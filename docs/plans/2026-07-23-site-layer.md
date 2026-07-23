@@ -269,3 +269,11 @@ acceptance evidence against disposable-slurm.
   `derive` scheme restricted to the token charset) at the pool/batch milestone.
 - `PoolSpec` intentionally enforces only `minReady ≤ pilots`; the pool
   implementation must additionally reject `drainGrace ≥ walltime` at acquire.
+
+## Extraction note (2026-07-23)
+
+Phase 3 now lives in the standalone `~/code/scala/sojourn` repo (artifact
+`sojourn-core`, package `io.github.bbuchsbaum.sojourn`); ADR-0010 moved there as
+ADR-0001. Phases 0/2 remain scala-slurm work; phases 3b-3e execute in sojourn
+against locally-published scala-slurm artifacts (0.1.0-SNAPSHOT via
+`core/publishLocal`, widening to managed/worker/ssh/local at integration).
