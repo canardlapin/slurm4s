@@ -35,6 +35,21 @@ object SpoolFixtures:
     Some(SubmissionKey.from("submit-42").toOption.get)
   )
 
+  /** Pins the sub-second ISO-8601 canonical form (fractional seconds are emitted when present). */
+  val registrationSubSecond: PilotRegistration = PilotRegistration(
+    PilotId.from("pilot-beta").toOption.get,
+    WorkerReleaseId.from("worker-release-1").toOption.get,
+    Instant.parse("2026-07-23T08:00:00.123456789Z"),
+    Instant.parse("2026-07-23T12:00:00.500Z")
+  )
+
+  /** Pins the canonical form of an idle heartbeat (`"claimed":null` is emitted, not dropped). */
+  val heartbeatIdle: PilotHeartbeat = PilotHeartbeat(
+    PilotId.from("pilot-alpha.01").toOption.get,
+    Instant.parse("2026-07-23T08:06:00Z"),
+    None
+  )
+
   val invocation: SpoolInvocation = SpoolInvocation(
     SubmissionKey.from("submit-42").toOption.get,
     OperationId.from("example.echo").toOption.get,
@@ -61,7 +76,9 @@ object SpoolFixtures:
     SpoolCodec.encodeRegistration(registration) ++ newline ++
       SpoolCodec.encodeHeartbeat(heartbeat) ++ newline ++
       SpoolCodec.encodeInvocation(invocation) ++ newline ++
-      SpoolCodec.encodeInvocation(invocationStored) ++ newline
+      SpoolCodec.encodeInvocation(invocationStored) ++ newline ++
+      SpoolCodec.encodeRegistration(registrationSubSecond) ++ newline ++
+      SpoolCodec.encodeHeartbeat(heartbeatIdle) ++ newline
 
 /** Provenance tool for `spool-v1-fixtures.json`. Run:
   * {{{

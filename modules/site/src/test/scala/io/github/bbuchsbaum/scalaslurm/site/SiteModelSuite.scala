@@ -36,6 +36,15 @@ class SiteModelSuite extends munit.ScalaCheckSuite:
     }
   }
 
+  test("site tokens reject the reserved path atoms '.' and '..'") {
+    assert(SiteName.from(".").isLeft)
+    assert(SiteName.from("..").isLeft)
+    assert(spool.PilotId.from(".").isLeft)
+    assert(spool.PilotId.from("..").isLeft)
+    assert(SiteName.from("v1.0").isRight)
+    assert(spool.PilotId.from("pilot..01").isRight)
+  }
+
   test("site name rejects empty, over-length, uppercase, and whitespace values") {
     assert(SiteName.from("").isLeft)
     assert(SiteName.from("A").isLeft)

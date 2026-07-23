@@ -26,6 +26,7 @@ private[site] object SiteText:
           "must contain only lowercase letters, digits, '-', '_', or '.'"
         )
       )
+    else if raw == "." || raw == ".." then Left(ValidationFailure(field, "must not be '.' or '..'"))
     else Right(raw)
 
   private def isToken(character: Char): Boolean =

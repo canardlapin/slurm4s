@@ -258,3 +258,14 @@ Each phase: `sbt +test scalafmtCheckAll` green under `-Werror`, MiMa clean from
 Phase 0 on, codec round-trip properties, wire fixtures re-pinned intentionally
 (never silently), discipline review against the commitments section, and Phase 4's
 acceptance evidence against disposable-slurm.
+
+## Follow-ups from kernel review (2026-07-23)
+
+- `ContentDigest` (core) is stringly — accepts any ≤200-char token, no `algo:hex`
+  shape. The site layer is its first hard consumer (DigestMismatch, fetch-verify);
+  parse the shape when core reopens (fold into Phase 0/2 window).
+- Spool file layout must NOT embed `SubmissionKey` verbatim in filenames — core
+  keys permit `/` and uppercase. Route through a path-safe encoding (or the 2d
+  `derive` scheme restricted to the token charset) at the pool/batch milestone.
+- `PoolSpec` intentionally enforces only `minReady ≤ pilots`; the pool
+  implementation must additionally reject `drainGrace ≥ walltime` at acquire.

@@ -22,24 +22,26 @@ class SpoolCodecSuite extends munit.ScalaCheckSuite:
     Gen.oneOf(('a' to 'z') ++ ('0' to '9') ++ Seq('-', '_', '.'))
 
   private def token(min: Int, max: Int): Gen[String] =
-    for
-      n <- Gen.choose(min, max)
-      chars <- Gen.listOfN(n, tokenChar)
-    yield chars.mkString
+    val raw =
+      for
+        n <- Gen.frequency(4 -> Gen.choose(min, max), 1 -> Gen.const(max))
+        chars <- Gen.listOfN(n, tokenChar)
+      yield chars.mkString
+    raw.suchThat(text => text != "." && text != "..")
 
-  private val pilotId: Gen[PilotId] = token(1, 40).map(PilotId.from(_).toOption.get)
+  private val pilotId: Gen[PilotId] = token(1, 128).map(PilotId.from(_).toOption.get)
   private val releaseId: Gen[WorkerReleaseId] =
-    token(1, 40).map(WorkerReleaseId.from(_).toOption.get)
+    token(1, 255).map(WorkerReleaseId.from(_).toOption.get)
   private val submissionKey: Gen[SubmissionKey] =
-    token(1, 40).map(SubmissionKey.from(_).toOption.get)
-  private val operationId: Gen[OperationId] = token(1, 40).map(OperationId.from(_).toOption.get)
+    token(1, 200).map(SubmissionKey.from(_).toOption.get)
+  private val operationId: Gen[OperationId] = token(1, 255).map(OperationId.from(_).toOption.get)
   private val operationVersion: Gen[OperationVersion] =
-    token(1, 20).map(OperationVersion.from(_).toOption.get)
-  private val schemaId: Gen[SchemaId] = token(1, 40).map(SchemaId.from(_).toOption.get)
+    token(1, 100).map(OperationVersion.from(_).toOption.get)
+  private val schemaId: Gen[SchemaId] = token(1, 255).map(SchemaId.from(_).toOption.get)
   private val resultSchemaId: Gen[ResultSchemaId] =
-    token(1, 40).map(ResultSchemaId.from(_).toOption.get)
+    token(1, 255).map(ResultSchemaId.from(_).toOption.get)
   private val contentDigest: Gen[ContentDigest] =
-    token(1, 40).map(ContentDigest.from(_).toOption.get)
+    token(1, 200).map(ContentDigest.from(_).toOption.get)
 
   private val pathSegment: Gen[String] =
     for
@@ -54,9 +56,11 @@ class SpoolCodecSuite extends munit.ScalaCheckSuite:
       segments <- Gen.listOfN(n, pathSegment)
     yield SitePath.from(segments.mkString("/")).toOption.get
 
-  // Whole-second instants so ISO-8601 round-tripping is exact and canonical.
   private val instant: Gen[Instant] =
-    Gen.choose(0L, 4102444800L).map(Instant.ofEpochSecond)
+    for
+      seconds <- Gen.choose(0L, 4102444800L)
+      nanos <- Gen.oneOf(Gen.const(0L), Gen.choose(0L, 999999999L))
+    yield Instant.ofEpochSecond(seconds, nanos)
 
   private val inlineInput: Gen[SpoolInput] =
     for
@@ -132,11 +136,24 @@ class SpoolCodecSuite extends munit.ScalaCheckSuite:
 
   test("each golden line decodes back to its sample") {
     val lines = splitLines(fixture("/fixtures/spool-v1-fixtures.json"))
-    assertEquals(lines.size, 4)
+    assertEquals(lines.size, 6)
     assertEquals(SpoolCodec.decodeRegistration(lines(0)), Right(SpoolFixtures.registration))
     assertEquals(SpoolCodec.decodeHeartbeat(lines(1)), Right(SpoolFixtures.heartbeat))
     assertEquals(SpoolCodec.decodeInvocation(lines(2)), Right(SpoolFixtures.invocation))
     assertEquals(SpoolCodec.decodeInvocation(lines(3)), Right(SpoolFixtures.invocationStored))
+    assertEquals(
+      SpoolCodec.decodeRegistration(lines(4)),
+      Right(SpoolFixtures.registrationSubSecond)
+    )
+    assertEquals(SpoolCodec.decodeHeartbeat(lines(5)), Right(SpoolFixtures.heartbeatIdle))
+  }
+
+  test("the idle-heartbeat canonical form emits claimed as null") {
+    val text = new String(
+      SpoolCodec.encodeHeartbeat(SpoolFixtures.heartbeatIdle).toArray,
+      StandardCharsets.UTF_8
+    )
+    assert(text.contains("\"claimed\":null"))
   }
 
   test("registration canonical form has sorted keys, a version marker, and ISO instants") {
@@ -157,6 +174,14 @@ class SpoolCodecSuite extends munit.ScalaCheckSuite:
 
   test("malformed json is reported as a typed Malformed failure") {
     val result = SpoolCodec.decodeRegistration("not json".getBytes("UTF-8").toVector)
+    assert(result.left.exists {
+      case SpoolCodecFailure.Malformed(_) => true
+      case _                              => false
+    })
+  }
+
+  test("bytes that are not valid UTF-8 are reported as Malformed, not thrown") {
+    val result = SpoolCodec.decodeRegistration(Vector(0xff.toByte, 0xfe.toByte, '{'.toByte))
     assert(result.left.exists {
       case SpoolCodecFailure.Malformed(_) => true
       case _                              => false
