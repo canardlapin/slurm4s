@@ -38,6 +38,7 @@ lazy val root = project
     managed,
     worker,
     observability,
+    site,
     examples
   )
   .settings(name := "scala-slurm")
@@ -159,6 +160,24 @@ lazy val observability = project
     libraryDependencies += Libraries.catsEffect
   )
 
+// Site layer: scheduler-neutral compute/data facade over the Slurm modules.
+// Depends only on core until the in-flight cli/protocol work lands; will widen
+// to managed/worker/ssh/local for the integration milestones (see docs/plans/).
+lazy val site = project
+  .in(file("modules/site"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(
+    name := "scala-slurm-site",
+    libraryDependencies ++= Seq(
+      Libraries.catsEffect,
+      Libraries.fs2Core,
+      Libraries.fs2Io,
+      Libraries.circeCore,
+      Libraries.circeParser
+    )
+  )
+
 lazy val examples = project
   .in(file("modules/examples"))
   .enablePlugins(NoPublishPlugin)
@@ -170,5 +189,5 @@ lazy val examples = project
 
 addCommandAlias(
   "checkFormatting",
-  ";core/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
+  ";core/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;site/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
 )
