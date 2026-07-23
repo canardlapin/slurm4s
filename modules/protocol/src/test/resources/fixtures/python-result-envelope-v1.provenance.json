@@ -1,0 +1,14 @@
+{
+  "fixtureSchemaVersion": 1,
+  "fixtureId": "python-result-envelope-v1",
+  "source": "synthetic",
+  "capturedAt": "2026-07-22T12:00:00Z",
+  "generator": "examples/python/structured_result.py",
+  "containsPrivateData": false,
+  "redactions": [],
+  "invariants": [
+    "language-neutral result envelope",
+    "canonical UTF-8 JSON with one trailing LF",
+    "submission, epoch, operation, schema, release, value, size, and digest bindings"
+  ]
+}

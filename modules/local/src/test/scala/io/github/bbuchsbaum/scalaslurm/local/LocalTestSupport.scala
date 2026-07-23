@@ -1,0 +1,45 @@
+package io.github.bbuchsbaum.scalaslurm.local
+
+import cats.effect.IO
+import cats.effect.Resource
+import io.github.bbuchsbaum.scalaslurm.core.*
+
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.Comparator
+
+object LocalTestSupport:
+  def temporaryDirectory: Resource[IO, Path] =
+    Resource.make(IO.blocking(Files.createTempDirectory("scala-slurm-test-")))(deleteRecursively)
+
+  def policy(
+      timeoutMillis: Long = 2000L,
+      captureBytes: Int = 65536
+  ): io.github.bbuchsbaum.scalaslurm.cli.CommandPolicy =
+    io.github.bbuchsbaum.scalaslurm.cli.CommandPolicy(
+      DurationMillis.from(timeoutMillis).toOption.get,
+      ByteLimit.from(captureBytes).toOption.get
+    )
+
+  def request(key: String = "local-test"): JobRequest[NoResult] =
+    JobRequest(
+      submissionKey = SubmissionKey.from(key).toOption.get,
+      name = JobName.from("opaque-analysis").toOption.get,
+      payload = Payload.Script(
+        ScriptSource.Inline("analysis.sh", "#!/bin/sh\nprintf result\n".getBytes.toVector),
+        Vector.empty,
+        ResultContract.ExitOnly
+      ),
+      resources = ResourceRequest.validate(1, 1, Some(1), None, None).toOption.get
+    )
+
+  private def deleteRecursively(root: Path): IO[Unit] =
+    IO.blocking {
+      if Files.exists(root) then
+        val paths = Files.walk(root)
+        try
+          paths.sorted(Comparator.reverseOrder()).forEach { path =>
+            val _ = Files.deleteIfExists(path)
+          }
+        finally paths.close()
+    }.void

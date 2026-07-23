@@ -1,0 +1,20 @@
+{
+  "fixtureSchemaVersion": 1,
+  "fixtureId": "synthetic-slurm-25.05-v0.0.43-array",
+  "source": "synthetic",
+  "capturedAt": "2026-07-22T20:15:00Z",
+  "command": ["squeue", "--json=v0.0.43", "--jobs=2505001_0,2505001_1"],
+  "slurmVersion": "25.05.6-shape-simulation",
+  "dataParser": "v0.0.43",
+  "locale": "C.UTF-8",
+  "exitCode": 0,
+  "streams": {
+    "stdout": {"bytes": 690, "truncated": false, "sha256": "35d65cdd22cf0c3ec1d063327b0a13acc31bbcc158f39b9d331c3f31b0f0d66a"},
+    "stderr": {"bytes": 0, "truncated": false, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+  },
+  "redactions": [],
+  "invariant": "array task identity is carried independently from job_id",
+  "upstreamLifecycle": "https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle",
+  "upstreamShape": "https://github.com/SchedMD/slurm/blob/slurm-25-05-6-1/src/plugins/data_parser/v0.0.43/parsers.c",
+  "supportClaim": false
+}

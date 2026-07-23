@@ -1,0 +1,18 @@
+{
+  "jobs": [
+    {
+      "jobId": "1",
+      "cluster": "cluster",
+      "arrayIndex": 0,
+      "state": "Pending",
+      "reason": "Resources"
+    },
+    {
+      "jobId": "1",
+      "cluster": "cluster",
+      "arrayIndex": 1,
+      "state": "Pending",
+      "reason": "Resources"
+    }
+  ]
+}

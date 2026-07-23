@@ -1,0 +1,6 @@
+{
+  "jobs": [
+    {"jobId": "2605001", "arrayIndex": 0, "state": "Completed"},
+    {"jobId": "2605001", "arrayIndex": 1, "state": "Unknown(FUTURE_VENDOR_STATE)"}
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "plugin": {"type": "data_parser", "name": "v0.0.43"},
+    "Slurm": {"release": "25.05.6"}
+  },
+  "jobs": [
+    {
+      "job_id": 2505001,
+      "array_job_id": {"set": true, "infinite": false, "number": 2505001},
+      "array_task_id": {"set": true, "infinite": false, "number": 0},
+      "cluster": "fixture-25-05",
+      "job_state": ["PENDING"],
+      "state_reason": "Priority"
+    },
+    {
+      "job_id": 2505002,
+      "array_job_id": {"set": true, "infinite": false, "number": 2505001},
+      "array_task_id": {"set": true, "infinite": false, "number": 1},
+      "cluster": "fixture-25-05",
+      "job_state": ["RUNNING"],
+      "state_reason": "None"
+    }
+  ]
+}

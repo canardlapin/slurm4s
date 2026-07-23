@@ -1,0 +1,13 @@
+{
+  "fixtureSchemaVersion": 1,
+  "fixtureId": "synthetic-squeue-v0.0.43-pending-and-unknown",
+  "source": "synthetic",
+  "capturedAt": "2026-07-22T12:00:00Z",
+  "command": ["squeue", "--json=v0.0.43", "--jobs=1001,1002"],
+  "slurmVersion": "25.05.3-shape-simulation",
+  "dataParser": "v0.0.43",
+  "locale": "C.UTF-8",
+  "redactions": [],
+  "expected": "one pending job and one preserved unknown state",
+  "supportClaim": false
+}

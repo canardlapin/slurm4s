@@ -1,0 +1,56 @@
+{
+  "fixtureSchemaVersion": 1,
+  "fixtureId": "actual-slurm-25.05.6-v0.0.43-pending-array",
+  "source": "disposable-cluster-actual-binary",
+  "capturedAt": "2026-07-23T00:36:38.098Z",
+  "image": {
+    "base": "nathanhess/slurm:base-root",
+    "baseDigest": "sha256:b6881510de8ea6f9e5a5eea1b92d3c6e9c473aa663acae4a8735688cf17b0031",
+    "derivedImageId": "sha256:18698b8886c95eb79c63f0fdf9d87e9cd4ef3dd3b4c93ff8d34e6b2d9fac1357"
+  },
+  "command": [
+    "squeue",
+    "--json=v0.0.43",
+    "--jobs=1"
+  ],
+  "submittedCommand": [
+    "sbatch",
+    "--parsable",
+    "--array=0-1%1",
+    "--job-name=scala-slurm-fixture",
+    "--wrap=/usr/bin/true"
+  ],
+  "slurmVersion": "25.05.6",
+  "dataParser": "v0.0.43",
+  "parserRegistry": [
+    "data_parser/v0.0.40",
+    "data_parser/v0.0.42",
+    "data_parser/v0.0.41",
+    "data_parser/v0.0.43"
+  ],
+  "locale": "container-default",
+  "exitCode": 0,
+  "streams": {
+    "stdout": {
+      "bytes": 8698,
+      "truncated": false,
+      "sha256": "f1973d25706a0ee64cbd5d3f5ada3185091e7adc2dcd28fafc7d6a9deb31838f"
+    },
+    "stderr": {
+      "bytes": 0,
+      "truncated": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "redactions": [],
+  "observed": {
+    "controller": "running",
+    "worker": "not-registered",
+    "array": "accepted-and-pending",
+    "accounting": "not-captured"
+  },
+  "limitation": "Actual Slurm 25.05.6 binaries and controller output; the disposable worker did not register, so this is parser/submission evidence, not end-to-end execution or real-site acceptance.",
+  "parserCompatibilityClaim": true,
+  "siteSupportClaim": false,
+  "supportClaim": false
+}

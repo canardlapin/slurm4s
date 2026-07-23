@@ -1,0 +1,15 @@
+{
+  "fixtureSchemaVersion": 1,
+  "fixtureId": "wire-envelope-v1",
+  "source": "synthetic",
+  "capturedAt": "2026-07-22T00:00:00Z",
+  "generator": "VersionedJsonSuite canonical envelope",
+  "containsPrivateData": false,
+  "redactions": [],
+  "invariants": [
+    "UTF-8 encoding",
+    "lexicographically sorted keys",
+    "no insignificant whitespace",
+    "exactly one trailing LF"
+  ]
+}

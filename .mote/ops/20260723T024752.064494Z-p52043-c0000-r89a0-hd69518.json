@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY6DYBARJW9NDJ4Y3AGFSCGH","kind":"reserve_open","mode":"exclusive","op":"20260723T024752.064494Z-p52043-c0000-r89a0-hd69518","paths":["build.sbt","modules/examples","docs/examples/public-api.md","examples/README.md"],"reservation_id":"rv-01KY6DYK005QEDP2MSMQK9AMHJ","ts":"2026-07-23T02:47:52.064494Z","ttl_s":3600,"v":1}

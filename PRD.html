@@ -1,0 +1,1344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Product requirements for scala-slurm, a typed, effectful, evidence-preserving Scala 3 interface to Slurm for local and SSH-mediated execution.">
+  <title>scala-slurm — Product Requirements Document</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17211d;
+      --muted: #5a6861;
+      --paper: #fbfaf6;
+      --surface: #ffffff;
+      --surface-alt: #f1f5f1;
+      --line: #d8e0da;
+      --green: #195c43;
+      --green-dark: #103f2f;
+      --green-soft: #dfeee6;
+      --amber: #98610e;
+      --amber-soft: #fff1cf;
+      --red: #9a3b33;
+      --red-soft: #fbe6e3;
+      --blue: #295d82;
+      --blue-soft: #e4f0f8;
+      --code: #14231d;
+      --shadow: 0 16px 42px rgba(22, 43, 33, 0.08);
+      --radius: 14px;
+      --content: 1180px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 1.5rem;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top right, rgba(25, 92, 67, 0.09), transparent 29rem),
+        var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.66;
+    }
+
+    a {
+      color: var(--green);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 0.18em;
+    }
+
+    a:hover { color: var(--green-dark); }
+
+    code, pre {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    code {
+      padding: 0.08rem 0.28rem;
+      border-radius: 5px;
+      background: var(--surface-alt);
+      font-size: 0.91em;
+    }
+
+    pre {
+      margin: 1rem 0 1.4rem;
+      padding: 1rem 1.15rem;
+      overflow-x: auto;
+      border: 1px solid #29473a;
+      border-radius: 10px;
+      color: #eaf6ef;
+      background: var(--code);
+      font-size: 0.86rem;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+    }
+
+    .hero {
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(223,238,230,0.78));
+    }
+
+    .hero-inner {
+      width: min(var(--content), calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 4.8rem 0 3.2rem;
+    }
+
+    .eyebrow {
+      margin: 0 0 0.7rem;
+      color: var(--green);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, h4 {
+      color: var(--green-dark);
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.15;
+      text-wrap: balance;
+    }
+
+    h1 {
+      max-width: 900px;
+      margin: 0;
+      font-size: clamp(2.7rem, 7vw, 5.5rem);
+      letter-spacing: -0.045em;
+    }
+
+    h2 {
+      margin: 0 0 1rem;
+      font-size: clamp(1.8rem, 3vw, 2.55rem);
+      letter-spacing: -0.025em;
+    }
+
+    h3 {
+      margin: 2rem 0 0.65rem;
+      font-size: 1.42rem;
+    }
+
+    h4 {
+      margin: 1.4rem 0 0.45rem;
+      font-size: 1.05rem;
+    }
+
+    p { margin: 0.55rem 0 1rem; }
+
+    .lede {
+      max-width: 880px;
+      margin: 1.15rem 0 1.6rem;
+      color: #30433a;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(1.2rem, 2.2vw, 1.65rem);
+      line-height: 1.5;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-top: 1.5rem;
+    }
+
+    .pill, .priority, .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      font-size: 0.76rem;
+      font-weight: 750;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    .pill { padding: 0.38rem 0.7rem; background: rgba(255,255,255,0.72); }
+    .priority, .status { padding: 0.18rem 0.52rem; }
+    .p0 { color: var(--red); background: var(--red-soft); border-color: #e8bbb5; }
+    .p1 { color: var(--amber); background: var(--amber-soft); border-color: #e7ce91; }
+    .p2 { color: var(--blue); background: var(--blue-soft); border-color: #b9d2e3; }
+    .decided { color: var(--green); background: var(--green-soft); border-color: #b7d2c2; }
+    .open { color: var(--amber); background: var(--amber-soft); border-color: #e7ce91; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      gap: 3rem;
+      width: min(var(--content), calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 2.5rem 0 5rem;
+    }
+
+    .toc {
+      position: sticky;
+      top: 1.25rem;
+      align-self: start;
+      max-height: calc(100vh - 2.5rem);
+      padding: 1.1rem;
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,0.86);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .toc strong {
+      display: block;
+      margin-bottom: 0.55rem;
+      color: var(--green-dark);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .toc ol {
+      margin: 0;
+      padding-left: 1.15rem;
+    }
+
+    .toc li { margin: 0.31rem 0; color: var(--muted); }
+    .toc a { color: inherit; font-size: 0.82rem; text-decoration: none; }
+    .toc a:hover { color: var(--green); text-decoration: underline; }
+
+    main { min-width: 0; }
+
+    section {
+      margin-bottom: 2.2rem;
+      padding: 2.15rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,0.94);
+      box-shadow: 0 8px 28px rgba(22, 43, 33, 0.045);
+    }
+
+    section > :last-child { margin-bottom: 0; }
+
+    .section-number {
+      display: block;
+      margin-bottom: 0.35rem;
+      color: var(--green);
+      font-size: 0.72rem;
+      font-weight: 850;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .callout {
+      margin: 1.25rem 0;
+      padding: 1rem 1.15rem;
+      border-left: 4px solid var(--green);
+      border-radius: 0 10px 10px 0;
+      background: var(--green-soft);
+    }
+
+    .callout.warning {
+      border-left-color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .callout.danger {
+      border-left-color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .callout p:last-child { margin-bottom: 0; }
+
+    blockquote {
+      margin: 1.2rem 0;
+      padding: 0.3rem 0 0.3rem 1.25rem;
+      border-left: 4px solid var(--green);
+      color: var(--green-dark);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.28rem;
+      line-height: 1.5;
+    }
+
+    ul, ol { padding-left: 1.35rem; }
+    li { margin: 0.32rem 0; }
+
+    .grid-2, .grid-3 {
+      display: grid;
+      gap: 1rem;
+      margin: 1.15rem 0;
+    }
+
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .card {
+      padding: 1.05rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-alt);
+    }
+
+    .card h3, .card h4 { margin-top: 0; }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+
+    .table-wrap {
+      margin: 1.1rem 0 1.4rem;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      font-size: 0.89rem;
+    }
+
+    th, td {
+      padding: 0.72rem 0.78rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--green-dark);
+      background: var(--surface-alt);
+      font-size: 0.74rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .architecture {
+      display: grid;
+      gap: 0.55rem;
+      margin: 1.4rem 0;
+      padding: 1.1rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(180deg, #f5f8f5, #eef4f0);
+    }
+
+    .arch-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.6rem;
+    }
+
+    .arch-box {
+      padding: 0.8rem;
+      border: 1px solid #aec8b8;
+      border-radius: 8px;
+      background: white;
+      text-align: center;
+    }
+
+    .arch-box strong { display: block; color: var(--green-dark); }
+    .arch-box small { color: var(--muted); }
+    .arch-arrow { color: var(--green); font-weight: 900; text-align: center; }
+
+    .state-flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.45rem;
+      margin: 1rem 0;
+    }
+
+    .state {
+      padding: 0.4rem 0.62rem;
+      border: 1px solid #b6cbbd;
+      border-radius: 7px;
+      background: #f5faf7;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.77rem;
+    }
+
+    .arrow { color: var(--muted); font-weight: 800; }
+
+    .req-id {
+      color: var(--green-dark);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+
+    .checklist {
+      padding-left: 0;
+      list-style: none;
+    }
+
+    .checklist li {
+      position: relative;
+      padding-left: 1.55rem;
+    }
+
+    .checklist li::before {
+      position: absolute;
+      left: 0;
+      color: var(--green);
+      content: "✓";
+      font-weight: 900;
+    }
+
+    .footer {
+      padding: 2.4rem 1rem 3.5rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      text-align: center;
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 920px) {
+      .layout { grid-template-columns: 1fr; gap: 1.4rem; }
+      .toc { position: static; max-height: none; }
+      .toc ol { columns: 2; column-gap: 2rem; }
+      .grid-3 { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 680px) {
+      body { font-size: 15px; }
+      .hero-inner { padding: 3.2rem 0 2.4rem; }
+      .layout { width: min(100% - 1rem, var(--content)); padding-top: 1rem; }
+      section { padding: 1.3rem; }
+      .grid-2, .arch-row { grid-template-columns: 1fr; }
+      .toc ol { columns: 1; }
+    }
+
+    @media print {
+      @page { margin: 16mm; }
+      body { background: white; font-size: 10.5pt; }
+      .hero-inner, .layout { width: 100%; }
+      .hero-inner { padding: 0 0 1.5rem; }
+      .layout { display: block; padding: 1.5rem 0 0; }
+      .toc { position: static; max-height: none; margin-bottom: 1.5rem; box-shadow: none; }
+      .toc ol { columns: 2; }
+      section { break-inside: avoid-page; box-shadow: none; }
+      a { color: inherit; text-decoration: none; }
+      pre { white-space: pre-wrap; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">Founding product requirements · 22 July 2026</p>
+      <h1>scala-slurm</h1>
+      <p class="lede">A typed, effectful, evidence-preserving Scala 3 interface to Slurm that remains truthful under queueing, partial failure, disconnection, requeue, opaque workloads, and typed remote computation.</p>
+      <div class="meta" aria-label="Document metadata">
+        <span class="pill">Status: founding draft</span>
+        <span class="pill">Artifact: PRD.html</span>
+        <span class="pill">Primary runtime: Cats Effect</span>
+        <span class="pill">Baseline integration: Slurm CLI</span>
+        <span class="pill">Targets: local HPC + remote over SSH</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Table of contents">
+      <strong>Contents</strong>
+      <ol>
+        <li><a href="#summary">Executive summary</a></li>
+        <li><a href="#problem">Problem</a></li>
+        <li><a href="#vision">Vision and principles</a></li>
+        <li><a href="#users">Users and jobs</a></li>
+        <li><a href="#goals">Goals and non-goals</a></li>
+        <li><a href="#scope">Release scope</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#domain">Domain model</a></li>
+        <li><a href="#workloads">Workload contracts</a></li>
+        <li><a href="#execution">Local and remote execution</a></li>
+        <li><a href="#scheduler">Slurm integration</a></li>
+        <li><a href="#durability">Durability and recovery</a></li>
+        <li><a href="#logs">Logs and diagnosis</a></li>
+        <li><a href="#resources">Resources and site policy</a></li>
+        <li><a href="#requirements">Requirements catalog</a></li>
+        <li><a href="#quality">Quality attributes</a></li>
+        <li><a href="#testing">Verification strategy</a></li>
+        <li><a href="#modules">Modules and dependencies</a></li>
+        <li><a href="#delivery">Delivery plan</a></li>
+        <li><a href="#acceptance">Acceptance criteria</a></li>
+        <li><a href="#risks">Risks</a></li>
+        <li><a href="#decisions">Decisions and open questions</a></li>
+        <li><a href="#references">References and glossary</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="summary">
+        <span class="section-number">01 · Executive summary</span>
+        <h2>A low-level Slurm library built around truth, not happy paths</h2>
+        <p><strong>scala-slurm</strong> will provide Scala 3 applications with a composable interface to Slurm on the HPC system itself and from remote clients over SSH. It will expose Slurm's scheduling primitives without collapsing the different meanings of command invocation, scheduler acceptance, queue state, workload execution, logs, and typed results.</p>
+        <p>The library has two related surfaces:</p>
+        <ol>
+          <li><strong>A raw typed scheduler interface</strong> for submission, observation, accounting, cancellation, capabilities, and logs.</li>
+          <li><strong>An optional managed controller</strong> for durable intent, idempotency, ambiguous submission recovery, coalesced observation, cursors, and restart-safe event delivery.</li>
+        </ol>
+        <p>Opaque Python, R, shell, and other scripts are first-class. They may expose only exit status and logs, or opt into declared outputs and a language-neutral structured result protocol. Typed Scala computations use registered, versioned operations with encoded inputs and outputs; arbitrary closures or <code>IO[A]</code> values are never serialized.</p>
+        <div class="callout">
+          <strong>Core proposition.</strong> Robustness comes from explicit uncertainty, durable evidence, bounded effects, and recoverable protocols—not from pretending Slurm is a synchronous function call and not from binding directly to <code>libslurm</code>.
+        </div>
+      </section>
+
+      <section id="problem">
+        <span class="section-number">02 · Problem</span>
+        <h2>Driving Slurm is a distributed diagnosis problem</h2>
+        <p>A conventional wrapper treats a batch submission as a subprocess returning a job identifier. Real usage presents a wider and messier state space:</p>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Before acceptance</h3>
+            <ul>
+              <li>SSH, authentication, host-key, and network failures</li>
+              <li>missing Slurm commands or incompatible output formats</li>
+              <li>invalid account, partition, QoS, topology, or memory request</li>
+              <li>local validation succeeding while a site plugin still rejects the job</li>
+              <li>controller acceptance followed by a lost response</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>After acceptance</h3>
+            <ul>
+              <li>long or indefinite queueing with changing reasons</li>
+              <li>preemption, requeue, suspension, timeout, OOM, or node failure</li>
+              <li>successful scheduler completion but invalid application output</li>
+              <li>nonzero program exit, missing executable, missing file, or script error</li>
+              <li>delayed accounting and temporarily missing or buffered logs</li>
+            </ul>
+          </div>
+        </div>
+        <p>These conditions must not be flattened into one exception or one linear <code>Pending → Running → Done</code> enum. A user needs to know what is confirmed, what is suspected, what evidence supports it, and which observations may be stale.</p>
+
+        <h3>Why existing approaches are insufficient</h3>
+        <ul>
+          <li><strong>Shell wrappers</strong> are easy to start but tend to use fragile text parsing, unbounded polling, implicit environment inheritance, and ambiguous retry.</li>
+          <li><strong>Synchronous job APIs</strong> conflate scheduler acceptance with terminal completion and tie remote lifetime to a caller fiber or SSH channel.</li>
+          <li><strong>Exception-heavy APIs</strong> make ordinary remote unavailability indistinguishable from defects and lose partial evidence.</li>
+          <li><strong>Native bindings</strong> add JNI/JNA, native lifecycle, packaging, and major-version coupling without solving distributed ambiguity.</li>
+          <li><strong>Generic workflow engines</strong> solve a different problem and often obscure the exact Slurm evidence needed for diagnosis.</li>
+        </ul>
+      </section>
+
+      <section id="vision">
+        <span class="section-number">03 · Vision and principles</span>
+        <h2>Make uncertainty a value</h2>
+        <blockquote>Make Slurm interaction a typed, effectful, evidence-preserving boundary that stays honest when the environment is incomplete, asynchronous, and partially unavailable.</blockquote>
+        <div class="grid-3">
+          <div class="card">
+            <h3>Truthful</h3>
+            <p>Unknown, stale, unavailable, rejected, and failed are different states. The library never invents a terminal result from missing evidence.</p>
+          </div>
+          <div class="card">
+            <h3>Functional</h3>
+            <p>Pure normalization and reducers surround explicit effects. Resource ownership, cancellation, time, and concurrency remain visible.</p>
+          </div>
+          <div class="card">
+            <h3>Layered</h3>
+            <p>Scheduler semantics, transport, durable control, workload meaning, result decoding, and high-level orchestration remain separable.</p>
+          </div>
+        </div>
+
+        <h3>Design principles</h3>
+        <ol>
+          <li><strong>Expected mess is domain data.</strong> Routine transport, scheduler, parsing, accounting, and workload failures are values, not unstructured exceptions.</li>
+          <li><strong>Persist before publishing.</strong> Live FS2 streams accelerate delivery; durable state and cursors survive process loss.</li>
+          <li><strong>Remote jobs outlive local resources.</strong> Closing a process, SSH channel, stream, or fiber never implies <code>scancel</code>.</li>
+          <li><strong>Interpret effects at the edge.</strong> Domain values are ordinary immutable Scala data; deployable programs choose <code>IO</code>.</li>
+          <li><strong>Preserve evidence.</strong> Known fields are normalized while bounded raw responses and unknown values remain available.</li>
+          <li><strong>Prefer explicit protocols over inference.</strong> Structured worker receipts are authoritative; log recognizers provide conservative hints.</li>
+          <li><strong>Use the lowest sufficient integration.</strong> Standard Slurm commands are the baseline; REST and native bindings must earn their cost.</li>
+          <li><strong>Types encode stable invariants, not transient certainty.</strong> Runtime observations remain ADTs because remote facts can become stale immediately.</li>
+        </ol>
+      </section>
+
+      <section id="users">
+        <span class="section-number">04 · Users and jobs</span>
+        <h2>Primary users</h2>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Scala library author</h3>
+            <p>Needs a low-level, testable Slurm boundary beneath a scientific application, workflow tool, service, or desktop client.</p>
+          </div>
+          <div class="card">
+            <h3>HPC application developer</h3>
+            <p>Needs local and remote parity, structured diagnostics, explicit resources, and site-aware behavior without becoming a Slurm parsing expert.</p>
+          </div>
+          <div class="card">
+            <h3>Scientific tool author</h3>
+            <p>Submits opaque R or Python scripts today and may later adopt declared outputs, structured progress, or typed task results.</p>
+          </div>
+          <div class="card">
+            <h3>Operations-minded maintainer</h3>
+            <p>Needs bounded controller traffic, restart-safe state, raw evidence, version discovery, and a deterministic failure simulator.</p>
+          </div>
+        </div>
+
+        <h3>Core jobs to be done</h3>
+        <ul>
+          <li>Submit a job locally on an HPC login node and receive an unambiguous typed submission outcome.</li>
+          <li>Submit the same job through an existing SSH configuration without changing its scheduler semantics.</li>
+          <li>Reconnect after the desktop, network, SSH session, or agent disappears and recover the current job evidence.</li>
+          <li>Understand whether a job is waiting, rejected, running, requeued, preempted, out of memory, or failed inside the workload.</li>
+          <li>Resume stdout and stderr from exact byte cursors and retain useful bounded tails in a failure report.</li>
+          <li>Run an opaque script without forcing it into a bespoke worker protocol.</li>
+          <li>Run a registered typed Scala operation and recover a typed return value or structured failure.</li>
+          <li>Build higher-level workflow, retry, artifact, or user-interface behavior without bypassing the low-level evidence.</li>
+        </ul>
+      </section>
+
+      <section id="goals">
+        <span class="section-number">05 · Goals and non-goals</span>
+        <h2>Product boundaries</h2>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Goals</h3>
+            <ul class="checklist">
+              <li>Local and OpenSSH-mediated remote Slurm access</li>
+              <li>Typed requests, observations, failures, receipts, and cursors</li>
+              <li>Effect-polymorphic services with Cats Effect <code>IO</code> at assembly</li>
+              <li>Opaque scripts, declared outputs, structured results, and typed Scala tasks</li>
+              <li>Resumable bounded logs and evidence-based diagnosis</li>
+              <li>Durable optional control plane with idempotent submission</li>
+              <li>Capability negotiation across heterogeneous Slurm sites</li>
+              <li>Deterministic model and fault-injection testing</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Non-goals</h3>
+            <ul>
+              <li>A DAG or scientific workflow engine</li>
+              <li>A general distributed collection or data-processing framework</li>
+              <li>Exactly-once physical scheduler execution</li>
+              <li>Serialization of Scala closures, <code>IO[A]</code>, or JVM object graphs</li>
+              <li>Automatic proof that arbitrary side effects are retry-safe</li>
+              <li>A sandbox for user-supplied scripts</li>
+              <li>A Slurm administrator or cluster-policy management API</li>
+              <li>A promise that every site exposes live logs or accounting</li>
+              <li>Inferring authoritative failures from regexes over arbitrary log text</li>
+              <li>Requiring <code>slurmrestd</code> or native <code>libslurm</code></li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout warning">
+          <strong>Trust boundary.</strong> An opaque script is user-supplied code running with that user's Unix and Slurm authority. scala-slurm will avoid introducing additional command-injection paths, but it is not a workload sandbox.
+        </div>
+      </section>
+
+      <section id="scope">
+        <span class="section-number">06 · Release scope</span>
+        <h2>One architecture, staged capability</h2>
+        <p>The founding API must reserve the seams for durable management and typed results, but the implementation will grow through independently useful releases.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Release</th><th>Promise</th><th>Included</th><th>Excluded or deferred</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>v0.1</strong><br>Truthful local</td>
+                <td>Drive a local Slurm installation without lying about outcomes.</td>
+                <td>Core ADTs, request validation, CLI capability discovery, submit/query/account/cancel, opaque scripts, explicit log paths, fixtures and laws.</td>
+                <td>Remote agent, durable controller, typed Scala return values.</td>
+              </tr>
+              <tr>
+                <td><strong>v0.2</strong><br>Remote parity</td>
+                <td>The same scheduler semantics over the site's normal SSH path.</td>
+                <td>Versioned agent protocol, system OpenSSH bootstrap, framed stdio, reconnectable paged log access.</td>
+                <td>Automatic durable reconciliation across agent loss.</td>
+              </tr>
+              <tr>
+                <td><strong>v0.3</strong><br>Durable control</td>
+                <td>Attempts survive clients and ambiguous submission is reconciled.</td>
+                <td>Control store algebra, reference persistence, journal, submission digest, outbox/reconciler, coalesced polling, event cursors.</td>
+                <td>Exactly-once scheduler execution.</td>
+              </tr>
+              <tr>
+                <td><strong>v0.4</strong><br>Managed workloads</td>
+                <td>Scripts and Scala tasks may produce verified structured results.</td>
+                <td>Language-neutral result envelope, declared outputs, registered Scala tasks, typed reattachment, task context and worker receipt.</td>
+                <td>General artifact catalog or workflow orchestration.</td>
+              </tr>
+              <tr>
+                <td><strong>v0.5</strong><br>Scale and sites</td>
+                <td>Efficient operation across realistic job counts and site variation.</td>
+                <td>Arrays, resource profiles, adaptive coalescing, compatibility matrix, optional REST parity pilot.</td>
+                <td>Native bindings unless separately justified.</td>
+              </tr>
+              <tr>
+                <td><strong>v1.0</strong><br>Supported contract</td>
+                <td>Documented compatibility and real-cluster evidence for the complete low-level contract.</td>
+                <td>Stable public ADTs and algebras, migration policy, security review, release evidence, real-site acceptance.</td>
+                <td>High-level workflow features remain separate modules or projects.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <span class="section-number">07 · Architecture</span>
+        <h2>Ports, interpreters, and explicit lowering</h2>
+        <div class="architecture" role="img" aria-label="Layered architecture from application APIs through scheduler interpreters">
+          <div class="arch-row">
+            <div class="arch-box"><strong>Typed execution API</strong><small>Payload[A], ResultContract[A], SubmittedJob[A]</small></div>
+            <div class="arch-box"><strong>Raw scheduler API</strong><small>submit, observe, accounting, cancel, capabilities</small></div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-row">
+            <div class="arch-box"><strong>Workload lowerer</strong><small>script or operation → launch bundle</small></div>
+            <div class="arch-box"><strong>Managed controller</strong><small>intent, journal, reconciliation, cursors</small></div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-box"><strong>Scheduler[F]</strong><small>transport-neutral Slurm semantics</small></div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-row">
+            <div class="arch-box"><strong>Slurm CLI interpreter</strong><small>baseline, structured command execution</small></div>
+            <div class="arch-box"><strong>Slurm REST interpreter</strong><small>optional parity implementation</small></div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-row">
+            <div class="arch-box"><strong>Local process runner</strong><small>fs2.io.process on the HPC system</small></div>
+            <div class="arch-box"><strong>Remote agent protocol</strong><small>OpenSSH + fixed stdio service</small></div>
+          </div>
+        </div>
+
+        <h3>Authority boundaries</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Concern</th><th>Authority</th><th>Must not become authority</th></tr></thead>
+            <tbody>
+              <tr><td>Slurm allocation and scheduler facts</td><td>Slurm observations with source and observation time</td><td>Client caches or inferred log text</td></tr>
+              <tr><td>Managed submission intent</td><td>Control store and append-only event journal</td><td>SSH channel, fiber, <code>Queue</code>, or <code>Ref</code></td></tr>
+              <tr><td>Workload meaning</td><td><code>Payload</code>, launch bundle, operation identity, and result contract</td><td>Generated shell text or scheduler job name</td></tr>
+              <tr><td>Typed result</td><td>Validated result envelope bound to job, epoch, and schema</td><td>stdout parsing or process exit alone</td></tr>
+              <tr><td>Live delivery</td><td>FS2 streams backed by cursors and durable pages</td><td>An unbounded in-memory topic</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Effect model</h3>
+        <ul>
+          <li>Reusable algebras are parameterized by <code>F[_]</code> and ask for the weakest useful Cats Effect capability.</li>
+          <li>Deployable client and agent programs use <code>IO</code>.</li>
+          <li><code>Resource</code> scopes local processes, SSH channels, handles, and files—never remote job lifetime.</li>
+          <li><code>Temporal</code> owns bounded backoff, jitter, polling, and timeouts.</li>
+          <li>FS2 owns bounded live movement of bytes, log chunks, protocol frames, and committed events.</li>
+          <li>Domain state and persisted messages contain no Cats Effect or FS2 runtime types.</li>
+        </ul>
+      </section>
+
+      <section id="domain">
+        <span class="section-number">08 · Domain model</span>
+        <h2>Separate identities and failure planes</h2>
+        <h3>Durable identities</h3>
+        <pre><code>SubmissionKey          caller-provided idempotency identity
+  AttemptId            one managed attempt to satisfy that intent
+    AttemptEpoch*      fencing generation for ambiguous or repeated execution
+      JobRef*          zero or more observed Slurm bindings
+
+EventId + EventCursor  durable event replay identity
+LogRef + LogCursor      byte-exact diagnostic stream position
+OperationId             registered typed implementation identity
+ResultSchemaId          durable return-value contract</code></pre>
+        <p>Opaque types will represent job IDs, cluster names, array indices, offsets, digests, protocol versions, operation versions, and site identifiers. Construction validates format and prevents accidental interchange.</p>
+
+        <h3>Failure planes</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Question</th><th>Representative ADT</th><th>Forbidden inference</th></tr></thead>
+            <tbody>
+              <tr><td>Could the command be invoked?</td><td><code>InvocationResult</code></td><td>SSH failure means Slurm rejected the job</td></tr>
+              <tr><td>Did the controller accept it?</td><td><code>Submission</code></td><td>Lost response means the job was not submitted</td></tr>
+              <tr><td>What does Slurm currently report?</td><td><code>JobObservation</code> + <code>Freshness</code></td><td>Absent or stale query means terminal failure</td></tr>
+              <tr><td>Did the workload launch and exit?</td><td><code>WorkloadEvidence</code></td><td>Scheduler completion proves the intended program ran correctly</td></tr>
+              <tr><td>Was the result valid?</td><td><code>ExecutionResult[A]</code></td><td>Exit zero proves outputs exist or decode</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Public algebra sketch</h3>
+        <pre><code>trait Scheduler[F[_]]:
+  def capabilities: F[SchedulerCapabilities]
+  def submit(spec: ResolvedJobSpec): F[Submission]
+  def observe(jobs: NonEmptyVector[JobRef]): F[ObservationBatch]
+  def accounting(jobs: NonEmptyVector[JobRef]): F[AccountingBatch]
+  def cancel(job: JobRef): F[CancellationResult]
+
+trait SlurmExecutor[F[_]]:
+  def submit[A](payload: Payload[A], resources: ResourceRequest):
+    F[SubmittedJob[A]]
+  def snapshot(job: DurableJobHandle): F[ManagedObservation]
+  def await[A](job: SubmittedJob[A]): F[ExecutionResult[A]]
+  def events(job: DurableJobHandle, after: EventCursor):
+    Stream[F, JobEvent]
+  def logs(job: DurableJobHandle, from: LogCursor):
+    Stream[F, LogEvent]
+  def cancel(job: DurableJobHandle): F[CancellationAcknowledgement]</code></pre>
+        <p>Routine remote failures are returned in these ADTs. Failure of <code>F</code> is reserved for caller cancellation, defects, and failures that the interpreter cannot safely classify.</p>
+      </section>
+
+      <section id="workloads">
+        <span class="section-number">09 · Workload and result contracts</span>
+        <h2>Opaque and typed work share one scheduler</h2>
+        <h3>Workload spectrum</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Mode</th><th>Input knowledge</th><th>Result knowledge</th><th>Diagnostic strength</th></tr></thead>
+            <tbody>
+              <tr><td>Opaque script</td><td>Script bytes or staged script, arguments, environment</td><td>Exit-only</td><td>Scheduler, exit, stdout, stderr</td></tr>
+              <tr><td>Declared-output script</td><td>Opaque implementation plus expected output names</td><td>Output manifest</td><td>Adds missing/extra/staging checks</td></tr>
+              <tr><td>Protocol-aware script</td><td>Python, R, shell, or Scala implementation</td><td>Schema-identified result envelope</td><td>Structured start, progress, exit, and result</td></tr>
+              <tr><td>Registered Scala task</td><td>Typed input and versioned operation reference</td><td>Typed bounded value plus declared outputs</td><td>Strongest contract; still subject to scheduler loss</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <pre><code>sealed trait Payload[A]:
+  def resultContract: ResultContract[A]
+
+object Payload:
+  final case class Script[A](
+      source: ScriptSource,
+      arguments: Vector[Argument],
+      resultContract: ResultContract[A]
+  ) extends Payload[A]
+
+  final case class RegisteredTask[I, O](
+      operation: OperationRef[I, O],
+      input: I,
+      resultContract: ResultContract[O]
+  ) extends Payload[O]</code></pre>
+
+        <h3>Opaque scripts</h3>
+        <p>The library accepts inline content, a local file to stage, or an explicitly remote source. Script bytes and relevant launch inputs receive a canonical digest. Exit-only success claims no more than scheduler/process evidence supports.</p>
+        <p>A script may declare expected relative outputs without adopting the full worker protocol. Missing outputs then become a distinct result-validation failure even when the process exits zero.</p>
+
+        <h3>Language-neutral result envelope</h3>
+        <p>A protocol-aware workload writes one bounded result envelope atomically and last. The envelope binds protocol version, submission, attempt epoch, operation, result schema, status, value, declared outputs, sizes, and digests. Python and R helpers should be possible without making them core runtime dependencies.</p>
+
+        <h3>Registered Scala computation</h3>
+        <pre><code>trait ScalaTask[I, O]:
+  def id: OperationId
+  def version: OperationVersion
+  def inputSchema: SchemaId
+  def outputSchema: SchemaId
+  def run(input: I, context: TaskContext[IO]): IO[O]</code></pre>
+        <ul>
+          <li>The submitted value contains an operation reference and encoded input, not a serialized function.</li>
+          <li>The implementation is delivered as a versioned worker distribution, assembly, or container with a content digest.</li>
+          <li>The worker registry resolves operation ID and version before execution.</li>
+          <li>Large values become staged outputs; the returned typed value remains bounded control data.</li>
+          <li>Task code may use effect-polymorphic internal components, while the deployed worker selects <code>IO</code>.</li>
+        </ul>
+
+        <h3>File I/O and task context</h3>
+        <pre><code>trait TaskContext[F[_]]:
+  def inputs: InputAccess[F]
+  def outputs: OutputStaging[F]
+  def scratch: Resource[F, ScratchDirectory]
+  def progress(event: ProgressEvent): F[Unit]
+  def logger: TaskLogger[F]</code></pre>
+        <p>A managed task uses logical input and output names rather than serialized client-local paths. A lower-level native context may expose more direct filesystem access, but it must not be presented as capability isolation or retry safety.</p>
+
+        <h3>Typed reconnection</h3>
+        <p>The durable handle stores <code>ResultSchemaId</code>, not a Scala type parameter. Reattachment requires a compatible <code>ResultContract[A]</code>; a schema mismatch is detected before reading result bytes.</p>
+        <div class="callout warning">
+          <strong>Typing does not prove idempotence.</strong> A typed task may update a database, send mail, or mutate a shared file. Retry safety is a separate declared policy and defaults to unknown or no automatic retry.
+        </div>
+      </section>
+
+      <section id="execution">
+        <span class="section-number">10 · Local and remote execution</span>
+        <h2>Same scheduler semantics, different command locality</h2>
+        <h3>Local mode</h3>
+        <p>When running on an HPC login or service node, the CLI interpreter launches fixed Slurm executables through <code>fs2.io.process</code>. Commands use argument vectors, a controlled working directory, a sanitized environment, concurrent stdout/stderr draining, explicit timeouts, and bounded capture.</p>
+
+        <h3>Remote mode</h3>
+        <p>The client uses the site's configured system OpenSSH executable and normal host aliases, host-key policy, agent, proxy, and MFA behavior. It starts or attaches to a fixed remote command:</p>
+        <pre><code>ssh &lt;configured-options&gt; &lt;host&gt; scala-slurm-agent serve --stdio</code></pre>
+        <p>The client and agent exchange framed, versioned messages. The remote command remains constant; user values are protocol data rather than interpolated shell fragments. The agent invokes Slurm commands locally on the cluster and owns only user-level state.</p>
+
+        <h3>Agent lifecycle</h3>
+        <ul>
+          <li>The initial agent may be an on-demand process attached through stdio.</li>
+          <li>The managed mode persists intent and journal data in a permission-restricted user directory.</li>
+          <li>Agent restart reopens state and reconciles nonterminal attempts.</li>
+          <li>A site may supervise a persistent agent, but no inbound port is required by default.</li>
+          <li>Agent distribution installation, digest verification, and atomic adoption are explicit later capabilities.</li>
+        </ul>
+
+        <h3>Direct SSH compatibility mode</h3>
+        <p>A constrained direct-command adapter may be offered for bootstrapping, but it is not the correctness-defining remote path. It must advertise reduced capabilities, especially around quoting, durable control, paged logs, and recovery.</p>
+      </section>
+
+      <section id="scheduler">
+        <span class="section-number">11 · Slurm integration</span>
+        <h2>CLI first, REST optional, native only with evidence</h2>
+        <h3>Baseline command set</h3>
+        <ul>
+          <li><code>sbatch --parsable</code> for submission and job binding</li>
+          <li><code>squeue --json=&lt;data-parser&gt;</code> for active observation</li>
+          <li><code>sacct --json=&lt;data-parser&gt;</code> or explicit <code>--parsable2</code> fields for accounting</li>
+          <li><code>scontrol --json=&lt;data-parser&gt; show job</code> for focused reconciliation and diagnostics where supported</li>
+          <li><code>scancel</code> for explicit asynchronous cancellation requests</li>
+        </ul>
+
+        <h3>Compatibility discipline</h3>
+        <ul>
+          <li>Discover Slurm version, cluster identity, command availability, accounting availability, and supported data-parser versions.</li>
+          <li>Request a known JSON data-parser version instead of silently depending on the latest default.</li>
+          <li>Keep version-scoped DTOs and codecs inside the interpreter.</li>
+          <li>Use explicit fallback field sets and strict parsers where JSON is unavailable.</li>
+          <li>Preserve unknown states, flags, reasons, fields, warnings, and bounded raw responses.</li>
+          <li>Treat parse failure as an observation failure with evidence, never as job failure.</li>
+        </ul>
+
+        <h3>Controller load</h3>
+        <p>One coalescing observation service operates per site. It batches job references, rate-limits calls, uses jittered adaptive cadence, moves terminal candidates from <code>squeue</code> to <code>sacct</code>, and reserves focused <code>scontrol</code> probes for ambiguity. There is no one-polling-loop-per-job design.</p>
+
+        <h3>Alternative integrations</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Interpreter</th><th>Role</th><th>Benefits</th><th>Costs / decision</th></tr></thead>
+            <tbody>
+              <tr><td>CLI</td><td>Required baseline</td><td>Widely available; inherits site config and authentication; maintained by Slurm</td><td>Process launch and output compatibility; mitigate through batching and versioned parsing</td></tr>
+              <tr><td><code>slurmrestd</code></td><td>Optional after CLI parity</td><td>Structured HTTP, fewer subprocesses, generated OpenAPI</td><td>Not universally deployed; plugin/auth configuration varies</td></tr>
+              <tr><td><code>libslurm</code></td><td>No planned v1 implementation</td><td>Direct native calls</td><td>JNI/JNA, memory and threading rules, native packaging, major-version coupling; does not solve ambiguity</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="durability">
+        <span class="section-number">12 · Durability and recovery</span>
+        <h2>Acceptance is asynchronous and may be ambiguous</h2>
+        <div class="state-flow" aria-label="Managed submission state flow">
+          <span class="state">IntentRecorded</span><span class="arrow">→</span>
+          <span class="state">SubmissionPending</span><span class="arrow">→</span>
+          <span class="state">Submitting</span><span class="arrow">→</span>
+          <span class="state">Bound</span><span class="arrow">→</span>
+          <span class="state">Pending / Running / Requeued</span><span class="arrow">→</span>
+          <span class="state">Terminal</span>
+        </div>
+        <p><code>AcceptanceUnknown</code> branches from <code>Submitting</code> whenever Slurm may have accepted the request but the client or agent cannot prove the returned binding.</p>
+
+        <h3>Submission protocol</h3>
+        <ol>
+          <li>Normalize the request and calculate a canonical digest.</li>
+          <li>Persist <code>SubmissionKey</code>, digest, intent, and accepted-at time.</li>
+          <li>Append the intent event before scheduler action.</li>
+          <li>Claim a submission epoch and persist <code>Submitting</code>.</li>
+          <li>Invoke <code>sbatch</code> once for that claimed epoch.</li>
+          <li>Capture stdout, stderr, exit, timing, parse result, and command capability version.</li>
+          <li>Persist the scheduler binding, or record <code>AcceptanceUnknown</code>.</li>
+          <li>Reconcile uncertain acceptance using site-supported correlation metadata and active/accounting evidence.</li>
+        </ol>
+
+        <h3>Idempotency and fencing</h3>
+        <ul>
+          <li>The same submission key and digest returns the existing intent or receipt.</li>
+          <li>The same key with different content is a conflict before scheduler action.</li>
+          <li>Blind automatic resubmission is forbidden while acceptance is uncertain.</li>
+          <li>Attempt epochs fence structured results and staged outputs from stale duplicate workers.</li>
+          <li>Exactly-once scheduler execution is explicitly not promised.</li>
+        </ul>
+
+        <h3>Observation semantics</h3>
+        <p>Every observation includes source, observation time, last successful contact, and freshness. Empty query, timeout, authentication failure, parser failure, unavailable accounting, and confirmed not-found remain different outcomes. Requeue and flags are retained as history rather than forced into a false monotonic scheduler sequence.</p>
+
+        <h3>Cancellation</h3>
+        <p>Cancellation is an idempotent requested/acknowledged/reconciled protocol. Closing a stream or canceling a caller fiber never invokes <code>scancel</code>. A race between completion and cancellation produces one evidence-backed reconciled terminal outcome.</p>
+      </section>
+
+      <section id="logs">
+        <span class="section-number">13 · Logs and diagnosis</span>
+        <h2>Resumable bytes, conservative interpretation</h2>
+        <h3>Submission-time layout</h3>
+        <pre><code>attempts/&lt;submission-key&gt;/
+  stdout-%j-r%r.log
+  stderr-%j-r%r.log
+  worker-events.ndjson
+  worker-result.json</code></pre>
+        <p>Array paths include <code>%A</code> and <code>%a</code>. stdout and stderr are separate by default. Open mode is explicit rather than inherited from site configuration. Attempt directories are private and created before submission.</p>
+
+        <h3>Cursor model</h3>
+        <pre><code>final case class LogCursor(
+    stream: LogStream,
+    generation: LogGeneration,
+    offset: Long
+)
+
+enum LogEvent:
+  case Chunk(from: LogCursor, next: LogCursor, bytes: Chunk[Byte])
+  case WaitingForFile(stream: LogStream)
+  case GenerationChanged(previous: LogCursor, next: LogCursor)
+  case Truncated(previous: LogCursor, next: LogCursor)
+  case Gap(stream: LogStream, reason: Diagnostic)
+  case TemporarilyUnavailable(lastKnown: LogCursor, reason: Diagnostic)
+  case End(stream: LogStream, finalCursor: LogCursor)</code></pre>
+        <ul>
+          <li>Bounded page reads are fundamental; <code>follow</code> is derived as an FS2 stream.</li>
+          <li>Bytes are authoritative. Text and line decoding are optional incremental views.</li>
+          <li>Missing files while pending produce <code>WaitingForFile</code>, not failure.</li>
+          <li>Generation, size, and file identity detect restart, replacement, and truncation.</li>
+          <li>Terminal jobs receive a bounded final-drain grace period for delayed filesystem visibility.</li>
+          <li>A slow log consumer cannot block scheduler reconciliation.</li>
+          <li>If login and compute nodes do not share the relevant filesystem, the site reports live logs unavailable and may support completion-time retrieval only.</li>
+        </ul>
+
+        <h3>Diagnosis</h3>
+        <pre><code>enum Assessment[+A]:
+  case Confirmed(value: A, evidence: NonEmptyChain[Evidence])
+  case Suspected(candidates: NonEmptyChain[Candidate[A]])
+  case Undetermined(evidence: Chain[Evidence])</code></pre>
+        <p>Scheduler state, reason, flags, exit and signal, accounting, worker receipt, structured progress, stdout/stderr tails, and result validation contribute to one diagnosis. Built-in log recognizers may identify common tracebacks or runtime messages, but they return suspected causes with byte-range evidence. They never override stronger scheduler or worker evidence.</p>
+
+        <h3>Structured worker events</h3>
+        <p>The optional worker launcher appends versioned events such as worker started, process started, progress, process exited, and result written. It distinguishes inability to execute a program from a program that started and failed. Loss by OOM or node failure may prevent the final receipt; absence therefore remains evidence, not a complete diagnosis.</p>
+
+        <h3>Privacy and retention</h3>
+        <ul>
+          <li>Log pages, lines, and diagnostic tails have explicit size limits.</li>
+          <li>Raw workload logs are not copied into operational telemetry by default.</li>
+          <li>Rendering/redaction is separate from raw evidence so stored bytes are not silently altered.</li>
+          <li>Retention and cleanup policy is explicit and reports gaps after deletion.</li>
+        </ul>
+      </section>
+
+      <section id="resources">
+        <span class="section-number">14 · Resources and site policy</span>
+        <h2>Portable intent, site-specific resolution</h2>
+        <pre><code>final case class JobSpec(
+    launch: LaunchSpec,
+    resources: ResourceRequest,
+    environment: EnvironmentSpec,
+    metadata: JobMetadata
+)
+
+enum MemoryRequest:
+  case PerNode(bytes: PositiveBytes)
+  case PerCpu(bytes: PositiveBytes)
+  case AllNodeMemory</code></pre>
+        <p>Resource types should prevent simple contradictions and retain Slurm's meaningful alternatives. Pure validation accumulates errors. Site-aware preflight resolves portable intent through a <code>SiteProfile</code> into partition, account, QoS, constraints, memory convention, modules, containers, accelerators, limits, and native options.</p>
+
+        <h3>Rules</h3>
+        <ul>
+          <li>Record both requested and effective resource specifications.</li>
+          <li>Preflight is advisory; live controller policy and submission plugins remain authoritative.</li>
+          <li>Unknown native capabilities and reasons survive normalization.</li>
+          <li>Advanced Slurm-native options are isolated from the portable API and never become shell text.</li>
+          <li>Environment export policy is explicit; accidental inheritance is not the default contract.</li>
+          <li>Site configuration may disable live logs, direct execution, agent installation, structured result staging, or specific resource modes.</li>
+        </ul>
+      </section>
+
+      <section id="requirements">
+        <span class="section-number">15 · Requirements catalog</span>
+        <h2>Functional requirements</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Priority</th><th>Requirement</th><th>Acceptance evidence</th></tr></thead>
+            <tbody>
+              <tr><td class="req-id">F-01</td><td><span class="priority p0">P0</span></td><td>Expose immutable Scala 3 IDs, requests, states, diagnostics, results, and cursors without runtime effect types in persisted values.</td><td>Codec round trips, construction tests, exhaustive matches.</td></tr>
+              <tr><td class="req-id">F-02</td><td><span class="priority p0">P0</span></td><td>Execute the required Slurm commands locally with fixed executables, argument vectors, bounded I/O, and explicit timeouts.</td><td>Command golden tests and local conformance suite.</td></tr>
+              <tr><td class="req-id">F-03</td><td><span class="priority p0">P0</span></td><td>Submit locally and return accepted, rejected, unavailable, or acceptance-unknown without conflation.</td><td>Fault injection before, during, and after submission response.</td></tr>
+              <tr><td class="req-id">F-04</td><td><span class="priority p0">P0</span></td><td>Observe active state, accounting, reasons, flags, exit data, and freshness while retaining unknown values and raw evidence.</td><td>Cross-version fixtures and model-state properties.</td></tr>
+              <tr><td class="req-id">F-05</td><td><span class="priority p0">P0</span></td><td>Support explicit asynchronous cancellation whose lifecycle is independent of local resource finalization.</td><td>Cancellation/completion race suite.</td></tr>
+              <tr><td class="req-id">F-06</td><td><span class="priority p0">P0</span></td><td>Support opaque inline, staged-local, and explicitly remote scripts with exit-only results.</td><td>R, Python, and shell fixtures on fake and real Slurm.</td></tr>
+              <tr><td class="req-id">F-07</td><td><span class="priority p0">P0</span></td><td>Assign explicit private stdout/stderr locations and read logs by byte cursor with bounded resumable streams.</td><td>Disconnect/resume, partial UTF-8, truncate, rotate, and delayed-file tests.</td></tr>
+              <tr><td class="req-id">F-08</td><td><span class="priority p0">P0</span></td><td>Negotiate Slurm version, cluster, structured-output, accounting, array, and site capabilities.</td><td>Capability matrix fixtures and degraded-mode tests.</td></tr>
+              <tr><td class="req-id">F-09</td><td><span class="priority p0">P0</span></td><td>Provide remote parity through a framed versioned agent protocol launched by system OpenSSH.</td><td>Local/remote differential law suite and host-disconnect tests.</td></tr>
+              <tr><td class="req-id">F-10</td><td><span class="priority p0">P0</span></td><td>Persist managed submission intent before execution can become unobservable.</td><td>Crash-edge tests around every state transition.</td></tr>
+              <tr><td class="req-id">F-11</td><td><span class="priority p0">P0</span></td><td>Use submission keys, request digests, acceptance-unknown reconciliation, and attempt epochs without claiming exactly-once execution.</td><td>Lost-response and duplicate-candidate tests.</td></tr>
+              <tr><td class="req-id">F-12</td><td><span class="priority p1">P1</span></td><td>Support declared script outputs and distinguish process success from missing or invalid outputs.</td><td>Manifest absence, extra output, size, and digest tests.</td></tr>
+              <tr><td class="req-id">F-13</td><td><span class="priority p1">P1</span></td><td>Define a language-neutral structured event and result-envelope protocol.</td><td>Reference producers in Scala plus one non-Scala language.</td></tr>
+              <tr><td class="req-id">F-14</td><td><span class="priority p1">P1</span></td><td>Submit registered Scala operations with typed inputs and recover bounded typed outputs using schema-checked reattachment.</td><td>Compile-time API examples and runtime schema-mismatch tests.</td></tr>
+              <tr><td class="req-id">F-15</td><td><span class="priority p1">P1</span></td><td>Provide capability-based managed input/output/scratch access while retaining an explicitly lower-assurance native context.</td><td>Path-locality and staged-output contract tests.</td></tr>
+              <tr><td class="req-id">F-16</td><td><span class="priority p1">P1</span></td><td>Coalesce scheduler observations per site with bounded adaptive polling and no per-job command loop.</td><td>Virtual-clock load and fairness tests.</td></tr>
+              <tr><td class="req-id">F-17</td><td><span class="priority p2">P2</span></td><td>Lower compatible workloads into job arrays without losing per-element identity, logs, outcome, or result contract.</td><td>Array element attribution and partial-failure tests.</td></tr>
+              <tr><td class="req-id">F-18</td><td><span class="priority p2">P2</span></td><td>Offer optional <code>slurmrestd</code> parity behind the same scheduler algebra.</td><td>CLI/REST differential conformance tests on an enabled site.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="quality">
+        <span class="section-number">16 · Quality attributes</span>
+        <h2>Non-functional requirements</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Attribute</th><th>Requirement</th></tr></thead>
+            <tbody>
+              <tr><td class="req-id">Q-01</td><td>Correctness</td><td>No temporary unavailability, empty query, missing log, or parse failure may fabricate terminal workload failure.</td></tr>
+              <tr><td class="req-id">Q-02</td><td>Resource safety</td><td>All local processes, channels, files, streams, and fibers have explicit ownership, finalization, bounds, and diagnostic paths.</td></tr>
+              <tr><td class="req-id">Q-03</td><td>Durability</td><td>Managed attempts survive client and agent restart; committed journal events remain replayable by cursor.</td></tr>
+              <tr><td class="req-id">Q-04</td><td>Compatibility</td><td>Supported Slurm versions and data-parser codecs are explicit; unknown backend values remain inspectable.</td></tr>
+              <tr><td class="req-id">Q-05</td><td>Efficiency</td><td>Scheduler queries are coalesced, rate-limited, and bounded; logs stream in constant memory; no unbounded queues are permitted.</td></tr>
+              <tr><td class="req-id">Q-06</td><td>Security</td><td>Remote execution respects host keys and user authority, avoids shell interpolation, limits agent operations, protects state directories, and never persists credentials.</td></tr>
+              <tr><td class="req-id">Q-07</td><td>Testability</td><td>Time, process, transport, scheduler, persistence, and filesystem behavior can be replaced by deterministic test interpreters.</td></tr>
+              <tr><td class="req-id">Q-08</td><td>Observability</td><td>Structured logs, metrics, and traces describe operations but never substitute for the durable control journal or scheduler evidence.</td></tr>
+              <tr><td class="req-id">Q-09</td><td>API clarity</td><td>Common callers use ordinary ADTs and <code>F[A]</code>; transformer stacks, backend DTOs, and parsing details remain internal.</td></tr>
+              <tr><td class="req-id">Q-10</td><td>Evolution</td><td>Persisted and wire messages are versioned; migrations are explicit; interpreters can evolve without changing workload meaning.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="testing">
+        <span class="section-number">17 · Verification strategy</span>
+        <h2>Test the transitions that ordinary integration tests miss</h2>
+        <h3>Test layers</h3>
+        <ol>
+          <li><strong>Pure unit and property tests:</strong> validation, normalization, codecs, state reducers, diagnostic combination, resource resolution, and schema reattachment.</li>
+          <li><strong>Golden protocol tests:</strong> real CLI JSON, parsable output, stderr, unknown fields, job states, reasons, arrays, accounting records, and agent frames across supported versions.</li>
+          <li><strong>Scheduler model:</strong> deterministic fake scheduler, command runner, transport, filesystem, clock, worker, and control store.</li>
+          <li><strong>Interpreter conformance:</strong> local CLI, SSH agent, and optional REST must satisfy the same laws.</li>
+          <li><strong>Container or disposable cluster tests:</strong> normal batch lifecycle, output files, accounting, cancellation, arrays, and version probes.</li>
+          <li><strong>Real-site acceptance:</strong> an unprivileged installation through the site's normal SSH path with recorded versions, capabilities, policy, and limitations.</li>
+        </ol>
+
+        <h3>Required fault scenarios</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Injected scenario</th><th>Required result</th></tr></thead>
+            <tbody>
+              <tr><td>Crash before <code>sbatch</code></td><td>Intent remains pending and is eligible for one claimed submission.</td></tr>
+              <tr><td>Lost response after acceptance</td><td>State becomes <code>AcceptanceUnknown</code>; no blind retry occurs.</td></tr>
+              <tr><td>Same key, changed request</td><td>Conflict before scheduler action.</td></tr>
+              <tr><td>SSH disconnect</td><td>Remote work continues; events and logs resume from cursors.</td></tr>
+              <tr><td>Agent restart</td><td>Durable state reopens and nonterminal attempts reconcile.</td></tr>
+              <tr><td><code>squeue</code> unavailable</td><td>Last observation becomes stale or unavailable, not failed.</td></tr>
+              <tr><td><code>sacct</code> delayed</td><td>Terminal candidate remains unresolved during bounded reconciliation.</td></tr>
+              <tr><td>Unknown state or JSON field</td><td>Parsing succeeds conservatively and raw evidence is preserved.</td></tr>
+              <tr><td>Log file delayed, truncated, or replaced</td><td>Explicit waiting, generation, truncation, or gap event; byte cursor remains coherent.</td></tr>
+              <tr><td>Workload exits zero without required output</td><td>Result validation fails despite process success.</td></tr>
+              <tr><td>Malformed result envelope</td><td>No typed success; raw bounded evidence remains available.</td></tr>
+              <tr><td>Stale duplicate worker returns</td><td>Epoch mismatch prevents result acceptance.</td></tr>
+              <tr><td>Cancellation races completion</td><td>One reconciled terminal outcome backed by recorded evidence.</td></tr>
+              <tr><td>Slow stream consumer</td><td>Only that consumer slows; reconciliation and durable append continue.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Core laws</h3>
+        <ul>
+          <li>Submission key + identical digest is idempotent.</li>
+          <li>Submission key + different digest conflicts.</li>
+          <li>Read-only retry never changes scheduler or workload meaning.</li>
+          <li>Stream finalization never cancels a remote job.</li>
+          <li>Event replay omits no committed event and tolerates duplicate delivery.</li>
+          <li>Log resume emits an exact byte continuation unless it explicitly reports a gap.</li>
+          <li>Backend binding and placement never change the result schema or operation identity.</li>
+          <li>Local and remote CLI interpreters normalize equivalent evidence equivalently.</li>
+          <li>Stale attempt epochs cannot provide an accepted structured result.</li>
+        </ul>
+      </section>
+
+      <section id="modules">
+        <span class="section-number">18 · Modules and dependencies</span>
+        <h2>Small modules with executable boundaries</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Module</th><th>Responsibility</th><th>Introduced</th></tr></thead>
+            <tbody>
+              <tr><td><code>scala-slurm-core</code></td><td>Pure IDs, requests, states, diagnostics, capabilities, workload/result contracts, laws</td><td>v0.1</td></tr>
+              <tr><td><code>scala-slurm-cli</code></td><td>Command construction, versioned DTOs/parsers, CLI scheduler interpreter</td><td>v0.1</td></tr>
+              <tr><td><code>scala-slurm-local</code></td><td>FS2 process execution on the target system</td><td>v0.1</td></tr>
+              <tr><td><code>scala-slurm-testkit</code></td><td>Fake scheduler, model reducer, virtual clock, fixtures, transport and fault injection</td><td>v0.1</td></tr>
+              <tr><td><code>scala-slurm-protocol</code></td><td>Versioned client-agent frames and durable wire values</td><td>v0.2</td></tr>
+              <tr><td><code>scala-slurm-agent</code></td><td>Remote application, local scheduler execution, log paging, worker supervision</td><td>v0.2</td></tr>
+              <tr><td><code>scala-slurm-ssh</code></td><td>System OpenSSH bootstrap, framing, reconnect, agent installation capability</td><td>v0.2</td></tr>
+              <tr><td><code>scala-slurm-managed</code></td><td>Control store, journal, outbox, reconciliation, coalesced observation</td><td>v0.3</td></tr>
+              <tr><td><code>scala-slurm-worker</code></td><td>Structured events, result envelopes, operation registry, typed task runtime</td><td>v0.4</td></tr>
+              <tr><td><code>scala-slurm-rest</code></td><td>Optional versioned <code>slurmrestd</code> interpreter</td><td>v0.5+</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Proposed foundation</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Capability</th><th>Library</th><th>Boundary</th></tr></thead>
+            <tbody>
+              <tr><td>Functional data and composition</td><td>Cats</td><td>Core validation, non-empty evidence, laws</td></tr>
+              <tr><td>Effects and structured concurrency</td><td>Cats Effect</td><td>Services and deployable programs</td></tr>
+              <tr><td>Processes, bytes, files, live streams</td><td>FS2 core / IO</td><td>Interpreter and delivery boundaries</td></tr>
+              <tr><td>Versioned JSON</td><td>Circe</td><td>Wire, persistence, result envelope, Slurm JSON adapters</td></tr>
+              <tr><td>HTTP</td><td>http4s</td><td>Optional REST interpreter only</td></tr>
+              <tr><td>Property and law testing</td><td>ScalaCheck + Discipline</td><td>Domain and interpreter conformance</td></tr>
+              <tr><td>Test framework</td><td>MUnit + Cats Effect integration</td><td>Unit, effect, and integration suites</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>log4cats is a likely operational logging boundary once stable diagnostic fields exist. otel4s is deferred until transition and span semantics are stable. cats-parse is admitted only if fallback Slurm formats require a real grammar. No actor system, second effect runtime, or second streaming model is planned.</p>
+      </section>
+
+      <section id="delivery">
+        <span class="section-number">19 · Delivery plan</span>
+        <h2>Build the semantic core before remote complexity</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Phase</th><th>Deliverable</th><th>Exit gate</th></tr></thead>
+            <tbody>
+              <tr><td><strong>0. Foundations</strong></td><td>Build, modules, domain glossary, compatibility policy, fixture format, ADRs for failure and authority boundaries</td><td>Pure models compile; persisted/wire version policy agreed.</td></tr>
+              <tr><td><strong>1. Local vertical slice</strong></td><td>Opaque script → <code>sbatch</code> → observe → logs → accounting → terminal diagnosis</td><td>Runs locally against fake and disposable Slurm; no ambiguous state is flattened.</td></tr>
+              <tr><td><strong>2. Remote parity</strong></td><td>Agent protocol, SSH bootstrap, paged remote logs, differential conformance</td><td>Same fixture produces equivalent normalized evidence locally and remotely.</td></tr>
+              <tr><td><strong>3. Durable management</strong></td><td>Control store, journal, idempotency, outbox, reconciliation, adaptive polling</td><td>Submit, disconnect, restart client and agent, reconnect without blind duplicate.</td></tr>
+              <tr><td><strong>4. Structured workloads</strong></td><td>Declared outputs, worker events, result envelope, typed Scala registry and reattachment</td><td>Opaque Python/R and typed Scala examples pass result and failure matrix.</td></tr>
+              <tr><td><strong>5. Site scale</strong></td><td>Profiles, arrays, compatibility matrix, real-site evidence, optional REST pilot</td><td>Controller-safe observation and array attribution proven on real Slurm.</td></tr>
+              <tr><td><strong>6. v1 hardening</strong></td><td>Public API review, migrations, docs, security, performance, release process</td><td>All v1 acceptance criteria satisfied with reproducible evidence.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="acceptance">
+        <span class="section-number">20 · Acceptance criteria</span>
+        <h2>Definition of v1 success</h2>
+        <ul class="checklist">
+          <li>The same opaque script can be submitted locally and through SSH without changing scheduler semantics.</li>
+          <li>Submission returns durable acceptance or an explicit rejected, unavailable, or acceptance-unknown outcome—not terminal completion.</li>
+          <li>A queued or running managed job outlives the caller fiber, local process, SSH connection, client, and restartable agent.</li>
+          <li>A lost submission response does not trigger blind automatic resubmission.</li>
+          <li>Temporary scheduler, accounting, filesystem, network, or parser unavailability does not invent workload failure.</li>
+          <li>Known and unknown Slurm states, reasons, flags, warnings, exit data, and raw bounded evidence remain accessible.</li>
+          <li>stdout and stderr resume from exact byte cursors, including after disconnect, with explicit gap or truncation reporting.</li>
+          <li>Failure diagnosis combines scheduler, accounting, worker, logs, and result evidence with confirmed/suspected/undetermined confidence.</li>
+          <li>An exit-zero opaque script with a missing declared output is not reported as a valid result.</li>
+          <li>A registered Scala task returns a schema-validated typed value; wrong-schema reattachment fails safely.</li>
+          <li>Typed tasks are deployed by operation identity and worker release; no closures or <code>IO[A]</code> values are serialized.</li>
+          <li>Cancellation is explicit, asynchronous, idempotent, and independent of local resource finalization.</li>
+          <li>Coalesced observation avoids one Slurm RPC loop per job and remains bounded under slow consumers.</li>
+          <li>Fake/model tests, disposable-cluster tests, and at least one real unprivileged Slurm site pass the required failure matrix.</li>
+          <li>Supported Scala, JDK, Slurm, data-parser, agent-protocol, and persistence-schema versions are documented.</li>
+        </ul>
+
+        <h3>Success measures</h3>
+        <ul>
+          <li>Every persisted state-machine edge has at least one deterministic crash or interruption test.</li>
+          <li>Every public interpreter passes a shared conformance law suite.</li>
+          <li>No unbounded queue, unbounded subprocess capture, or unbounded log line exists in the implementation.</li>
+          <li>Compatibility fixtures cover at least two supported Slurm major-release families before v1.</li>
+          <li>Real-site evidence records exact versions, capabilities, commands, configuration assumptions, and known limitations.</li>
+        </ul>
+      </section>
+
+      <section id="risks">
+        <span class="section-number">21 · Risks and mitigations</span>
+        <h2>Known hard edges</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr></thead>
+            <tbody>
+              <tr><td>Slurm version and plugin output drift</td><td>Parser failure or semantic mismatch</td><td>Capability negotiation, explicit data-parser versions, golden fixtures, raw evidence, compatibility policy.</td></tr>
+              <tr><td>Submission accepted but response lost</td><td>Potential duplicate physical work</td><td>Durable intent, correlation metadata, acceptance-unknown state, reconciliation, epoch fencing; no exactly-once claim.</td></tr>
+              <tr><td>Site forbids agents or persistent processes</td><td>Reduced remote capability</td><td>On-demand stdio agent, local-only mode, explicit degraded direct-SSH adapter.</td></tr>
+              <tr><td>Accounting disabled, private, or delayed</td><td>Incomplete terminal diagnosis</td><td>Capability report, focused active evidence, worker receipt, bounded unresolved state, explicit limitations.</td></tr>
+              <tr><td>Logs on node-local or delayed filesystem</td><td>No live log stream or late completion evidence</td><td>Site filesystem probe, structured spool where possible, eventual retrieval, honest live-unavailable result.</td></tr>
+              <tr><td>Application output buffering</td><td>Apparently stalled live logs</td><td>Document buffering; structured progress; optional explicit launch policy; never silently apply <code>stdbuf</code>.</td></tr>
+              <tr><td>Typed task API overpromises safety</td><td>Unsafe retries or hidden side effects</td><td>Separate retry-safety declaration, no closure serialization, managed output fencing, explicit native context.</td></tr>
+              <tr><td>Controller overload from polling</td><td>Site disruption</td><td>Coalescing, batching, jitter, adaptive cadence, rate limits, arrays, metrics and load tests.</td></tr>
+              <tr><td>Logs contain credentials or private data</td><td>Disclosure through telemetry or persistence</td><td>Private directories, bounded access, no automatic telemetry copy, separate redacted presentation.</td></tr>
+              <tr><td>Functional abstractions obscure the public API</td><td>Poor adoption and maintenance</td><td>Ordinary ADTs, minimal constraints, concrete examples, no public transformer stack, dependency admission discipline.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="decisions">
+        <span class="section-number">22 · Decisions and open questions</span>
+        <h2>Current decisions</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Decision</th><th>Status</th><th>Rationale</th></tr></thead>
+            <tbody>
+              <tr><td>Standard Slurm commands define the baseline interpreter.</td><td><span class="status decided">Decided</span></td><td>Portable, site-native authentication/configuration, sufficient functionality; robustness is above the transport.</td></tr>
+              <tr><td>Remote operation uses a fixed agent protocol over system OpenSSH.</td><td><span class="status decided">Decided</span></td><td>Avoids dynamic remote shell construction while respecting existing SSH policy.</td></tr>
+              <tr><td>FS2 is the live byte/event transport, not durable authority.</td><td><span class="status decided">Decided</span></td><td>Backpressure and resource safety without confusing in-memory delivery with persistence.</td></tr>
+              <tr><td>Raw and managed scheduler surfaces coexist.</td><td><span class="status decided">Decided</span></td><td>Low-level fidelity remains available while robust applications gain recovery and idempotency.</td></tr>
+              <tr><td>Opaque scripts and typed tasks share result contracts.</td><td><span class="status decided">Decided</span></td><td>Language does not determine observability; scripts may progressively adopt structure.</td></tr>
+              <tr><td>Arbitrary <code>IO[A]</code> and closures are not serialized.</td><td><span class="status decided">Decided</span></td><td>Deployment, code identity, effects, and retry behavior must remain explicit.</td></tr>
+              <tr><td><code>slurmrestd</code> is optional after CLI parity.</td><td><span class="status decided">Decided</span></td><td>Useful for throughput and site integration but not universally deployed.</td></tr>
+              <tr><td>Native <code>libslurm</code> binding is excluded absent measured need.</td><td><span class="status decided">Decided</span></td><td>High platform and version cost with little initial semantic benefit.</td></tr>
+              <tr><td>Scala 3.7.4 and JDK 17 define the v1 build baseline.</td><td><span class="status decided">Decided</span></td><td>3.7.4 is the final Scala 3.7 patch selected for publication and verification; compiler minor-line changes require an explicit compatibility decision.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Open implementation questions</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Question</th><th>Provisional direction</th><th>Decision point</th></tr></thead>
+            <tbody>
+              <tr><td>Published organization, package, and module coordinates?</td><td>Use <code>scala-slurm</code> as the working product name; defer coordinates until build scaffold.</td><td>Phase 0</td></tr>
+              <tr><td>Minimum supported Slurm versions?</td><td>Choose from access to real sites and fixture availability rather than current-latest alone.</td><td>Phase 0–1</td></tr>
+              <tr><td>Default durable store?</td><td>Define <code>ControlStore[F]</code>; pilot a transactional embedded SQLite reference implementation.</td><td>Phase 3</td></tr>
+              <tr><td>Agent framing format?</td><td>Length-prefixed canonical JSON first; preserve protocol version and bounded frames.</td><td>Phase 2</td></tr>
+              <tr><td>Agent installation policy?</td><td>Manual path first; add digest-verified atomic user installation only after protocol parity.</td><td>Phase 2–3</td></tr>
+              <tr><td>Default typed result codec?</td><td>Versioned JSON for bounded values; make codec explicit in <code>ResultContract[A]</code>.</td><td>Phase 4</td></tr>
+              <tr><td>How much direct filesystem API should the agent expose?</td><td>Only attempt-scoped staging and paged log/result access initially; avoid becoming a general file browser.</td><td>Phase 2–4</td></tr>
+              <tr><td>Retry declarations and enforcement?</td><td>Default no automatic retry; add explicit policy only with idempotency or fenced-output evidence.</td><td>Phase 3–4</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="references">
+        <span class="section-number">23 · References and glossary</span>
+        <h2>Primary references</h2>
+        <ul>
+          <li><a href="https://slurm.schedmd.com/sbatch.html">Slurm <code>sbatch</code></a></li>
+          <li><a href="https://slurm.schedmd.com/squeue.html">Slurm <code>squeue</code></a></li>
+          <li><a href="https://slurm.schedmd.com/sacct.html">Slurm <code>sacct</code></a></li>
+          <li><a href="https://slurm.schedmd.com/scontrol.html">Slurm <code>scontrol</code></a></li>
+          <li><a href="https://slurm.schedmd.com/job_state_codes.html">Slurm job state codes</a></li>
+          <li><a href="https://slurm.schedmd.com/job_reason_codes.html">Slurm job reason codes</a></li>
+          <li><a href="https://slurm.schedmd.com/job_exit_code.html">Slurm job exit codes</a></li>
+          <li><a href="https://slurm.schedmd.com/rest_clients.html">Slurm REST and data-parser client guidance</a></li>
+          <li><a href="https://slurm.schedmd.com/api.html">Slurm native API guidance</a></li>
+          <li><a href="https://typelevel.org/cats-effect/">Cats Effect</a></li>
+          <li><a href="https://fs2.io/">FS2</a></li>
+        </ul>
+
+        <h3>Glossary</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td>Acceptance</td><td>Proof that Slurm assigned a scheduler binding, or that the managed controller durably recorded intent; never terminal job success.</td></tr>
+              <tr><td>Acceptance unknown</td><td>Slurm may have accepted a submission, but the library lacks enough evidence to bind or safely retry it.</td></tr>
+              <tr><td>Attempt epoch</td><td>A fencing generation distinguishing physical execution candidates for one managed attempt.</td></tr>
+              <tr><td>Evidence</td><td>Timestamped normalized and/or raw material supporting an observation or diagnosis.</td></tr>
+              <tr><td>Freshness</td><td>Whether an observation is current, stale with last-known data, or unavailable.</td></tr>
+              <tr><td>Opaque script</td><td>A workload whose internal semantics are unknown to the library; it may still declare outputs or use the result protocol.</td></tr>
+              <tr><td>Registered task</td><td>A versioned operation installed in the Scala worker and invoked through typed encoded input.</td></tr>
+              <tr><td>Result contract</td><td>The durable schema and validation rules connecting a payload to its expected return type and outputs.</td></tr>
+              <tr><td>Site profile</td><td>Configuration that resolves portable resources and capabilities into site-specific Slurm behavior.</td></tr>
+              <tr><td>Worker receipt</td><td>A structured record of worker/process start, exit, and result production, written independently of stdout.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <strong>Document authority.</strong> Until code and more focused ADRs exist, this PRD is the founding product and architecture contract for scala-slurm. Feasibility findings may refine it, but implementation must not silently weaken its uncertainty, durability, or evidence boundaries.
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="footer">
+    <p><strong>scala-slurm</strong> · Founding product requirements · 22 July 2026</p>
+    <p>Designed for truthful interaction with Slurm's asynchronous and failure-prone operational reality.</p>
+  </footer>
+</body>
+</html>
