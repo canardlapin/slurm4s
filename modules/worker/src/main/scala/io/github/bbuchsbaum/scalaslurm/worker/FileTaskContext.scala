@@ -6,11 +6,9 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.scalaslurm.core.*
 
 import java.io.ByteArrayOutputStream
-import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
@@ -124,11 +122,21 @@ object FileTaskContext:
         IO.blocking {
           val target = resolveWithin(root, path)
           Option(target.getParent).foreach(createPrivateDirectory)
-          writeAtomically(target, bytes)
-          OutputEntry
-            .from(path, bytes.size.toLong, digest(bytes))
-            .left
-            .map(problem => TaskIoFailure.OutputUnavailable(path, problem.reason))
+          AtomicFiles.writeNewBlocking(target, bytes) match
+            case Left(AtomicFiles.WriteFailure.AtomicMoveUnavailable(_)) =>
+              Left(
+                TaskIoFailure.OutputUnavailable(
+                  path,
+                  "workspace does not support atomic output publication"
+                )
+              )
+            case Left(failure) =>
+              Left(TaskIoFailure.OutputUnavailable(path, failure.toString))
+            case Right(()) =>
+              OutputEntry
+                .from(path, bytes.size.toLong, digest(bytes))
+                .left
+                .map(problem => TaskIoFailure.OutputUnavailable(path, problem.reason))
         }.handleError(error => Left(TaskIoFailure.OutputUnavailable(path, safeMessage(error))))
 
     def seal(
@@ -227,19 +235,6 @@ object FileTaskContext:
         throw new IllegalArgumentException("output parent must not be a symbolic link")
       current = current.getParent
     target
-
-  private def writeAtomically(target: Path, bytes: Vector[Byte]): Unit =
-    val temporary = target.resolveSibling(s".${target.getFileName}.tmp-${UUID.randomUUID()}")
-    try
-      Files.write(temporary, bytes.toArray, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
-      setPrivate(temporary)
-      try
-        val _ = Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE)
-      catch
-        case _: AtomicMoveNotSupportedException =>
-          throw new IllegalStateException("workspace does not support atomic output publication")
-    finally
-      val _ = Files.deleteIfExists(temporary)
 
   private def createPrivateDirectory(path: Path): Unit =
     Files.createDirectories(path)

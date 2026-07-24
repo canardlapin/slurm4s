@@ -7,17 +7,11 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.scalaslurm.core.*
 import io.github.bbuchsbaum.scalaslurm.protocol.TaskInvocationCodec
 
-import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
-import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
-import java.nio.file.LinkOption
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
-import java.util.UUID
 
 final case class WorkerLaunchSettings(
     workspace: Path,
@@ -338,70 +332,23 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       bytes: Vector[Byte],
       executable: Boolean
   ): Either[Diagnostics, Unit] =
-    if Files.exists(target, LinkOption.NOFOLLOW_LINKS) then
-      if !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS) then
-        Left(
-          Diagnostics.one(
-            Diagnostic("typed-launch-conflict", "an existing launch artifact is not a regular file")
+    AtomicFiles.writeStableBlocking(target, bytes, executable).left.map {
+      case AtomicFiles.WriteFailure.TargetConflict(_, detail) =>
+        Diagnostics.one(Diagnostic("typed-launch-conflict", s"launch artifact conflict: $detail"))
+      case AtomicFiles.WriteFailure.TargetExists(_) =>
+        Diagnostics.one(
+          Diagnostic("typed-launch-conflict", "a launch artifact appeared concurrently")
+        )
+      case AtomicFiles.WriteFailure.AtomicMoveUnavailable(_) =>
+        Diagnostics.one(
+          Diagnostic(
+            "atomic-launch-staging-unavailable",
+            "the worker workspace does not support atomic artifact publication"
           )
         )
-      else
-        val existing = readAtMost(target, bytes.size)
-        Either.cond(
-          existing == bytes,
-          (),
-          Diagnostics.one(
-            Diagnostic(
-              "typed-launch-conflict",
-              "an existing launch artifact has different bytes"
-            )
-          )
-        )
-    else
-      val temporary = target.resolveSibling(s".${target.getFileName}.tmp-${UUID.randomUUID()}")
-      try
-        Files.write(
-          temporary,
-          bytes.toArray,
-          StandardOpenOption.CREATE_NEW,
-          StandardOpenOption.WRITE
-        )
-        setPermissions(temporary, executable)
-        try
-          val _ = Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE)
-          Right(())
-        catch
-          case _: AtomicMoveNotSupportedException =>
-            Left(
-              Diagnostics.one(
-                Diagnostic(
-                  "atomic-launch-staging-unavailable",
-                  "the worker workspace does not support atomic artifact publication"
-                )
-              )
-            )
-      finally
-        val _ = Files.deleteIfExists(temporary)
-
-  private def readAtMost(path: Path, maximum: Int): Vector[Byte] =
-    val input = Files.newInputStream(path, StandardOpenOption.READ)
-    val output = ByteArrayOutputStream()
-    val buffer = new Array[Byte](8192)
-    try
-      var total = 0L
-      var done = false
-      while !done && total <= maximum.toLong do
-        val requested =
-          math.min(buffer.length.toLong, maximum.toLong - total + 1L).toInt
-        val count = input.read(buffer, 0, requested)
-        if count < 0 then done = true
-        else
-          output.write(buffer, 0, count)
-          total += count.toLong
-      output.toByteArray.toVector
-    finally
-      input.close()
-      output.close()
+      case AtomicFiles.WriteFailure.Io(detail) =>
+        Diagnostics.one(Diagnostic("launch-staging-io", detail))
+    }
 
   private def createPrivateDirectory(path: Path): Either[Diagnostics, Unit] =
     val root = settings.workspace.toAbsolutePath.normalize()
