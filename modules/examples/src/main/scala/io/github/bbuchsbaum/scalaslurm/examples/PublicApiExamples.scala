@@ -6,7 +6,6 @@ import cats.effect.Resource
 import cats.syntax.all.*
 import fs2.io.process.Processes
 import io.github.bbuchsbaum.scalaslurm.agent.AgentApi
-import io.github.bbuchsbaum.scalaslurm.cli.*
 import io.github.bbuchsbaum.scalaslurm.core.*
 import io.github.bbuchsbaum.scalaslurm.local.*
 import io.github.bbuchsbaum.scalaslurm.managed.*
@@ -82,43 +81,17 @@ object JobRequests:
       )
     }
 
-final case class LocalRuntime(
-    scheduler: SlurmCliScheduler[IO],
-    logs: LocalLogReader[IO]
-)
-
 object LocalOpaque:
   def runtime(
-      workspace: Path,
-      executablePaths: Map[SlurmExecutable, String],
-      baseEnvironment: Map[String, String],
-      allowedEnvironmentOverrides: Set[String],
-      dataParser: DataParserVersion,
-      commandPolicy: CommandPolicy,
-      maximumScriptBytes: ByteLimit,
-      maximumLogPageBytes: ByteLimit
-  )(using Processes[IO]): LocalRuntime =
-    val executor = Fs2CommandExecutor[IO](
-      LocalCommandSettings(
-        executablePaths,
-        baseEnvironment,
-        allowedEnvironmentOverrides,
-        commandPolicy.captureLimit
-      )
-    )
-    val planner = LocalSubmissionPlanner[IO](
-      LocalWorkspaceSettings(workspace, maximumScriptBytes)
-    )
-    LocalRuntime(
-      SlurmCliScheduler[IO](executor, planner, SlurmCliSettings(dataParser, commandPolicy)),
-      LocalLogReader[IO](workspace, maximumLogPageBytes)
-    )
+      config: SlurmLocalConfig
+  )(using Processes[IO]): Resource[IO, SlurmLocal[IO]] =
+    SlurmLocal.default[IO](config)
 
   def submit(
-      runtime: LocalRuntime,
+      runtime: SlurmLocal[IO],
       request: JobRequest[NoResult]
   ): IO[SubmissionAttempt] =
-    runtime.scheduler.submit(request)
+    runtime.submit(request)
 
 object RemoteOpaque:
   def wire(
@@ -139,13 +112,11 @@ object RemoteOpaque:
     wire(connection, SystemSshProcessRunner[IO], frameLimits, exchangePolicy)
 
   def connect(
-      connection: SshConnection,
-      frameLimits: FrameLimits,
-      exchangePolicy: SshExchangePolicy
-  )(using Processes[IO]): IO[Either[ValidationFailure, AgentCall[SshAgentApi[IO]]]] =
-    systemWire(connection, frameLimits, exchangePolicy) match
-      case Left(problem) => IO.pure(Left(problem))
-      case Right(client) => SshAgentApi.connect[IO](client).map(Right(_))
+      config: SlurmSshConfig
+  )(using
+      Processes[IO]
+  ): Either[ValidationFailure, Resource[IO, RemoteSlurm[IO]]] =
+    Slurm.overSsh[IO](config)
 
   def submit(
       api: AgentApi[IO],
@@ -188,9 +159,7 @@ object ManagedRecovery:
       scheduler: Scheduler[IO],
       limits: JournalLimits = JournalLimits.default
   ): Resource[IO, ManagedController[IO]] =
-    FileJournalControlStore
-      .open[IO](journal, limits)
-      .map(store => ManagedController[IO](store, scheduler))
+    Managed.durable[IO](journal, scheduler, ManagedConfig(journalLimits = limits))
 
   def afterRestart(
       controller: ManagedController[IO],
@@ -208,7 +177,7 @@ object ManagedRecovery:
 
 final class IncrementTask private (
     val operation: OperationRef[Int, Int]
-) extends ScalaTask[Int, Int]:
+) extends SlurmTask[Int, Int]:
   val inputCodec: InputCodec[Int] = new InputCodec[Int]:
     val schemaId: SchemaId = operation.inputSchema
     def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
@@ -262,13 +231,7 @@ object TypedResults:
       SubmissionKey.from(submissionKey).toValidatedNec,
       JobName.from(name).toValidatedNec
     ).mapN { (key, jobName) =>
-      val contract = ResultContract.Structured(task.outputCodec, maximumResultBytes)
-      JobRequest(
-        key,
-        jobName,
-        Payload.RegisteredTask(task.operation, input, task.inputCodec, contract),
-        resources
-      )
+      task(input).request(key, jobName, resources, maximumResultBytes)
     }
 
   def registry(task: IncrementTask): Either[TaskFailure, TaskRegistry] =

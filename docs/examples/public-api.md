@@ -10,15 +10,22 @@ It covers the following low-level workflows.
 
 ## Opaque scripts: local and remote
 
-Build opaque requests with `JobRequests.exitOnly`. A `ScriptSource.Inline` or
-`ScriptSource.StagedLocal` request can be submitted through the runtime returned by
-`LocalOpaque.runtime`; that runtime composes `Fs2CommandExecutor`, `LocalSubmissionPlanner`, and
-`SlurmCliScheduler`.
+Build opaque requests with `JobRequests.exitOnly`. `SlurmLocalConfig.default` supplies validated
+defaults, and `SlurmLocal.default` owns the public local composition of `Fs2CommandExecutor`,
+`LocalSubmissionPlanner`, `SlurmCliScheduler`, and `LocalLogReader`:
 
-For a remote HPC login node, validate an `SshConnection`, create a framed wire client with
-`RemoteOpaque.systemWire`, and negotiate the agent with `RemoteOpaque.connect`. Submit with
-`RemoteOpaque.submit`. A remote process failure remains an `AgentFailure`; an `sbatch` rejection,
-unknown acceptance, or accepted job remains a distinct `SubmissionAttempt`.
+```scala
+SlurmLocalConfig.default(workspace, environment).map { config =>
+  SlurmLocal.default[IO](config).use(_.submit(request))
+}
+```
+
+For a remote HPC login node, validate an `SshConnection`, build `SlurmSshConfig`, and acquire the
+negotiated API through `Slurm.overSsh`. A remote process failure remains an `AgentFailure`; an
+`sbatch` rejection, unknown acceptance, or accepted job remains a distinct `SubmissionAttempt`.
+The acquired `RemoteSlurm[F]` delegates the `AgentApi[F]` operations. If negotiation failed, each
+operation returns that same `AgentCall.Failed` value; resource acquisition does not erase
+authentication, transport, or protocol failure.
 
 The SSH command is a fixed argument vector that starts `scala-slurm-agent serve --stdio`. The
 request is a bounded protocol frame; no user script or argument is interpolated into a shell
@@ -64,9 +71,18 @@ or unavailable accounting leaves it unknown.
 
 ## Typed Scala tasks and results
 
-`IncrementTask` is a small `ScalaTask[Int, Int]`. `IncrementTask.create` validates its versioned
+`IncrementTask` is a small `SlurmTask[Int, Int]`. `IncrementTask.create` validates its versioned
 operation and schema identifiers. `TypedResults.request` binds the input codec and structured
 result codec to a `Payload.RegisteredTask`; it does not serialize a closure or an `IO`.
+
+The common request shape no longer exposes payload construction:
+
+```scala
+val request =
+  IncrementTask.create().map { task =>
+    task(41).request(submissionKey, jobName, resources, maximumResultBytes)
+  }
+```
 
 On the execution host, `RegisteredTaskLauncher` lowers that request to a fixed worker command and
 stages a bounded invocation. `TypedResults.submit` submits the lowered script. Register the same
@@ -76,6 +92,10 @@ After completion, `TypedResults.attach` uses the managed attempt and durable res
 check submission identity, attempt epoch, operation, schema, worker release, result byte limits,
 and declared output evidence before returning `ExecutionResult[Int]`. A workload failure, invalid
 result, or indeterminate read remains distinct from a typed success.
+
+Remote typed submission remains a separate protocol milestone. The current SSH agent publishes
+opaque submission, observation, accounting, cancellation, and bounded log reads; it does not
+pretend that a target-side `RegisteredTaskLauncher` is already remotely available.
 
 The examples tests exercise validation, log resumption, remote failure separation, bounded empty
 restart recovery, and typed schema binding without requiring Slurm or SSH.

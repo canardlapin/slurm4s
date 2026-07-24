@@ -9,7 +9,7 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.scalaslurm.core.*
 import io.github.bbuchsbaum.scalaslurm.worker.*
 
-object Increment extends ScalaTask[Int, Int]:
+object Increment extends SlurmTask[Int, Int]:
   val operation = OperationRef[Int, Int](
     OperationId.from("example.increment").toOption.get,
     OperationVersion.from("1").toOption.get,
@@ -41,9 +41,19 @@ the codec schemas and bounds input before constructing that transportable value.
 resolves the registry entry, executes it with a managed or explicitly native context, validates
 outputs, and publishes one atomic result envelope.
 
-For scheduler submission, construct `Payload.RegisteredTask` with `Increment.operation`, the input
-value, `Increment.inputCodec`, and a structured result contract. A target-side
-`RegisteredTaskLauncher` stages the versioned invocation and fixed worker command;
+For scheduler submission, construct a task call and lower it with typed identifiers and resources:
+
+```scala
+val request =
+  Increment(41).request(
+    submissionKey,
+    jobName,
+    resources,
+    maximumResultBytes
+  )
+```
+
+A target-side `RegisteredTaskLauncher` stages the versioned invocation and fixed worker command;
 `RegisteredTaskSubmitter` then passes the lowered script request to `Scheduler[IO]`. This staging
 must run where the worker distribution and private attempt workspace exist—locally on the HPC
 host or inside the remote agent application.

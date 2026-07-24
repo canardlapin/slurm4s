@@ -59,6 +59,26 @@ real-site evidence gap and reproducible smoke procedure are recorded in
 The executable typed-task API is introduced in
 [`docs/examples/typed-task.md`](docs/examples/typed-task.md).
 
+Published assembly façades keep routine setup out of application code:
+
+```scala
+val local = SlurmLocal.default[IO](localConfig)
+val remote = Slurm.overSsh[IO](sshConfig)
+val durable = Managed.durable[IO](journal, scheduler)
+```
+
+Registered Scala operations can expose a compact call shape while retaining explicit schemas and
+codecs in the worker definition:
+
+```scala
+val request =
+  Increment(41).request(submissionKey, jobName, resources, maximumResultBytes)
+```
+
+The current remote agent still accepts opaque scripts only. Target-side registered-task staging
+and typed result reattachment remain explicit rather than being hidden behind a façade that cannot
+yet honor them.
+
 To install the agent on an HPC host, package the `agent` module as the executable
 `scala-slurm-agent` and configure a private workspace:
 
