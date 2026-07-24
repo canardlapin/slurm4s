@@ -50,6 +50,21 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     }
   }
 
+  test("contained remote agent failure is not misclassified as CLI or transport failure") {
+    val response = request.copy(
+      body = AgentBody.Response(
+        AgentResponseStatus.InternalFailure,
+        Json.obj(
+          "code" -> Json.fromString("agent-handler-failed"),
+          "message" -> Json.fromString("the remote agent could not complete the request")
+        )
+      )
+    )
+    client(success(response)).roundTrip(request).map { result =>
+      assert(failure(result).isInstanceOf[AgentFailure.RemoteAgentFailure])
+    }
+  }
+
   test("handshake reports an incompatible agent major distinctly") {
     val incompatible = ProtocolVersion.from(2, 0).toOption.get
     val response = request.copy(

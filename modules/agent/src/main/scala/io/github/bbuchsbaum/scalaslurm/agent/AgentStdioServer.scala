@@ -81,7 +81,11 @@ final class AgentStdioServer[F[_]: Concurrent](
           AgentMessageCodec.decode(bytes) match
             case Left(failure) =>
               Concurrent[F].raiseError[AgentEnvelope](AgentWireException(failure.toString))
-            case Right(request) => handler.handle(request)
+            case Right(request) =>
+              handler.handle(request).attempt.map {
+                case Right(response) => response
+                case Left(error)     => handlerFailure(request, error)
+              }
         }
         .evalMap { response =>
           FrameCodec.encode(AgentMessageCodec.encode(response), limits) match
@@ -99,5 +103,21 @@ final class AgentStdioServer[F[_]: Concurrent](
         )
         .drain
     }
+
+  private def handlerFailure(request: AgentEnvelope, error: Throwable): AgentEnvelope =
+    val causeClass = Option(error.getClass.getSimpleName)
+      .filter(_.nonEmpty)
+      .getOrElse("Throwable")
+      .take(128)
+    request.copy(
+      body = AgentBody.Response(
+        AgentResponseStatus.InternalFailure,
+        Json.obj(
+          "code" -> Json.fromString("agent-handler-failed"),
+          "message" -> Json.fromString("the remote agent could not complete the request"),
+          "causeClass" -> Json.fromString(causeClass)
+        )
+      )
+    )
 
 final case class AgentWireException(message: String) extends RuntimeException(message)

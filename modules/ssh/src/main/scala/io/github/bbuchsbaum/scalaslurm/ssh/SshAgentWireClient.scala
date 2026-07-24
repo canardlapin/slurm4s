@@ -81,6 +81,8 @@ final class SshAgentWireClient[F[_]: Monad](
         case AgentBody.Response(AgentResponseStatus.Ok, _)                  => Right(message)
         case AgentBody.Response(AgentResponseStatus.DomainFailure, payload) =>
           Left(s"remote-cli:${diagnostic(payload)}")
+        case AgentBody.Response(AgentResponseStatus.InternalFailure, payload) =>
+          Left(s"remote-agent:${diagnostic(payload)}")
         case AgentBody.Response(AgentResponseStatus.ProtocolFailure, payload) =>
           Left(s"protocol:${diagnostic(payload)}")
         case AgentBody.Request(_, _) =>
@@ -94,6 +96,15 @@ final class SshAgentWireClient[F[_]: Monad](
           .Failed(
             AgentFailure.RemoteCliFailure(
               problem.stripPrefix("remote-cli:"),
+              Some(stderr)
+            )
+          )
+          .pure[F]
+      case Left(problem) if problem.startsWith("remote-agent:") =>
+        AgentCall
+          .Failed(
+            AgentFailure.RemoteAgentFailure(
+              problem.stripPrefix("remote-agent:"),
               Some(stderr)
             )
           )

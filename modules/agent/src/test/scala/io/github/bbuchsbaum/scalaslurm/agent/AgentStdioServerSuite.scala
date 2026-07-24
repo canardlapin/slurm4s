@@ -72,8 +72,77 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
       }
   }
 
+  test("handler failure is correlated, redacted, and does not terminate later requests") {
+    val secret = "account-token=do-not-leak"
+    val failing = request("handler-fails")
+    val following = request("handler-recovers")
+    val handler = new AgentRequestHandler[IO]:
+      def handle(request: AgentEnvelope): IO[AgentEnvelope] =
+        if request.requestId == failing.requestId then IO.raiseError(new RuntimeException(secret))
+        else
+          IO.pure(
+            request.copy(
+              body = AgentBody.Response(
+                AgentResponseStatus.Ok,
+                io.circe.Json.obj("continued" -> io.circe.Json.fromBoolean(true))
+              )
+            )
+          )
+    val input = frame(failing) ++ frame(following)
+
+    Stream
+      .emits(input)
+      .covary[IO]
+      .through(AgentStdioServer[IO](handler).pipe)
+      .compile
+      .toVector
+      .map { bytes =>
+        val responses = decodeFrames(bytes)
+        assertEquals(responses.map(_.requestId), Vector(failing.requestId, following.requestId))
+        responses match
+          case Vector(first, second) =>
+            first.body match
+              case AgentBody.Response(AgentResponseStatus.InternalFailure, payload) =>
+                assertEquals(
+                  payload.hcursor.get[String]("code"),
+                  Right("agent-handler-failed")
+                )
+                assertEquals(
+                  payload.hcursor.get[String]("causeClass"),
+                  Right("RuntimeException")
+                )
+                assert(!payload.noSpaces.contains(secret))
+              case other => fail(s"expected contained handler failure, received $other")
+            second.body match
+              case AgentBody.Response(AgentResponseStatus.Ok, payload) =>
+                assertEquals(payload.hcursor.get[Boolean]("continued"), Right(true))
+              case other => fail(s"expected following success, received $other")
+          case other => fail(s"expected two responses, received ${other.size}")
+      }
+  }
+
+  test("framing corruption remains a stream failure") {
+    val invalidLength = Vector[Byte](0x7f, 0xff.toByte, 0xff.toByte, 0xff.toByte)
+
+    Stream
+      .emits(invalidLength)
+      .covary[IO]
+      .through(AgentStdioServer[IO](unusedHandler).pipe)
+      .compile
+      .drain
+      .attempt
+      .map {
+        case Left(_: AgentWireException) => assert(true)
+        case other                       => fail(s"expected framing failure, received $other")
+      }
+  }
+
   private val unusedLogs: AgentLogReader[IO] =
     AgentLogReader((_, _, _) => IO.raiseError(new AssertionError("logs not used")))
+
+  private val unusedHandler: AgentRequestHandler[IO] = new AgentRequestHandler[IO]:
+    def handle(request: AgentEnvelope): IO[AgentEnvelope] =
+      IO.raiseError(new AssertionError(s"handler not used: ${request.requestId.value}"))
 
   private val unusedScheduler: Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
@@ -83,3 +152,27 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
     def cancel(job: JobRef): IO[CancellationAttempt] = unused
 
   private def unused[A]: IO[A] = IO.raiseError(new AssertionError("scheduler not used"))
+
+  private def request(id: String): AgentEnvelope =
+    AgentEnvelope(
+      RequestId.from(id).fold(problem => fail(problem.toString), identity),
+      ProtocolVersion.v1,
+      AgentBody.Request(AgentMethod.Capabilities, io.circe.Json.obj())
+    )
+
+  private def frame(request: AgentEnvelope): Vector[Byte] =
+    FrameCodec
+      .encode(AgentMessageCodec.encode(request), FrameLimits.default)
+      .fold(problem => fail(problem.toString), identity)
+
+  private def decodeFrames(bytes: Vector[Byte]): Vector[AgentEnvelope] =
+    FrameDecoder
+      .empty()
+      .feed(bytes)
+      .fold(
+        problem => fail(problem.toString),
+        result =>
+          result._2.map(frame =>
+            AgentMessageCodec.decode(frame).fold(problem => fail(problem.toString), identity)
+          )
+      )
