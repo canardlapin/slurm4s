@@ -1,0 +1,59 @@
+{
+  "Succeeded": {
+    "value": [
+      {
+        "Observed": {
+          "value": {
+            "job": {
+              "jobId": "2001",
+              "cluster": null,
+              "arrayIndex": null
+            },
+            "state": {
+              "code": "running"
+            },
+            "freshness": {
+              "Current": {
+                "observedAt": "2026-07-23T12:00:00Z"
+              }
+            },
+            "reason": null,
+            "rawFields": {
+              "job_state": "[\"RUNNING\"]"
+            },
+            "evidence": {
+              "primary": {
+                "source": {
+                  "CommandStdout": {
+                    "command": "squeue"
+                  }
+                },
+                "observedAt": "2026-07-23T12:00:00Z",
+                "bytesBase64": "cXVldWUtZXZpZGVuY2U=",
+                "originalByteCount": 14
+              },
+              "related": []
+            },
+            "timing": {
+              "start": {
+                "kind": "actual",
+                "at": {
+                  "kind": "absolute",
+                  "value": "2026-07-23T10:00:00Z"
+                }
+              },
+              "projectedEndAt": {
+                "kind": "absolute",
+                "value": "2026-07-23T11:30:00Z"
+              },
+              "timeLimit": {
+                "kind": "limited",
+                "minutes": 90
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

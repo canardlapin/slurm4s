@@ -6,6 +6,7 @@ import io.github.bbuchsbaum.scalaslurm.core.*
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.LocalDateTime
 
 class SlurmParsersSuite extends munit.FunSuite:
   test("sbatch parsable output retains the optional cluster") {
@@ -32,6 +33,101 @@ class SlurmParsersSuite extends munit.FunSuite:
     assert(observations.head.rawFields.contains("state_reason"))
   }
 
+  test("structured queue timing distinguishes actual and expected starts") {
+    val running = JobRef(JobId.from("2001").toOption.get, None, None)
+    val pending = JobRef(JobId.from("2002").toOption.get, None, None)
+    val raw =
+      """{"jobs":[
+        |{"job_id":2001,"job_state":["RUNNING"],"start_time":{"set":true,"infinite":false,"number":1784800800},"end_time":{"set":true,"infinite":false,"number":1784806200},"time_limit":{"set":true,"infinite":false,"number":90}},
+        |{"job_id":2002,"job_state":["PENDING"],"start_time":{"set":true,"infinite":false,"number":1784804400},"end_time":{"set":true,"infinite":false,"number":0},"time_limit":{"set":false,"infinite":true,"number":0}}
+        |]}""".stripMargin
+
+    val observations =
+      SqueueJsonV0043.parse(evidence(raw), NonEmptyVector.of(running, pending)).toOption.get
+
+    assertEquals(
+      observations.head.timing,
+      JobTiming(
+        Some(
+          JobStart.Actual(
+            SchedulerTimestamp.Absolute(Instant.ofEpochSecond(1784800800L))
+          )
+        ),
+        Some(SchedulerTimestamp.Absolute(Instant.ofEpochSecond(1784806200L))),
+        ObservedTimeLimit.Limited(WallTimeMinutes.from(90).toOption.get)
+      )
+    )
+    assertEquals(
+      observations(1).timing.start,
+      Some(
+        JobStart.Expected(
+          SchedulerTimestamp.Absolute(Instant.ofEpochSecond(1784804400L))
+        )
+      )
+    )
+    assertEquals(observations(1).timing.projectedEndAt, None)
+    assertEquals(observations(1).timing.timeLimit, ObservedTimeLimit.Unlimited)
+  }
+
+  test("malformed optional queue timing degrades to unknown without losing the observation") {
+    val job = JobRef(JobId.from("2003").toOption.get, None, None)
+    val raw =
+      """{"jobs":[{"job_id":2003,"job_state":["RUNNING"],"start_time":"not-a-time","end_time":{"unexpected":true},"time_limit":{"set":true,"infinite":false}}]}"""
+
+    val observation =
+      SqueueJsonV0043.parse(evidence(raw), NonEmptyVector.one(job)).toOption.get.head
+
+    assertEquals(observation.state, SlurmState.Running)
+    assertEquals(observation.timing.start, None)
+    assertEquals(observation.timing.projectedEndAt, None)
+    assert(observation.timing.timeLimit.isInstanceOf[ObservedTimeLimit.Unknown])
+    assert(observation.rawFields.keySet.contains("time_limit"))
+  }
+
+  test("scontrol parsing retains spaced values and site-local timing facts") {
+    val parsed = ScontrolOneliner
+      .parse(
+        evidence(
+          "JobId=2004 JobState=RUNNING Command=/opt/run model --name example StartTime=2026-07-23T10:00:00 EndTime=2026-07-23T11:30:00 TimeLimit=01:30:00 Reason=Node failure detected\n"
+        )
+      )
+      .toOption
+      .get
+    val timing = ScontrolOneliner.timing(parsed)
+
+    assertEquals(parsed.get("Command"), Some("/opt/run model --name example"))
+    assertEquals(parsed.get("Reason"), Some("Node failure detected"))
+    assertEquals(
+      timing.start,
+      Some(
+        JobStart.Actual(
+          SchedulerTimestamp.SiteLocal(LocalDateTime.parse("2026-07-23T10:00:00"))
+        )
+      )
+    )
+    assertEquals(
+      timing.projectedEndAt,
+      Some(SchedulerTimestamp.SiteLocal(LocalDateTime.parse("2026-07-23T11:30:00")))
+    )
+    assertEquals(
+      timing.timeLimit,
+      ObservedTimeLimit.Limited(WallTimeMinutes.from(90).toOption.get)
+    )
+  }
+
+  test("scontrol timing preserves unlimited and partition-derived limits") {
+    assertEquals(
+      ScontrolOneliner.timing(Map("JobState" -> "PENDING", "TimeLimit" -> "UNLIMITED")).timeLimit,
+      ObservedTimeLimit.Unlimited
+    )
+    assertEquals(
+      ScontrolOneliner
+        .timing(Map("JobState" -> "PENDING", "TimeLimit" -> "Partition_Limit"))
+        .timeLimit,
+      ObservedTimeLimit.PartitionDefault
+    )
+  }
+
   test("strict accounting fallback distinguishes OOM from ordinary non-zero exit") {
     val expected = NonEmptyVector.one(JobRef(JobId.from("1001").toOption.get, None, None))
     val oom = SacctParsable2.parse(evidence("1001|OUT_OF_MEMORY|0:9|OutOfMemory\n"), expected)
@@ -47,6 +143,47 @@ class SlurmParsersSuite extends munit.FunSuite:
     val running = SacctParsable2.parse(evidence("1001|RUNNING|0:0|None\n"), expected)
 
     assertEquals(running.toOption.get.head.outcome, None)
+  }
+
+  test("requeue states are typed consistently and remain nonterminal in accounting") {
+    val expected = NonEmptyVector.one(JobRef(JobId.from("1001").toOption.get, None, None))
+    val states = Vector(
+      "REQUEUED" -> SlurmState.Requeued,
+      "RQ" -> SlurmState.Requeued,
+      "REQUEUE_HOLD" -> SlurmState.RequeueHeld,
+      "RH" -> SlurmState.RequeueHeld,
+      "REQUEUE_FED" -> SlurmState.RequeueFederation,
+      "RF" -> SlurmState.RequeueFederation,
+      "SPECIAL_EXIT" -> SlurmState.SpecialExit,
+      "SE" -> SlurmState.SpecialExit
+    )
+
+    states.foreach { case (raw, state) =>
+      assertEquals(SlurmStateParser.parse(raw), state, clues(raw))
+      val accounting =
+        SacctParsable2.parse(evidence(s"1001|$raw|0:0|None\n"), expected).toOption.get.head
+      assertEquals(accounting.state, state, clues(raw))
+      assertEquals(accounting.outcome, None, clues(raw))
+    }
+  }
+
+  test("structured queue exposes requeueing without consulting raw fields") {
+    val job = JobRef(JobId.from("2005").toOption.get, None, None)
+    val raw =
+      """{"jobs":[{"job_id":2005,"job_state":["REQUEUED"],"start_time":{"set":true,"infinite":false,"number":1784800800}}]}"""
+    val observation =
+      SqueueJsonV0043.parse(evidence(raw), NonEmptyVector.one(job)).toOption.get.head
+
+    assertEquals(observation.state, SlurmState.Requeued)
+    assertEquals(InterruptionClass.classify(observation.state), InterruptionClass.Requeueing)
+    assertEquals(
+      observation.timing.start,
+      Some(
+        JobStart.Reported(
+          SchedulerTimestamp.Absolute(Instant.ofEpochSecond(1784800800L))
+        )
+      )
+    )
   }
 
   test("array observations and partial failures never alias sibling elements") {
@@ -111,6 +248,8 @@ class SlurmParsersSuite extends munit.FunSuite:
       expected.toVector.map(_.copy(cluster = Some(cluster)))
     )
     assert(parsed.toOption.get.forall(_.state == SlurmState.Pending))
+    assert(parsed.toOption.get.forall(_.timing.start.isEmpty))
+    assert(parsed.toOption.get.forall(_.timing.timeLimit == ObservedTimeLimit.Unlimited))
 
     val provenance =
       io.circe.parser.parse(resource(s"$directory/provenance.json")).toOption.get.hcursor

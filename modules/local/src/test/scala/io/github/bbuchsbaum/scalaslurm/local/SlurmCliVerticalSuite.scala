@@ -51,7 +51,7 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
               SlurmCommands.focused(job),
               exited(
                 SlurmExecutable.Scontrol,
-                "JobId=1001 JobState=OUT_OF_MEMORY Reason=OutOfMemory\n"
+                "JobId=1001 JobState=OUT_OF_MEMORY StartTime=2026-07-23T10:00:00 EndTime=2026-07-23T10:15:00 TimeLimit=00:15:00 Reason=Out of memory on node alpha\n"
               )
             ),
             ExpectedCommand.exact(
@@ -95,7 +95,11 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
         focused <- scheduler.focused(job)
         _ = focused match
           case SchedulerQueryResult.Succeeded(value) =>
-            assertEquals(value.fields.get("Reason"), Some("OutOfMemory"))
+            assertEquals(value.fields.get("Reason"), Some("Out of memory on node alpha"))
+            assertEquals(
+              value.timing.timeLimit,
+              ObservedTimeLimit.Limited(WallTimeMinutes.from(15).toOption.get)
+            )
           case other => fail(s"unexpected focused diagnostic: $other")
         cancelled <- scheduler.cancel(job)
         _ = assert(cancelled.isInstanceOf[CancellationAttempt.Completed])

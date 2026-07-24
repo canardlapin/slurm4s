@@ -3,6 +3,7 @@ package io.github.bbuchsbaum.scalaslurm.protocol
 import cats.data.NonEmptyVector
 import cats.syntax.all.*
 import io.circe.Decoder
+import io.circe.DecodingFailure
 import io.circe.Encoder
 import io.circe.HCursor
 import io.circe.Json
@@ -11,6 +12,7 @@ import io.circe.generic.semiauto.deriveEncoder
 import io.github.bbuchsbaum.scalaslurm.core.*
 
 import java.time.Instant
+import java.time.LocalDateTime
 import java.util.Base64
 import scala.util.Try
 
@@ -25,7 +27,12 @@ object AgentDomainJson:
         "resources" -> value.resources.asJson,
         "environment" -> value.environment.asJson,
         "resultContract" -> Json.fromString("exit-only")
-      ) ++ value.array.toVector.map(array => "array" -> encodeArray(array))
+      ) ++ value.array.toVector.map(array => "array" -> encodeArray(array)) ++
+        Option
+          .when(value.retrySafety != RetrySafety.Unknown)(
+            "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
+          )
+          .toVector
       Right(
         Json.obj(fields*)
       )
@@ -45,6 +52,7 @@ object AgentDomainJson:
       resources <- field[ResourceRequest](cursor, "resources")
       environment <- field[Map[String, String]](cursor, "environment")
       array <- optionalArray(cursor)
+      retrySafety <- optionalRetrySafety(cursor)
       contract <- field[String](cursor, "resultContract")
       _ <- Either.cond(contract == "exit-only", (), "unsupported result contract")
     yield JobRequest(
@@ -53,7 +61,8 @@ object AgentDomainJson:
       Payload.Script(source, arguments, ResultContract.ExitOnly),
       resources,
       environment,
-      array
+      array,
+      retrySafety
     )
 
   def encodeJobRefs(value: NonEmptyVector[JobRef]): Json = value.toVector.asJson
@@ -142,11 +151,32 @@ object AgentDomainJson:
             .map(_.toChain.toVector.map(_.message).mkString("; "))
         yield Some(request)
 
+  private def optionalRetrySafety(cursor: HCursor): Either[String, RetrySafety] =
+    cursor.downField("retrySafety").focus match
+      case None | Some(Json.Null) => Right(RetrySafety.Unknown)
+      case Some(value)            =>
+        value.asString.toRight("retrySafety must be a string").flatMap(decodeRetrySafety)
+
+  private def encodeRetrySafety(value: RetrySafety): String = value match
+    case RetrySafety.Unknown               => "unknown"
+    case RetrySafety.NoAutomaticRetry      => "no-automatic-retry"
+    case RetrySafety.SafeForAutomaticRetry => "safe-for-automatic-retry"
+
+  private def decodeRetrySafety(value: String): Either[String, RetrySafety] = value match
+    case "unknown"                  => Right(RetrySafety.Unknown)
+    case "no-automatic-retry"       => Right(RetrySafety.NoAutomaticRetry)
+    case "safe-for-automatic-retry" => Right(RetrySafety.SafeForAutomaticRetry)
+    case other                      => Left(s"unknown retrySafety: $other")
+
   extension [A: Encoder](value: A) private def asJson: Json = summon[Encoder[A]].apply(value)
 
   private given Encoder[Instant] = Encoder.encodeString.contramap(_.toString)
   private given Decoder[Instant] = Decoder.decodeString.emap { raw =>
     Try(Instant.parse(raw)).toEither.left.map(_.getMessage)
+  }
+  private given Encoder[LocalDateTime] = Encoder.encodeString.contramap(_.toString)
+  private given Decoder[LocalDateTime] = Decoder.decodeString.emap { raw =>
+    Try(LocalDateTime.parse(raw)).toEither.left.map(_.getMessage)
   }
 
   private def stringEncoder[A](value: A => String): Encoder[A] =
@@ -252,14 +282,138 @@ object AgentDomainJson:
   private given [A: Encoder]: Encoder[SchedulerQueryResult[A]] = deriveEncoder
   private given [A: Decoder]: Decoder[SchedulerQueryResult[A]] = deriveDecoder
 
-  private given Encoder[SlurmState] = deriveEncoder
-  private given Decoder[SlurmState] = deriveDecoder
+  private given Encoder[SlurmState] = Encoder.instance {
+    case SlurmState.Unknown(raw) =>
+      Json.obj(
+        "code" -> Json.fromString("unknown"),
+        "raw" -> Json.fromString(raw)
+      )
+    case state =>
+      Json.obj("code" -> Json.fromString(slurmStateCode(state)))
+  }
+  private given Decoder[SlurmState] = Decoder.instance { cursor =>
+    cursor.value.asString match
+      case Some(code) => decodeSlurmState(code, None, cursor)
+      case None       =>
+        cursor.get[Option[String]]("code").flatMap {
+          case Some(code) =>
+            cursor.get[Option[String]]("raw").flatMap(raw => decodeSlurmState(code, raw, cursor))
+          case None => decodeLegacySlurmState(cursor)
+        }
+  }
   private given Encoder[Freshness] = deriveEncoder
   private given Decoder[Freshness] = deriveDecoder
   private given Encoder[WorkloadOutcome] = deriveEncoder
   private given Decoder[WorkloadOutcome] = deriveDecoder
-  private given Encoder[JobObservation] = deriveEncoder
-  private given Decoder[JobObservation] = deriveDecoder
+  private given Encoder[SchedulerTimestamp] = Encoder.instance {
+    case SchedulerTimestamp.Absolute(value) =>
+      Json.obj(
+        "kind" -> Json.fromString("absolute"),
+        "value" -> value.asJson
+      )
+    case SchedulerTimestamp.SiteLocal(value) =>
+      Json.obj(
+        "kind" -> Json.fromString("site-local"),
+        "value" -> value.asJson
+      )
+  }
+  private given Decoder[SchedulerTimestamp] = Decoder.instance { cursor =>
+    cursor.get[String]("kind").flatMap {
+      case "absolute"   => cursor.get[Instant]("value").map(SchedulerTimestamp.Absolute.apply)
+      case "site-local" =>
+        cursor.get[LocalDateTime]("value").map(SchedulerTimestamp.SiteLocal.apply)
+      case other =>
+        Left(DecodingFailure(s"unknown scheduler timestamp kind: $other", cursor.history))
+    }
+  }
+  private given Encoder[JobStart] = Encoder.instance {
+    case JobStart.Actual(at) =>
+      Json.obj("kind" -> Json.fromString("actual"), "at" -> at.asJson)
+    case JobStart.Expected(at) =>
+      Json.obj("kind" -> Json.fromString("expected"), "at" -> at.asJson)
+    case JobStart.Reported(at) =>
+      Json.obj("kind" -> Json.fromString("reported"), "at" -> at.asJson)
+  }
+  private given Decoder[JobStart] = Decoder.instance { cursor =>
+    cursor.get[String]("kind").flatMap {
+      case "actual"   => cursor.get[SchedulerTimestamp]("at").map(JobStart.Actual.apply)
+      case "expected" => cursor.get[SchedulerTimestamp]("at").map(JobStart.Expected.apply)
+      case "reported" => cursor.get[SchedulerTimestamp]("at").map(JobStart.Reported.apply)
+      case other      => Left(DecodingFailure(s"unknown job start kind: $other", cursor.history))
+    }
+  }
+  private given Encoder[ObservedTimeLimit] = Encoder.instance {
+    case ObservedTimeLimit.Limited(value) =>
+      Json.obj(
+        "kind" -> Json.fromString("limited"),
+        "minutes" -> Json.fromLong(value.toLong)
+      )
+    case ObservedTimeLimit.Unlimited =>
+      Json.obj("kind" -> Json.fromString("unlimited"))
+    case ObservedTimeLimit.PartitionDefault =>
+      Json.obj("kind" -> Json.fromString("partition-default"))
+    case ObservedTimeLimit.Unknown(raw) =>
+      Json.obj(
+        "kind" -> Json.fromString("unknown"),
+        "raw" -> raw.asJson
+      )
+  }
+  private given Decoder[ObservedTimeLimit] = Decoder.instance { cursor =>
+    cursor.get[String]("kind").flatMap {
+      case "limited" =>
+        cursor
+          .get[Long]("minutes")
+          .flatMap(raw =>
+            WallTimeMinutes
+              .from(raw)
+              .left
+              .map(problem => DecodingFailure(problem.reason, cursor.history))
+          )
+          .map(ObservedTimeLimit.Limited.apply)
+      case "unlimited"         => Right(ObservedTimeLimit.Unlimited)
+      case "partition-default" =>
+        Right(ObservedTimeLimit.PartitionDefault)
+      case "unknown" => cursor.get[Option[String]]("raw").map(ObservedTimeLimit.Unknown.apply)
+      case other     =>
+        Left(DecodingFailure(s"unknown observed time-limit kind: $other", cursor.history))
+    }
+  }
+  private given Encoder[JobTiming] = Encoder.instance { value =>
+    Json.obj(
+      "start" -> value.start.asJson,
+      "projectedEndAt" -> value.projectedEndAt.asJson,
+      "timeLimit" -> value.timeLimit.asJson
+    )
+  }
+  private given Decoder[JobTiming] = Decoder.instance { cursor =>
+    for
+      start <- cursor.get[Option[JobStart]]("start")
+      projectedEndAt <- cursor.get[Option[SchedulerTimestamp]]("projectedEndAt")
+      timeLimit <- cursor.get[ObservedTimeLimit]("timeLimit")
+    yield JobTiming(start, projectedEndAt, timeLimit)
+  }
+  private given Encoder[JobObservation] = Encoder.instance { value =>
+    Json.obj(
+      "job" -> value.job.asJson,
+      "state" -> value.state.asJson,
+      "freshness" -> value.freshness.asJson,
+      "reason" -> value.reason.asJson,
+      "rawFields" -> value.rawFields.asJson,
+      "evidence" -> value.evidence.asJson,
+      "timing" -> value.timing.asJson
+    )
+  }
+  private given Decoder[JobObservation] = Decoder.instance { cursor =>
+    for
+      job <- cursor.get[JobRef]("job")
+      state <- cursor.get[SlurmState]("state")
+      freshness <- cursor.get[Freshness]("freshness")
+      reason <- cursor.get[Option[String]]("reason")
+      rawFields <- cursor.get[Map[String, String]]("rawFields")
+      evidence <- cursor.get[EvidenceBundle]("evidence")
+      timing <- cursor.get[Option[JobTiming]]("timing").map(_.getOrElse(JobTiming.unknown))
+    yield JobObservation(job, state, freshness, reason, rawFields, evidence, timing)
+  }
   private given Encoder[ExitStatus] = deriveEncoder
   private given Decoder[ExitStatus] = deriveDecoder
   private given Encoder[AccountingRecord] = deriveEncoder
@@ -292,3 +446,71 @@ object AgentDomainJson:
   private given Decoder[LogPage] = deriveDecoder
   private given Encoder[LogReadResult] = deriveEncoder
   private given Decoder[LogReadResult] = deriveDecoder
+
+  private def slurmStateCode(state: SlurmState): String = state match
+    case SlurmState.Pending           => "pending"
+    case SlurmState.Running           => "running"
+    case SlurmState.Completing        => "completing"
+    case SlurmState.Completed         => "completed"
+    case SlurmState.Failed            => "failed"
+    case SlurmState.Cancelled         => "cancelled"
+    case SlurmState.OutOfMemory       => "out-of-memory"
+    case SlurmState.TimedOut          => "timed-out"
+    case SlurmState.NodeFailure       => "node-failure"
+    case SlurmState.Preempted         => "preempted"
+    case SlurmState.Requeued          => "requeued"
+    case SlurmState.RequeueHeld       => "requeue-held"
+    case SlurmState.RequeueFederation => "requeue-federation"
+    case SlurmState.SpecialExit       => "special-exit"
+    case SlurmState.Unknown(_)        => "unknown"
+
+  private def decodeSlurmState(
+      code: String,
+      raw: Option[String],
+      cursor: HCursor
+  ): Decoder.Result[SlurmState] =
+    code match
+      case "pending"            => Right(SlurmState.Pending)
+      case "running"            => Right(SlurmState.Running)
+      case "completing"         => Right(SlurmState.Completing)
+      case "completed"          => Right(SlurmState.Completed)
+      case "failed"             => Right(SlurmState.Failed)
+      case "cancelled"          => Right(SlurmState.Cancelled)
+      case "out-of-memory"      => Right(SlurmState.OutOfMemory)
+      case "timed-out"          => Right(SlurmState.TimedOut)
+      case "node-failure"       => Right(SlurmState.NodeFailure)
+      case "preempted"          => Right(SlurmState.Preempted)
+      case "requeued"           => Right(SlurmState.Requeued)
+      case "requeue-held"       => Right(SlurmState.RequeueHeld)
+      case "requeue-federation" => Right(SlurmState.RequeueFederation)
+      case "special-exit"       => Right(SlurmState.SpecialExit)
+      case "unknown"            =>
+        raw
+          .filter(_.nonEmpty)
+          .map(value => Right(SlurmState.Unknown(value)))
+          .getOrElse(
+            Left(DecodingFailure("unknown Slurm state requires non-empty raw text", cursor.history))
+          )
+      case other =>
+        Left(DecodingFailure(s"unknown Slurm state code: $other", cursor.history))
+
+  private def decodeLegacySlurmState(cursor: HCursor): Decoder.Result[SlurmState] =
+    cursor.value.asObject.flatMap(_.toVector match
+      case Vector((name, payload)) => Some(name -> payload)
+      case _                       => None) match
+      case Some(("Pending", _))       => Right(SlurmState.Pending)
+      case Some(("Running", _))       => Right(SlurmState.Running)
+      case Some(("Completing", _))    => Right(SlurmState.Completing)
+      case Some(("Completed", _))     => Right(SlurmState.Completed)
+      case Some(("Failed", _))        => Right(SlurmState.Failed)
+      case Some(("Cancelled", _))     => Right(SlurmState.Cancelled)
+      case Some(("OutOfMemory", _))   => Right(SlurmState.OutOfMemory)
+      case Some(("TimedOut", _))      => Right(SlurmState.TimedOut)
+      case Some(("NodeFailure", _))   => Right(SlurmState.NodeFailure)
+      case Some(("Preempted", _))     => Right(SlurmState.Preempted)
+      case Some(("Unknown", payload)) =>
+        payload.hcursor
+          .get[String]("raw")
+          .flatMap(raw => decodeSlurmState("unknown", Some(raw), cursor))
+      case _ =>
+        Left(DecodingFailure("invalid legacy Slurm state", cursor.history))

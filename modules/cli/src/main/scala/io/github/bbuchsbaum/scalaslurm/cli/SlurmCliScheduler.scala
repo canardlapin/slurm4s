@@ -140,7 +140,9 @@ final class SlurmCliScheduler[F[_]: Monad](
     executor.execute(SlurmCommands.focused(job), settings.commandPolicy).map { result =>
       querySingle(result, ScontrolOneliner.parse) match
         case SchedulerQueryResult.Succeeded(fields) =>
-          SchedulerQueryResult.Succeeded(FocusedJobDiagnostic(job, fields, evidenceOf(result)))
+          SchedulerQueryResult.Succeeded(
+            FocusedJobDiagnostic(job, fields, evidenceOf(result), ScontrolOneliner.timing(fields))
+          )
         case SchedulerQueryResult.InvocationFailed(failure) =>
           SchedulerQueryResult.InvocationFailed(failure)
         case SchedulerQueryResult.ParseFailed(diagnostics, evidence) =>

@@ -11,6 +11,10 @@ import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import scala.util.Try
 
 object EvidenceText:
   def decode(bytes: Vector[Byte]): Either[Diagnostics, String] =
@@ -117,9 +121,11 @@ object SqueueJsonV0043:
         .flatMap(_.asString)
         .flatMap(ClusterName.from(_).toOption)
       stateText <- state(fields).toRight(diagnostics("invalid-squeue-job", "job_state is required"))
+      parsedState = SlurmStateParser.parse(stateText)
       reason = fields("state_reason")
         .flatMap(_.asString)
         .orElse(fields("reason").flatMap(_.asString))
+      timing = SlurmTiming.fromJson(fields, parsedState)
       raw = selectedRaw(
         fields,
         Vector(
@@ -131,17 +137,21 @@ object SqueueJsonV0043:
           "job_state",
           "state_reason",
           "reason",
-          "cluster"
+          "cluster",
+          "start_time",
+          "end_time",
+          "time_limit"
         )
       )
     yield matchedJobs.map { matched =>
       JobObservation(
         job = matched.copy(cluster = reportedCluster.orElse(matched.cluster)),
-        state = SlurmStateParser.parse(stateText),
+        state = parsedState,
         freshness = Freshness.Current(stdout.observedAt),
         reason = reason,
         rawFields = raw,
-        evidence = EvidenceBundle(stdout)
+        evidence = EvidenceBundle(stdout),
+        timing = timing
       )
     }
 
@@ -321,7 +331,8 @@ object SacctParsable2:
       case SlurmState.TimedOut    => Some(WorkloadOutcome.TimeLimitExceeded)
       case SlurmState.Cancelled   => Some(WorkloadOutcome.Cancelled)
       case SlurmState.NodeFailure => Some(WorkloadOutcome.NodeFailure)
-      case SlurmState.Pending | SlurmState.Running | SlurmState.Completing |
+      case SlurmState.Pending | SlurmState.Running | SlurmState.Completing | SlurmState.Requeued |
+          SlurmState.RequeueHeld | SlurmState.RequeueFederation | SlurmState.SpecialExit |
           SlurmState.Unknown(_) =>
         None
 
@@ -387,21 +398,38 @@ private object ArrayTaskExpression:
     raw.toIntOption.filter(_ >= 0).toRight("array task expression contains a non-numeric index")
 
 object ScontrolOneliner:
+  private val FieldStart = "(?:^|\\s)([A-Za-z][A-Za-z0-9_./:-]*)=".r
+
   def parse(stdout: BoundedEvidence): Either[Diagnostics, Map[String, String]] =
     EvidenceText.decode(stdout.bytes).flatMap { raw =>
-      val tokens = raw.trim.split("\\s+").toVector.filter(_.nonEmpty)
-      tokens
-        .traverse { token =>
-          token.split("=", 2).toVector match
-            case Vector(key, value) if key.nonEmpty => Right(key -> value)
-            case _                                  =>
-              Left(
-                Diagnostics
-                  .one(Diagnostic("invalid-scontrol-response", "expected key=value tokens"))
-              )
-        }
-        .map(_.toMap)
+      val matches = FieldStart.findAllMatchIn(raw).toVector
+      matches.headOption match
+        case None =>
+          Left(
+            Diagnostics.one(
+              Diagnostic("invalid-scontrol-response", "expected at least one key=value field")
+            )
+          )
+        case Some(first) if raw.substring(0, first.start).trim.nonEmpty =>
+          Left(
+            Diagnostics.one(
+              Diagnostic("invalid-scontrol-response", "unexpected text before the first field")
+            )
+          )
+        case Some(_) =>
+          Right(
+            matches.zipWithIndex.map { case (current, index) =>
+              val end = matches.lift(index + 1).fold(raw.length)(_.start)
+              current.group(1) -> raw.substring(current.end, end).trim
+            }.toMap
+          )
     }
+
+  def timing(fields: Map[String, String]): JobTiming =
+    val state = fields
+      .get("JobState")
+      .fold[SlurmState](SlurmState.Unknown("missing JobState"))(SlurmStateParser.parse)
+    SlurmTiming.fromText(fields, state)
 
 object SlurmStateParser:
   def parse(raw: String): SlurmState =
@@ -416,4 +444,148 @@ object SlurmStateParser:
       case "TIMEOUT" | "TO"        => SlurmState.TimedOut
       case "NODE_FAIL" | "NF"      => SlurmState.NodeFailure
       case "PREEMPTED" | "PR"      => SlurmState.Preempted
+      case "REQUEUED" | "RQ"       => SlurmState.Requeued
+      case "REQUEUE_HOLD" | "RH"   => SlurmState.RequeueHeld
+      case "REQUEUE_FED" | "RF"    => SlurmState.RequeueFederation
+      case "SPECIAL_EXIT" | "SE"   => SlurmState.SpecialExit
       case _                       => SlurmState.Unknown(raw)
+
+private object SlurmTiming:
+  private val MissingText = Set("", "NONE", "N/A", "NA", "UNKNOWN", "(NULL)", "NULL")
+  private val DayTime = "([0-9]+)-([0-9]+):([0-9]{2}):([0-9]{2})".r
+  private val ClockTime = "([0-9]+):([0-9]{2}):([0-9]{2})".r
+
+  def fromJson(fields: JsonObject, state: SlurmState): JobTiming =
+    JobTiming(
+      start = fields
+        .apply("start_time")
+        .flatMap(timestamp)
+        .map(value => classifyStart(state, value)),
+      projectedEndAt = fields.apply("end_time").flatMap(timestamp),
+      timeLimit = fields("time_limit").fold[ObservedTimeLimit](
+        ObservedTimeLimit.Unknown(None)
+      )(timeLimit)
+    )
+
+  def fromText(fields: Map[String, String], state: SlurmState): JobTiming =
+    JobTiming(
+      start = fields
+        .get("StartTime")
+        .flatMap(textTimestamp)
+        .map(value => classifyStart(state, value)),
+      projectedEndAt = fields.get("EndTime").flatMap(textTimestamp),
+      timeLimit = fields
+        .get("TimeLimit")
+        .fold[ObservedTimeLimit](ObservedTimeLimit.Unknown(None))(textTimeLimit)
+    )
+
+  private def classifyStart(state: SlurmState, value: SchedulerTimestamp): JobStart =
+    state match
+      case SlurmState.Pending => JobStart.Expected(value)
+      case SlurmState.Running | SlurmState.Completing | SlurmState.Completed | SlurmState.Failed |
+          SlurmState.Cancelled | SlurmState.OutOfMemory | SlurmState.TimedOut |
+          SlurmState.NodeFailure | SlurmState.Preempted =>
+        JobStart.Actual(value)
+      case SlurmState.Requeued | SlurmState.RequeueHeld | SlurmState.RequeueFederation |
+          SlurmState.SpecialExit | SlurmState.Unknown(_) =>
+        JobStart.Reported(value)
+
+  private def timestamp(value: Json): Option[SchedulerTimestamp] =
+    value.asNumber
+      .flatMap(_.toLong)
+      .flatMap(epoch)
+      .orElse(value.asString.flatMap(textTimestamp))
+      .orElse(
+        value.asObject.flatMap { fields =>
+          val set = fields("set").flatMap(_.asBoolean).getOrElse(false)
+          val infinite = fields("infinite").flatMap(_.asBoolean).getOrElse(false)
+          Option
+            .when(set && !infinite)(
+              fields("number").flatMap(number =>
+                number.asNumber.flatMap(_.toLong).orElse(number.asString.flatMap(_.toLongOption))
+              )
+            )
+            .flatten
+            .flatMap(epoch)
+        }
+      )
+
+  private def epoch(seconds: Long): Option[SchedulerTimestamp] =
+    Option
+      .when(seconds > 0L)(seconds)
+      .flatMap(value => Try(Instant.ofEpochSecond(value)).toOption)
+      .map(SchedulerTimestamp.Absolute.apply)
+
+  private def textTimestamp(raw: String): Option[SchedulerTimestamp] =
+    val normalized = raw.trim
+    if MissingText.contains(normalized.toUpperCase) then None
+    else
+      Try(Instant.parse(normalized)).toOption
+        .map(SchedulerTimestamp.Absolute.apply)
+        .orElse(
+          Try(OffsetDateTime.parse(normalized).toInstant).toOption
+            .map(SchedulerTimestamp.Absolute.apply)
+        )
+        .orElse(
+          Try(LocalDateTime.parse(normalized)).toOption
+            .map(SchedulerTimestamp.SiteLocal.apply)
+        )
+
+  private def timeLimit(value: Json): ObservedTimeLimit =
+    value.asNumber
+      .flatMap(_.toLong)
+      .map(minutes)
+      .orElse(value.asString.map(textTimeLimit))
+      .orElse(
+        value.asObject.map { fields =>
+          val set = fields("set").flatMap(_.asBoolean).getOrElse(false)
+          val infinite = fields("infinite").flatMap(_.asBoolean).getOrElse(false)
+          if infinite then ObservedTimeLimit.Unlimited
+          else if set then
+            fields("number")
+              .flatMap(number =>
+                number.asNumber.flatMap(_.toLong).orElse(number.asString.flatMap(_.toLongOption))
+              )
+              .fold[ObservedTimeLimit](ObservedTimeLimit.Unknown(Some(value.noSpaces)))(minutes)
+          else ObservedTimeLimit.Unknown(None)
+        }
+      )
+      .getOrElse(ObservedTimeLimit.Unknown(Some(value.noSpaces.take(512))))
+
+  private def textTimeLimit(raw: String): ObservedTimeLimit =
+    val normalized = raw.trim
+    normalized.toUpperCase match
+      case "UNLIMITED" | "INFINITE"              => ObservedTimeLimit.Unlimited
+      case "PARTITION_LIMIT" | "PARTITION-LIMIT" =>
+        ObservedTimeLimit.PartitionDefault
+      case missing if MissingText.contains(missing) =>
+        ObservedTimeLimit.Unknown(Option(normalized).filter(_.nonEmpty))
+      case _ =>
+        val totalMinutes = normalized match
+          case DayTime(days, hours, minutes, seconds) =>
+            durationMinutes(days, hours, minutes, seconds)
+          case ClockTime(hours, minutes, seconds) =>
+            durationMinutes("0", hours, minutes, seconds)
+          case value => value.toLongOption.filter(_ > 0L)
+        totalMinutes.fold[ObservedTimeLimit](
+          ObservedTimeLimit.Unknown(Some(normalized.take(512)))
+        )(minutes)
+
+  private def durationMinutes(
+      days: String,
+      hours: String,
+      minutes: String,
+      seconds: String
+  ): Option[Long] =
+    val totalSeconds =
+      BigInt(days) * 86400 + BigInt(hours) * 3600 + BigInt(minutes) * 60 + BigInt(seconds)
+    val roundedMinutes = (totalSeconds + 59) / 60
+    Option.when(roundedMinutes > 0 && roundedMinutes.isValidLong)(roundedMinutes.longValue)
+
+  private def minutes(value: Long): ObservedTimeLimit =
+    WallTimeMinutes
+      .from(value)
+      .fold(
+        _ => ObservedTimeLimit.Unknown(Some(value.toString)),
+        ObservedTimeLimit.Limited.apply
+      )

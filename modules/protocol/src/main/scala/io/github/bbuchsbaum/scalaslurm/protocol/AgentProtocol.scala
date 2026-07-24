@@ -39,6 +39,7 @@ enum AgentResponseStatus(val wireName: String) derives CanEqual:
   case Ok extends AgentResponseStatus("ok")
   case DomainFailure extends AgentResponseStatus("domain-failure")
   case ProtocolFailure extends AgentResponseStatus("protocol-failure")
+  case InternalFailure extends AgentResponseStatus("internal-failure")
 
 object AgentResponseStatus:
   def fromWireName(raw: String): Option[AgentResponseStatus] = values.find(_.wireName == raw)
@@ -97,6 +98,7 @@ enum AgentFailure derives CanEqual:
       evidence: Option[BoundedEvidence]
   )
   case RemoteCliFailure(diagnostic: String, evidence: Option[BoundedEvidence])
+  case RemoteAgentFailure(diagnostic: String, evidence: Option[BoundedEvidence])
   case ProtocolViolation(diagnostic: String, evidence: Option[BoundedEvidence])
 
 enum AgentCall[+A]:

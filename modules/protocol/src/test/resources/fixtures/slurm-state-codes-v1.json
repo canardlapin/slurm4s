@@ -1,0 +1,48 @@
+[
+  {
+    "code": "pending"
+  },
+  {
+    "code": "running"
+  },
+  {
+    "code": "completing"
+  },
+  {
+    "code": "completed"
+  },
+  {
+    "code": "failed"
+  },
+  {
+    "code": "cancelled"
+  },
+  {
+    "code": "out-of-memory"
+  },
+  {
+    "code": "timed-out"
+  },
+  {
+    "code": "node-failure"
+  },
+  {
+    "code": "preempted"
+  },
+  {
+    "code": "requeued"
+  },
+  {
+    "code": "requeue-held"
+  },
+  {
+    "code": "requeue-federation"
+  },
+  {
+    "code": "special-exit"
+  },
+  {
+    "code": "unknown",
+    "raw": "FUTURE_STATE"
+  }
+]

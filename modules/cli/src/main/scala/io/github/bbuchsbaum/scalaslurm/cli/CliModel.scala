@@ -4,6 +4,7 @@ import cats.data.NonEmptyChain
 import io.github.bbuchsbaum.scalaslurm.core.Diagnostics
 import io.github.bbuchsbaum.scalaslurm.core.JobRef
 import io.github.bbuchsbaum.scalaslurm.core.JobRequest
+import io.github.bbuchsbaum.scalaslurm.core.JobTiming
 import io.github.bbuchsbaum.scalaslurm.core.SitePolicyViolation
 import io.github.bbuchsbaum.scalaslurm.core.SiteResolution
 import io.github.bbuchsbaum.scalaslurm.core.SubmissionAttempt
@@ -46,5 +47,6 @@ enum SiteSubmissionResult derives CanEqual:
 final case class FocusedJobDiagnostic(
     job: JobRef,
     fields: Map[String, String],
-    evidence: io.github.bbuchsbaum.scalaslurm.core.EvidenceBundle
+    evidence: io.github.bbuchsbaum.scalaslurm.core.EvidenceBundle,
+    timing: JobTiming = JobTiming.unknown
 ) derives CanEqual
