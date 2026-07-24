@@ -22,3 +22,9 @@ class RequestSuite extends munit.FunSuite:
     assertNotEquals(perNode, perCpu)
     assertNotEquals(perNode, allNode)
   }
+
+  test("retry safety defaults conservatively and attempt epochs advance without overflow") {
+    assertEquals(RetrySafety.Unknown, RetrySafety.Unknown)
+    assertEquals(AttemptEpoch.initial.next.map(_.value), Right(2L))
+    assert(AttemptEpoch.from(Long.MaxValue).toOption.get.next.isLeft)
+  }

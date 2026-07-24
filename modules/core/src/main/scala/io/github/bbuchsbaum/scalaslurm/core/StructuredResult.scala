@@ -41,7 +41,8 @@ final case class DurableResultHandle(
     maximumResultBytes: ByteLimit,
     maximumEnvelopeBytes: ByteLimit,
     declaredOutputs: Vector[RelativeOutputPath],
-    workerRelease: WorkerRelease
+    workerRelease: WorkerRelease,
+    retrySafety: RetrySafety = RetrySafety.Unknown
 ) derives CanEqual
 
 final case class TaskInvocation(
@@ -56,7 +57,8 @@ final case class TaskInvocation(
     maximumResultBytes: ByteLimit,
     maximumEnvelopeBytes: ByteLimit,
     maximumOutputBytes: ByteLimit,
-    workerRelease: WorkerRelease
+    workerRelease: WorkerRelease,
+    retrySafety: RetrySafety = RetrySafety.Unknown
 ) derives CanEqual
 
 object ResultEnvelope:

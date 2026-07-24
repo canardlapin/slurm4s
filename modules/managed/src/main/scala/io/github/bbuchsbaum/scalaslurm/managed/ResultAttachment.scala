@@ -31,7 +31,8 @@ object ManagedResultHandle:
         contract.maxResultBytes,
         maximumEnvelopeBytes,
         contract.outputs,
-        workerRelease
+        workerRelease,
+        attempt.intent.retrySafety
       ),
       ValidationFailure("resultSchema", "operation and result contract schemas do not match")
     )
@@ -133,6 +134,13 @@ object ResultAttachment:
     else if handle.submissionKey != attempt.intent.submissionKey ||
       handle.attemptId != attempt.intent.attemptId
     then Some(Diagnostic("result-handle-mismatch", "the durable handle identifies another attempt"))
+    else if handle.retrySafety != attempt.intent.retrySafety then
+      Some(
+        Diagnostic(
+          "retry-safety-mismatch",
+          "the durable handle and managed intent have different retry-safety provenance"
+        )
+      )
     else
       EpochFence.validate(attempt, handle.attemptEpoch) match
         case EpochFence.Stale(expected, received) =>

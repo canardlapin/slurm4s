@@ -44,12 +44,25 @@ object JournalLimits:
 
 final case class JournalRecovery(truncatedUncommittedBytes: Long) derives CanEqual
 
+private[managed] enum JournalCommitBoundary derives CanEqual:
+  case BeforeAppend
+  case AfterForce
+  case AfterPublication
+
+private[managed] trait JournalCommitProbe[F[_]]:
+  def checkpoint(boundary: JournalCommitBoundary): F[Unit]
+
+private object JournalCommitProbe:
+  def noop[F[_]: Async]: JournalCommitProbe[F] = new JournalCommitProbe[F]:
+    def checkpoint(boundary: JournalCommitBoundary): F[Unit] = Async[F].unit
+
 final class FileJournalControlStore[F[_]: Async] private (
     channel: FileChannel,
     state: Ref[F, ControlState],
     semaphore: Semaphore[F],
     limits: JournalLimits,
-    val recovery: JournalRecovery
+    val recovery: JournalRecovery,
+    commitProbe: JournalCommitProbe[F]
 ) extends ControlStore[F]:
   def transact(command: ControlCommand): F[Either[ControlFailure, ControlCommit]] =
     semaphore.permit.use { _ =>
@@ -58,12 +71,16 @@ final class FileJournalControlStore[F[_]: Async] private (
           case Left(failure)                                   => Left(failure).pure[F]
           case Right(commit) if commit.committedEvents.isEmpty => Right(commit).pure[F]
           case Right(commit)                                   =>
-            Async[F]
-              .blocking(append(current.revision, commit.state.revision, command))
-              .flatMap { _ =>
-                val compacted = compact(commit.state)
-                state.set(compacted).as(Right(commit.copy(state = compacted)))
-              }
+            val compacted = compact(commit.state)
+            Async[F].uncancelable { poll =>
+              poll(commitProbe.checkpoint(JournalCommitBoundary.BeforeAppend)) *>
+                Async[F]
+                  .blocking(append(current.revision, commit.state.revision, command)) *>
+                commitProbe.checkpoint(JournalCommitBoundary.AfterForce) *>
+                state.set(compacted) *>
+                poll(commitProbe.checkpoint(JournalCommitBoundary.AfterPublication)) *>
+                Right(commit.copy(state = compacted)).pure[F]
+            }
       }
     }
 
@@ -175,6 +192,13 @@ object FileJournalControlStore:
       path: Path,
       limits: JournalLimits = JournalLimits.default
   ): Resource[F, FileJournalControlStore[F]] =
+    openWithProbe(path, limits, JournalCommitProbe.noop[F])
+
+  private[managed] def openWithProbe[F[_]: Async](
+      path: Path,
+      limits: JournalLimits,
+      commitProbe: JournalCommitProbe[F]
+  ): Resource[F, FileJournalControlStore[F]] =
     Resource
       .make(acquire(path, limits))(release)
       .flatMap { opened =>
@@ -187,7 +211,8 @@ object FileJournalControlStore:
             state,
             semaphore,
             limits,
-            opened.recovery
+            opened.recovery,
+            commitProbe
           )
         )
       }

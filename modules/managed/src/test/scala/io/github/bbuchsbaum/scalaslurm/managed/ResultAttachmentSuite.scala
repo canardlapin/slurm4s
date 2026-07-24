@@ -101,6 +101,63 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
     assertEquals(invalidCode(stale), "stale-result-epoch")
   }
 
+  test("resubmission fences old result handles and retry-safety provenance") {
+    val bound = boundState
+    val original = bound.attempts.values.head
+    val originalHandle = durableHandle(original, contract)
+    val record = AccountingRecord(
+      job,
+      SlurmState.NodeFailure,
+      None,
+      Some(WorkloadOutcome.NodeFailure),
+      Freshness.Current(later),
+      Map.empty,
+      evidence
+    )
+    val terminal = applyCommand(
+      bound,
+      ControlCommand.RecordAccounting(
+        cats.data.NonEmptyVector.one(job),
+        SchedulerQueryResult.Succeeded(
+          AccountingBatch(cats.data.NonEmptyVector.one(record), Vector.empty)
+        ),
+        later.plusSeconds(1L)
+      )
+    )
+    val retried = applyCommand(
+      terminal.state,
+      ControlCommand.RetrySubmission(
+        original.intent.submissionKey,
+        original.intent.epoch,
+        RetryAuthorization.Manual(
+          RetryReason.from("operator authorized replacement").toOption.get
+        ),
+        later.plusSeconds(2L)
+      )
+    )
+    val current = retried.state.attempts(original.intent.submissionKey)
+    val stale = ResultAttachment.attach(
+      current,
+      originalHandle,
+      contract,
+      Vector.empty,
+      Vector.empty,
+      later.plusSeconds(3L)
+    )
+    val provenanceMismatch = ResultAttachment.attach(
+      original,
+      originalHandle.copy(retrySafety = RetrySafety.SafeForAutomaticRetry),
+      contract,
+      Vector.empty,
+      Vector.empty,
+      later.plusSeconds(3L)
+    )
+
+    assertEquals(current.currentJob, None)
+    assertEquals(invalidCode(stale), "stale-result-epoch")
+    assertEquals(invalidCode(provenanceMismatch), "retry-safety-mismatch")
+  }
+
   test("worker failure envelope remains a structured workload failure") {
     val attempt = boundAttempt
     val handle = durableHandle(attempt, contract)
@@ -161,6 +218,9 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
   }
 
   private def boundAttempt: ManagedAttempt =
+    boundState.attempts.values.head
+
+  private def boundState: ControlState =
     val value = intent("typed-result")
     val recorded = applyCommand(ControlState.empty, ControlCommand.RecordIntent(value)).state
     val claimed = applyCommand(
@@ -175,7 +235,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
         accepted,
         later
       )
-    ).state.attempts(value.submissionKey)
+    ).state
 
   private def durableHandle[A](
       attempt: ManagedAttempt,

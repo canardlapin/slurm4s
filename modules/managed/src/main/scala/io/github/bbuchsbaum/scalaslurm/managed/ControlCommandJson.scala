@@ -12,7 +12,7 @@ import scala.util.Try
 private[managed] object ControlCommandJson:
   def encode(command: ControlCommand): Json = command match
     case ControlCommand.RecordIntent(intent) =>
-      Json.obj(
+      val fields = Vector(
         "type" -> Json.fromString("record-intent"),
         "submissionKey" -> Json.fromString(intent.submissionKey.value),
         "attemptId" -> Json.fromString(intent.attemptId.value),
@@ -22,7 +22,8 @@ private[managed] object ControlCommandJson:
         ),
         "requestDigest" -> Json.fromString(intent.request.digest.value),
         "at" -> Json.fromString(intent.recordedAt.toString)
-      )
+      ) ++ retrySafetyField(intent.retrySafety)
+      Json.obj(fields*)
     case ControlCommand.ClaimSubmission(key, at) =>
       base("claim-submission", key, at)
     case ControlCommand.RecordSubmission(key, epoch, result, at) =>
@@ -37,6 +38,13 @@ private[managed] object ControlCommandJson:
         Json.obj(
           "epoch" -> Json.fromLong(epoch.value),
           "evidence" -> AgentDomainJson.encodeEvidence(evidence)
+        )
+      )
+    case ControlCommand.RetrySubmission(key, expectedEpoch, authorization, at) =>
+      base("retry-submission", key, at).deepMerge(
+        Json.obj(
+          "expectedEpoch" -> Json.fromLong(expectedEpoch.value),
+          "authorization" -> encodeRetryAuthorization(authorization)
         )
       )
     case ControlCommand.ReconcileBinding(key, epoch, job, evidence, at) =>
@@ -96,6 +104,19 @@ private[managed] object ControlCommandJson:
             evidenceJson <- jsonField(cursor, "evidence")
             evidence <- AgentDomainJson.decodeEvidence(evidenceJson)
           yield ControlCommand.RecoverSubmissionClaim(common._1, epoch, evidence, common._2)
+        case "retry-submission" =>
+          for
+            common <- common(cursor)
+            expectedRaw <- cursor.get[Long]("expectedEpoch").left.map(_.message)
+            expected <- AttemptEpoch.from(expectedRaw).left.map(_.reason)
+            authorizationJson <- jsonField(cursor, "authorization")
+            authorization <- decodeRetryAuthorization(authorizationJson)
+          yield ControlCommand.RetrySubmission(
+            common._1,
+            expected,
+            authorization,
+            common._2
+          )
         case "reconcile-binding" =>
           for
             common <- common(cursor)
@@ -153,13 +174,19 @@ private[managed] object ControlCommandJson:
       digest <- ContentDigest.from(digestText).left.map(_.reason)
       request <- CanonicalRequest.validated(bytes, digest)
       at <- instant(cursor, "at")
+      retrySafety <- decodeRetrySafety(cursor)
       decoded <- request.decode
       _ <- Either.cond(
         decoded.submissionKey == key,
         (),
         "stored submission key does not match canonical request"
       )
-    yield ControlCommand.RecordIntent(ManagedIntent(key, attempt, epoch, request, at))
+      _ <- Either.cond(
+        decoded.retrySafety == retrySafety,
+        (),
+        "stored retry safety does not match canonical request"
+      )
+    yield ControlCommand.RecordIntent(ManagedIntent(key, attempt, epoch, request, at, retrySafety))
 
   private def common(cursor: HCursor): Either[String, (SubmissionKey, Instant)] =
     for
@@ -181,6 +208,50 @@ private[managed] object ControlCommandJson:
       .left
       .map(_.message)
       .flatMap(value => AttemptEpoch.from(value).left.map(_.reason))
+
+  private def retrySafetyField(value: RetrySafety): Vector[(String, Json)] =
+    Option
+      .when(value != RetrySafety.Unknown)(
+        "retrySafety" -> Json.fromString(
+          value match
+            case RetrySafety.Unknown               => "unknown"
+            case RetrySafety.NoAutomaticRetry      => "no-automatic-retry"
+            case RetrySafety.SafeForAutomaticRetry => "safe-for-automatic-retry"
+        )
+      )
+      .toVector
+
+  private def decodeRetrySafety(cursor: HCursor): Either[String, RetrySafety] =
+    cursor.get[Option[String]]("retrySafety").left.map(_.message).flatMap {
+      case None | Some("unknown")           => Right(RetrySafety.Unknown)
+      case Some("no-automatic-retry")       => Right(RetrySafety.NoAutomaticRetry)
+      case Some("safe-for-automatic-retry") => Right(RetrySafety.SafeForAutomaticRetry)
+      case Some(other)                      => Left(s"unknown retrySafety: $other")
+    }
+
+  private def encodeRetryAuthorization(value: RetryAuthorization): Json = value match
+    case RetryAuthorization.Manual(reason) =>
+      Json.obj(
+        "kind" -> Json.fromString("manual"),
+        "reason" -> Json.fromString(reason.value)
+      )
+    case RetryAuthorization.Automatic(reason) =>
+      Json.obj(
+        "kind" -> Json.fromString("automatic"),
+        "reason" -> Json.fromString(reason.value)
+      )
+
+  private def decodeRetryAuthorization(json: Json): Either[String, RetryAuthorization] =
+    for
+      cursor <- Either.cond(json.isObject, json.hcursor, "retry authorization must be an object")
+      kind <- string(cursor, "kind")
+      reasonText <- string(cursor, "reason")
+      reason <- RetryReason.from(reasonText).left.map(_.reason)
+      authorization <- kind match
+        case "manual"    => Right(RetryAuthorization.Manual(reason))
+        case "automatic" => Right(RetryAuthorization.Automatic(reason))
+        case other       => Left(s"unknown retry authorization: $other")
+    yield authorization
 
   private def instant(cursor: HCursor, name: String): Either[String, Instant] =
     string(cursor, name).flatMap(raw => Try(Instant.parse(raw)).toEither.left.map(_.getMessage))

@@ -75,11 +75,19 @@ class StructuredResultCodecSuite extends munit.FunSuite:
       valueLimit,
       envelopeLimit,
       envelope.outputs.entries.map(_.path),
-      envelope.workerRelease
+      envelope.workerRelease,
+      RetrySafety.SafeForAutomaticRetry
     )
 
     val bytes = DurableResultHandleCodec.encode(handle, envelopeLimit).toOption.get
     assertEquals(DurableResultHandleCodec.decode(bytes, envelopeLimit), Right(handle))
+    val conservative = handle.copy(retrySafety = RetrySafety.Unknown)
+    val conservativeBytes =
+      DurableResultHandleCodec.encode(conservative, envelopeLimit).toOption.get
+    assertEquals(
+      DurableResultHandleCodec.decode(conservativeBytes, envelopeLimit),
+      Right(conservative)
+    )
   }
 
   test("typed task invocation contains only bounded encoded input and durable identities") {
@@ -103,7 +111,8 @@ class StructuredResultCodecSuite extends munit.FunSuite:
       WorkerRelease(
         WorkerReleaseId.from("wire-worker").toOption.get,
         ContentDigest.from("sha256:wire-worker").toOption.get
-      )
+      ),
+      RetrySafety.NoAutomaticRetry
     )
     val encoded = TaskInvocationCodec.encode(invocation, envelopeLimit).toOption.get
 

@@ -172,7 +172,7 @@ object DurableResultHandleCodec:
         (),
         StructuredCodecFailure.Invalid("result handle outputs must be distinct and bounded")
       )
-      payload = Json.obj(
+      fields = Vector(
         "submissionKey" -> Json.fromString(value.submissionKey.value),
         "attemptId" -> Json.fromString(value.attemptId.value),
         "attemptEpoch" -> Json.fromLong(value.attemptEpoch.value),
@@ -185,7 +185,8 @@ object DurableResultHandleCodec:
           value.declaredOutputs.map(path => Json.fromString(path.value))*
         ),
         "workerRelease" -> encodeWorkerRelease(value.workerRelease)
-      )
+      ) ++ encodeRetrySafetyField(value.retrySafety)
+      payload = Json.obj(fields*)
       bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, payload))
       _ <- Either.cond(
         bytes.size <= maximumBytes.value,
@@ -245,6 +246,7 @@ object DurableResultHandleCodec:
       )
       releaseJson <- requiredJson(cursor, "workerRelease")
       release <- decodeWorkerRelease(releaseJson)
+      retrySafety <- decodeRetrySafetyField(cursor)
     yield DurableResultHandle(
       submissionKey,
       attemptId,
@@ -255,7 +257,8 @@ object DurableResultHandleCodec:
       maximumResultBytes,
       maximumEnvelopeBytes,
       outputs,
-      release
+      release,
+      retrySafety
     )
 
 object TaskInvocationCodec:
@@ -283,7 +286,7 @@ object TaskInvocationCodec:
         (),
         invalid("task invocation outputs must be distinct and bounded")
       )
-      payload = Json.obj(
+      fields = Vector(
         "submissionKey" -> Json.fromString(value.submissionKey.value),
         "attemptId" -> Json.fromString(value.attemptId.value),
         "attemptEpoch" -> Json.fromLong(value.attemptEpoch.value),
@@ -300,7 +303,8 @@ object TaskInvocationCodec:
         "maximumEnvelopeBytes" -> Json.fromInt(value.maximumEnvelopeBytes.value),
         "maximumOutputBytes" -> Json.fromInt(value.maximumOutputBytes.value),
         "workerRelease" -> encodeWorkerRelease(value.workerRelease)
-      )
+      ) ++ encodeRetrySafetyField(value.retrySafety)
+      payload = Json.obj(fields*)
       bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, payload))
       _ <- Either.cond(
         bytes.size <= maximumBytes.value,
@@ -380,6 +384,7 @@ object TaskInvocationCodec:
         .map(problem => invalid(problem.reason))
       releaseJson <- requiredJson(cursor, "workerRelease")
       release <- decodeWorkerRelease(releaseJson)
+      retrySafety <- decodeRetrySafetyField(cursor)
     yield TaskInvocation(
       submissionKey,
       attemptId,
@@ -392,7 +397,8 @@ object TaskInvocationCodec:
       maximumResultBytes,
       maximumEnvelopeBytes,
       maximumOutputBytes,
-      release
+      release,
+      retrySafety
     )
 
   private def decodeBase64(
@@ -420,6 +426,26 @@ object TaskInvocationCodec:
     yield decoded
 
 private[protocol] object StructuredJson:
+  def encodeRetrySafetyField(value: RetrySafety): Vector[(String, Json)] =
+    Option
+      .when(value != RetrySafety.Unknown)(
+        "retrySafety" -> Json.fromString(
+          value match
+            case RetrySafety.Unknown               => "unknown"
+            case RetrySafety.NoAutomaticRetry      => "no-automatic-retry"
+            case RetrySafety.SafeForAutomaticRetry => "safe-for-automatic-retry"
+        )
+      )
+      .toVector
+
+  def decodeRetrySafetyField(cursor: HCursor): Either[StructuredCodecFailure, RetrySafety] =
+    optionalField[String](cursor, "retrySafety").flatMap {
+      case None | Some("unknown")           => Right(RetrySafety.Unknown)
+      case Some("no-automatic-retry")       => Right(RetrySafety.NoAutomaticRetry)
+      case Some("safe-for-automatic-retry") => Right(RetrySafety.SafeForAutomaticRetry)
+      case Some(other)                      => Left(invalid(s"unknown retrySafety: $other"))
+    }
+
   def encodeRegisteredOperation(value: RegisteredOperation): Json =
     Json.obj(
       "id" -> Json.fromString(value.id.value),

@@ -270,7 +270,8 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         SubmissionKey.from("typed-scheduler-submit").toOption.get,
         JobName.from("typed-scheduler-submit").toOption.get,
         payload,
-        ResourceRequest.validate(1, 1, None, None, None).toEither.toOption.get
+        ResourceRequest.validate(1, 1, None, None, None).toEither.toOption.get,
+        retrySafety = RetrySafety.SafeForAutomaticRetry
       )
       val executable = root.resolve("worker-distribution")
       for
@@ -295,15 +296,27 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           )
         )
         result <- RegisteredTaskSubmitter(launcher, scheduler).submit(request)
+        retryPrepared <- launcher.prepare(request, AttemptEpoch.from(2L).toOption.get)
         captured <- observed.get
       yield result match
         case RegisteredSubmissionResult.Submitted(prepared, SubmissionAttempt.Completed(_)) =>
+          val retried = retryPrepared.toOption.get
           val invocationBytes = Files.readAllBytes(prepared.invocationPath).toVector
           assertEquals(
             TaskInvocationCodec.decode(invocationBytes, envelopeLimit, inputLimit),
             Right(prepared.invocation)
           )
           assertEquals(prepared.resultHandle.resultSchema, task.operation.outputSchema)
+          assertEquals(prepared.invocation.retrySafety, RetrySafety.SafeForAutomaticRetry)
+          assertEquals(prepared.resultHandle.retrySafety, RetrySafety.SafeForAutomaticRetry)
+          assertEquals(
+            prepared.schedulerRequest.retrySafety,
+            RetrySafety.SafeForAutomaticRetry
+          )
+          assertEquals(retried.invocation.attemptEpoch.value, 2L)
+          assertEquals(retried.resultHandle.attemptEpoch.value, 2L)
+          assertNotEquals(retried.invocationPath, prepared.invocationPath)
+          assertNotEquals(retried.resultPath, prepared.resultPath)
           val launchText = Files.readString(prepared.launchScript)
           assert(launchText.contains("--invocation"))
           assert(!launchText.contains("'41'"))
@@ -340,7 +353,8 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
             "99"
           )
         ),
-        maximumConcurrent = Some(PositiveInt.from("maximumConcurrent", 1).toOption.get)
+        maximumConcurrent = Some(PositiveInt.from("maximumConcurrent", 1).toOption.get),
+        retrySafety = RetrySafety.NoAutomaticRetry
       )
       val executable = root.resolve("worker-distribution")
       for
@@ -369,6 +383,17 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       yield result match
         case RegisteredArraySubmissionResult.Submitted(prepared, SubmissionAttempt.Completed(_)) =>
           assertEquals(prepared.schedulerRequest.array, Some(prepared.arrayRequest))
+          assertEquals(prepared.schedulerRequest.retrySafety, RetrySafety.NoAutomaticRetry)
+          assert(
+            prepared.elements.toVector.forall(
+              _.invocation.retrySafety == RetrySafety.NoAutomaticRetry
+            )
+          )
+          assert(
+            prepared.elements.toVector.forall(
+              _.resultHandle.retrySafety == RetrySafety.NoAutomaticRetry
+            )
+          )
           assertEquals(
             prepared.elements.toVector.map(_.invocation.inputBytes),
             Vector("41", "99").map(_.getBytes("UTF-8").toVector)
@@ -416,6 +441,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         Right(value.toString.getBytes("UTF-8").toVector)
       def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
         bytesToInt(bytes)
+    override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
 
     def run(input: String, context: TaskContext[IO]): IO[Int] =
       for

@@ -54,7 +54,8 @@ final case class RegisteredTaskArrayRequest[I, O](
     resources: ResourceRequest,
     environment: Map[String, String],
     elements: NonEmptyVector[RegisteredTaskArrayElement[I]],
-    maximumConcurrent: Option[PositiveInt]
+    maximumConcurrent: Option[PositiveInt],
+    retrySafety: RetrySafety = RetrySafety.Unknown
 )
 
 final case class PreparedRegisteredArraySubmission[O](
@@ -74,10 +75,13 @@ enum RegisteredArraySubmissionResult[A]:
   case Submitted(prepared: PreparedRegisteredArraySubmission[A], result: SubmissionAttempt)
 
 final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
-  def prepare[A](request: JobRequest[A]): IO[Either[Diagnostics, PreparedRegisteredSubmission[A]]] =
+  def prepare[A](
+      request: JobRequest[A],
+      attemptEpoch: AttemptEpoch = AttemptEpoch.initial
+  ): IO[Either[Diagnostics, PreparedRegisteredSubmission[A]]] =
     request.payload match
       case task: Payload.RegisteredTask[?, A] @unchecked =>
-        IO.blocking(prepareBlocking(request, task)).attempt.map {
+        IO.blocking(prepareBlocking(request, task, attemptEpoch)).attempt.map {
           case Right(value) => value
           case Left(error)  => Left(diagnostics("typed-task-preparation-failed", error))
         }
@@ -94,15 +98,17 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         )
 
   def prepareArray[I, O](
-      request: RegisteredTaskArrayRequest[I, O]
+      request: RegisteredTaskArrayRequest[I, O],
+      attemptEpoch: AttemptEpoch = AttemptEpoch.initial
   ): IO[Either[Diagnostics, PreparedRegisteredArraySubmission[O]]] =
-    IO.blocking(prepareArrayBlocking(request)).attempt.map {
+    IO.blocking(prepareArrayBlocking(request, attemptEpoch)).attempt.map {
       case Right(value) => value
       case Left(error)  => Left(diagnostics("typed-array-preparation-failed", error))
     }
 
   private def prepareArrayBlocking[I, O](
-      request: RegisteredTaskArrayRequest[I, O]
+      request: RegisteredTaskArrayRequest[I, O],
+      attemptEpoch: AttemptEpoch
   ): Either[Diagnostics, PreparedRegisteredArraySubmission[O]] =
     for
       _ <- validateExecutable()
@@ -123,15 +129,17 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
             request.name,
             task,
             request.resources,
-            request.environment
+            request.environment,
+            retrySafety = request.retrySafety
           ),
-          task
+          task,
+          attemptEpoch
         )
       }
       aggregateAttempt <- deterministicAttempt(request.submissionKey, request.operation).left.map(
         problem => Diagnostics.one(Diagnostic("invalid-array-attempt-id", problem.reason))
       )
-      directory = settings.workspace.toAbsolutePath.normalize().resolve(aggregateAttempt.value)
+      directory = epochDirectory(aggregateAttempt, attemptEpoch)
       _ <- createPrivateDirectory(directory)
       launchScript = directory.resolve("launch-worker-array.sh")
       identities = prepared.zip(request.elements.toVector).map { case (value, element) =>
@@ -173,7 +181,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         ),
         request.resources,
         request.environment,
-        Some(arrayRequest)
+        Some(arrayRequest),
+        request.retrySafety
       )
     yield PreparedRegisteredArraySubmission(
       schedulerRequest,
@@ -185,20 +194,22 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
 
   private def prepareBlocking[I, O](
       request: JobRequest[O],
-      task: Payload.RegisteredTask[I, O]
+      task: Payload.RegisteredTask[I, O],
+      attemptEpoch: AttemptEpoch
   ): Either[Diagnostics, PreparedRegisteredSubmission[O]] =
     for
       _ <- validateExecutable()
       attemptId <- deterministicAttempt(request.submissionKey, task.operation).left
         .map(problem => Diagnostics.one(Diagnostic("invalid-attempt-id", problem.reason)))
-      directory = settings.workspace.toAbsolutePath.normalize().resolve(attemptId.value)
+      directory = epochDirectory(attemptId, attemptEpoch)
       _ <- createPrivateDirectory(directory)
       invocation <- TaskInvocations
         .encodeRegistered(
           task,
+          request.retrySafety,
           request.submissionKey,
           attemptId,
-          AttemptEpoch.initial,
+          attemptEpoch,
           None,
           settings.maximumInputBytes,
           settings.maximumEnvelopeBytes,
@@ -228,14 +239,15 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       handle = DurableResultHandle(
         request.submissionKey,
         attemptId,
-        AttemptEpoch.initial,
+        attemptEpoch,
         None,
         WorkloadOperation.Registered(task.operation.id, task.operation.version),
         task.operation.outputSchema,
         invocation.maximumResultBytes,
         settings.maximumEnvelopeBytes,
         invocation.declaredOutputs,
-        settings.workerRelease
+        settings.workerRelease,
+        request.retrySafety
       )
     yield PreparedRegisteredSubmission(
       schedulerRequest,
@@ -246,6 +258,9 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       launchScript,
       handle
     )
+
+  private def epochDirectory(attemptId: AttemptId, epoch: AttemptEpoch): Path =
+    settings.workspace.toAbsolutePath.normalize().resolve(s"${attemptId.value}-e${epoch.value}")
 
   private def validateExecutable(): Either[Diagnostics, Unit] =
     val executable = settings.executable.toAbsolutePath.normalize()

@@ -5,11 +5,6 @@ import cats.effect.IO
 import cats.effect.Ref
 import io.github.bbuchsbaum.scalaslurm.core.*
 
-enum RetrySafety derives CanEqual:
-  case Unknown
-  case NoAutomaticRetry
-  case SafeForAutomaticRetry
-
 trait ScalaTask[I, O]:
   def operation: OperationRef[I, O]
   def inputCodec: InputCodec[I]
@@ -46,11 +41,13 @@ object TaskInvocations:
       maximumResultBytes,
       maximumEnvelopeBytes,
       maximumOutputBytes,
-      workerRelease
+      workerRelease,
+      task.retrySafety
     )
 
   def encodeRegistered[I, O](
       task: Payload.RegisteredTask[I, O],
+      retrySafety: RetrySafety,
       submissionKey: SubmissionKey,
       attemptId: AttemptId,
       attemptEpoch: AttemptEpoch,
@@ -76,7 +73,8 @@ object TaskInvocations:
           contract.maxResultBytes,
           maximumEnvelopeBytes,
           maximumOutputBytes,
-          workerRelease
+          workerRelease,
+          retrySafety
         )
       case _ =>
         Left(
@@ -99,7 +97,8 @@ object TaskInvocations:
       maximumResultBytes: ByteLimit,
       maximumEnvelopeBytes: ByteLimit,
       maximumOutputBytes: ByteLimit,
-      workerRelease: WorkerRelease
+      workerRelease: WorkerRelease,
+      retrySafety: RetrySafety
   ): Either[TaskFailure, TaskInvocation] =
     for
       _ <- Either.cond(
@@ -130,7 +129,8 @@ object TaskInvocations:
       maximumResultBytes,
       maximumEnvelopeBytes,
       maximumOutputBytes,
-      workerRelease
+      workerRelease,
+      retrySafety
     )
 
 enum TaskFailure derives CanEqual:

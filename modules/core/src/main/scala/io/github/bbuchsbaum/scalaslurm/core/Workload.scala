@@ -29,6 +29,11 @@ enum ScriptSource derives CanEqual:
 enum NoResult derives CanEqual:
   case Value
 
+enum RetrySafety derives CanEqual:
+  case Unknown
+  case NoAutomaticRetry
+  case SafeForAutomaticRetry
+
 final case class OutputEntry private (
     path: RelativeOutputPath,
     sizeBytes: Long,

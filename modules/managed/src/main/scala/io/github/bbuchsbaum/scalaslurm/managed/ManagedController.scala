@@ -3,6 +3,7 @@ package io.github.bbuchsbaum.scalaslurm.managed
 import cats.effect.Clock
 import cats.effect.Outcome
 import cats.effect.kernel.Async
+import cats.effect.kernel.Poll
 import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import fs2.Stream
@@ -64,16 +65,22 @@ final class ManagedController[F[_]: Async](
       submissionKey: SubmissionKey
   ): F[Either[ControlFailure, ManagedAttempt]] =
     Clock[F].realTimeInstant.flatMap { claimedAt =>
-      store.transact(ControlCommand.ClaimSubmission(submissionKey, claimedAt)).flatMap {
-        case Left(failure) => Left(failure).pure[F]
-        case Right(ControlCommit(ControlResult.SubmissionClaimed(attempt, _), _, _)) =>
-          invokeSubmission(attempt)
-        case Right(ControlCommit(ControlResult.SubmissionAlreadyClaimed(attempt), _, _)) =>
-          Right(attempt).pure[F]
-        case Right(other) =>
-          Left(
-            ControlFailure.JournalCorrupt(s"unexpected submission claim result: ${other.result}")
-          ).pure[F]
+      Async[F].uncancelable { poll =>
+        store.transact(ControlCommand.ClaimSubmission(submissionKey, claimedAt)).flatMap {
+          case Left(failure) => poll(Left(failure).pure[F])
+          case Right(ControlCommit(ControlResult.SubmissionClaimed(attempt, _), _, _)) =>
+            invokeSubmission(attempt, poll)
+          case Right(ControlCommit(ControlResult.SubmissionAlreadyClaimed(attempt), _, _)) =>
+            poll(Right(attempt).pure[F])
+          case Right(other) =>
+            poll(
+              Left(
+                ControlFailure.JournalCorrupt(
+                  s"unexpected submission claim result: ${other.result}"
+                )
+              ).pure[F]
+            )
+        }
       }
     }
 
@@ -174,32 +181,55 @@ final class ManagedController[F[_]: Async](
         .map(commitAttempt)
     }
 
+  def retrySubmission(
+      submissionKey: SubmissionKey,
+      expectedEpoch: AttemptEpoch,
+      authorization: RetryAuthorization
+  ): F[Either[ControlFailure, ManagedAttempt]] =
+    Clock[F].realTimeInstant.flatMap { now =>
+      store
+        .transact(
+          ControlCommand.RetrySubmission(
+            submissionKey,
+            expectedEpoch,
+            authorization,
+            now
+          )
+        )
+        .map(commitAttempt)
+    }
+
   def dispatchCancellation(
       submissionKey: SubmissionKey
   ): F[Either[ControlFailure, ManagedAttempt]] =
     Clock[F].realTimeInstant.flatMap { claimedAt =>
-      store.transact(ControlCommand.ClaimCancellation(submissionKey, claimedAt)).flatMap {
-        case Left(failure) => Left(failure).pure[F]
-        case Right(commit) =>
-          commit.result match
-            case ControlResult.CancellationQueued(attempt, outbox)
-                if outbox.status.isInstanceOf[OutboxStatus.InFlight] =>
-              attempt.currentJob match
-                case Some(job) =>
-                  scheduler.cancel(job).flatMap { result =>
-                    Clock[F].realTimeInstant.flatMap { now =>
-                      store
-                        .transact(ControlCommand.RecordCancellation(submissionKey, result, now))
-                        .map(commitAttempt)
-                    }
-                  }
-                case None =>
-                  Left(ControlFailure.OutboxInvariant(submissionKey, "job binding missing")).pure[F]
-            case ControlResult.NoChange(Some(attempt)) => Right(attempt).pure[F]
-            case other                                 =>
-              Left(
-                ControlFailure.JournalCorrupt(s"unexpected cancellation claim result: $other")
-              ).pure[F]
+      Async[F].uncancelable { poll =>
+        store.transact(ControlCommand.ClaimCancellation(submissionKey, claimedAt)).flatMap {
+          case Left(failure) => poll(Left(failure).pure[F])
+          case Right(commit) =>
+            commit.result match
+              case ControlResult.CancellationQueued(attempt, outbox)
+                  if outbox.status.isInstanceOf[OutboxStatus.InFlight] =>
+                attempt.currentJob match
+                  case Some(job) => invokeCancellation(submissionKey, job, poll)
+                  case None      =>
+                    val failure =
+                      ControlFailure.OutboxInvariant(submissionKey, "job binding missing")
+                    recoverCancellationClaim(
+                      submissionKey,
+                      "cancellation claim has no durable job binding"
+                    ).as(Left(failure))
+              case ControlResult.NoChange(Some(attempt)) =>
+                poll(Right(attempt).pure[F])
+              case other =>
+                poll(
+                  Left(
+                    ControlFailure.JournalCorrupt(
+                      s"unexpected cancellation claim result: $other"
+                    )
+                  ).pure[F]
+                )
+        }
       }
     }
 
@@ -217,13 +247,14 @@ final class ManagedController[F[_]: Async](
     loop(after)
 
   private def invokeSubmission(
-      attempt: ManagedAttempt
+      attempt: ManagedAttempt,
+      poll: Poll[F]
   ): F[Either[ControlFailure, ManagedAttempt]] =
     attempt.intent.request.decode match
       case Left(problem) =>
         Async[F].raiseError(new IllegalStateException(s"durable request cannot decode: $problem"))
       case Right(request) =>
-        val operation = scheduler.submit(request).flatMap { result =>
+        val operation = poll(scheduler.submit(request)).flatMap { result =>
           Clock[F].realTimeInstant.flatMap { now =>
             store
               .transact(
@@ -239,28 +270,68 @@ final class ManagedController[F[_]: Async](
         }
         operation.guaranteeCase {
           case Outcome.Succeeded(_) => Async[F].unit
-          case _                    =>
-            Clock[F].realTimeInstant.flatMap { now =>
-              store
-                .transact(
-                  ControlCommand.RecoverSubmissionClaim(
-                    attempt.intent.submissionKey,
-                    attempt.intent.epoch,
-                    recoveryEvidence(now, "submission effect ended without a persisted result"),
-                    now
-                  )
-                )
-                .void
-            }
+          case _                    => recoverSubmissionClaim(attempt)
         }
+
+  private def invokeCancellation(
+      submissionKey: SubmissionKey,
+      job: JobRef,
+      poll: Poll[F]
+  ): F[Either[ControlFailure, ManagedAttempt]] =
+    val operation = poll(scheduler.cancel(job)).flatMap { result =>
+      Clock[F].realTimeInstant.flatMap { now =>
+        store
+          .transact(ControlCommand.RecordCancellation(submissionKey, result, now))
+          .map(commitAttempt)
+      }
+    }
+    operation.guaranteeCase {
+      case Outcome.Succeeded(_) => Async[F].unit
+      case _                    =>
+        recoverCancellationClaim(
+          submissionKey,
+          "cancellation effect ended without a persisted result"
+        )
+    }
+
+  private def recoverSubmissionClaim(attempt: ManagedAttempt): F[Unit] =
+    Clock[F].realTimeInstant.flatMap { now =>
+      store
+        .transact(
+          ControlCommand.RecoverSubmissionClaim(
+            attempt.intent.submissionKey,
+            attempt.intent.epoch,
+            recoveryEvidence(now, "submission effect ended without a persisted result"),
+            now
+          )
+        )
+        .void
+    }
+
+  private def recoverCancellationClaim(
+      submissionKey: SubmissionKey,
+      message: String
+  ): F[Unit] =
+    Clock[F].realTimeInstant.flatMap { now =>
+      store
+        .transact(
+          ControlCommand.RecoverCancellationClaim(
+            submissionKey,
+            recoveryEvidence(now, message),
+            now
+          )
+        )
+        .void
+    }
 
   private def commitAttempt(
       result: Either[ControlFailure, ControlCommit]
   ): Either[ControlFailure, ManagedAttempt] = result.flatMap { commit =>
     commit.result match
-      case ControlResult.Updated(Vector(single))        => Right(single)
-      case ControlResult.CancellationQueued(attempt, _) => Right(attempt)
-      case ControlResult.NoChange(Some(attempt))        => Right(attempt)
+      case ControlResult.Updated(Vector(single))          => Right(single)
+      case ControlResult.CancellationQueued(attempt, _)   => Right(attempt)
+      case ControlResult.SubmissionRetried(attempt, _, _) => Right(attempt)
+      case ControlResult.NoChange(Some(attempt))          => Right(attempt)
       case other => Left(ControlFailure.JournalCorrupt(s"expected one attempt, received $other"))
   }
 

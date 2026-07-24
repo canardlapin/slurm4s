@@ -131,12 +131,39 @@ enum ManagedIntentFailure derives CanEqual:
         )
       )
 
+object RetryReason:
+  opaque type Type = String
+
+  def from(raw: String): Either[ValidationFailure, Type] =
+    if raw == null then Left(ValidationFailure("retryReason", "must not be null"))
+    else
+      val normalized = raw.trim
+      if normalized.isEmpty then Left(ValidationFailure("retryReason", "must not be empty"))
+      else if normalized.length > 4096 then
+        Left(ValidationFailure("retryReason", "must contain at most 4096 characters"))
+      else if raw.exists(_.isControl) then
+        Left(ValidationFailure("retryReason", "must not contain control characters"))
+      else Right(normalized)
+
+  extension (reason: Type) def value: String = reason
+
+type RetryReason = RetryReason.Type
+
+enum RetryAuthorization derives CanEqual:
+  case Manual(reason: RetryReason)
+  case Automatic(reason: RetryReason)
+
+  def retryReason: RetryReason = this match
+    case RetryAuthorization.Manual(value)    => value
+    case RetryAuthorization.Automatic(value) => value
+
 final case class ManagedIntent(
     submissionKey: SubmissionKey,
     attemptId: AttemptId,
     epoch: AttemptEpoch,
     request: CanonicalRequest,
-    recordedAt: Instant
+    recordedAt: Instant,
+    retrySafety: RetrySafety = RetrySafety.Unknown
 ) derives CanEqual
 
 object ManagedIntent:
@@ -156,7 +183,8 @@ object ManagedIntent:
             attemptId,
             AttemptEpoch.initial,
             canonical,
-            recordedAt
+            recordedAt,
+            request.retrySafety
           )
         }
     }
@@ -217,7 +245,9 @@ final case class ManagedAttempt(
     cancellation: ManagedCancellation,
     updatedAt: Instant
 ) derives CanEqual:
-  def currentJob: Option[JobRef] = bindings.lastOption.map(_.job)
+  def currentBinding: Option[BindingRecord] =
+    bindings.reverseIterator.find(_.epoch == intent.epoch)
+  def currentJob: Option[JobRef] = currentBinding.map(_.job)
   def isTerminal: Boolean = phase.isInstanceOf[ManagedPhase.Terminal]
 
 enum OutboxAction derives CanEqual:
@@ -247,6 +277,12 @@ enum ManagedEvent derives CanEqual:
       result: SubmissionAttempt
   )
   case SubmissionRecoveryRequired(submissionKey: SubmissionKey, epoch: AttemptEpoch)
+  case SubmissionRetried(
+      submissionKey: SubmissionKey,
+      previousEpoch: AttemptEpoch,
+      nextEpoch: AttemptEpoch,
+      authorization: RetryAuthorization
+  )
   case BindingReconciled(submissionKey: SubmissionKey, epoch: AttemptEpoch, job: JobRef)
   case ObservationRecorded(submissionKey: SubmissionKey)
   case ObservationUnavailable(submissionKey: SubmissionKey)

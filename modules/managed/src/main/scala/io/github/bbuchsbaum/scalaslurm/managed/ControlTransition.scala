@@ -20,6 +20,12 @@ enum ControlCommand:
       evidence: EvidenceBundle,
       at: Instant
   )
+  case RetrySubmission(
+      submissionKey: SubmissionKey,
+      expectedEpoch: AttemptEpoch,
+      authorization: RetryAuthorization,
+      at: Instant
+  )
   case ReconcileBinding(
       submissionKey: SubmissionKey,
       epoch: AttemptEpoch,
@@ -64,6 +70,8 @@ enum ControlFailure derives CanEqual:
       expected: AttemptEpoch,
       received: AttemptEpoch
   )
+  case RetryNotAuthorized(submissionKey: SubmissionKey, retrySafety: RetrySafety)
+  case EpochExhausted(submissionKey: SubmissionKey)
   case OutboxInvariant(submissionKey: SubmissionKey, message: String)
   case JournalCorrupt(message: String)
   case JournalLocked(path: String)
@@ -73,6 +81,11 @@ enum ControlResult derives CanEqual:
   case IntentExisting(attempt: ManagedAttempt)
   case SubmissionClaimed(attempt: ManagedAttempt, outbox: OutboxEntry)
   case SubmissionAlreadyClaimed(attempt: ManagedAttempt)
+  case SubmissionRetried(
+      attempt: ManagedAttempt,
+      outbox: OutboxEntry,
+      authorization: RetryAuthorization
+  )
   case Updated(attempts: Vector[ManagedAttempt])
   case CancellationQueued(attempt: ManagedAttempt, outbox: OutboxEntry)
   case NoChange(attempt: Option[ManagedAttempt])
@@ -95,6 +108,8 @@ object ControlTransition:
         recordSubmission(state, key, epoch, result, at)
       case ControlCommand.RecoverSubmissionClaim(key, epoch, evidence, at) =>
         recoverSubmission(state, key, epoch, evidence, at)
+      case ControlCommand.RetrySubmission(key, expectedEpoch, authorization, at) =>
+        retrySubmission(state, key, expectedEpoch, authorization, at)
       case ControlCommand.ReconcileBinding(key, epoch, job, evidence, at) =>
         reconcileBinding(state, key, epoch, job, evidence, at)
       case ControlCommand.RecordObservations(requested, result, at) =>
@@ -150,6 +165,82 @@ object ControlTransition:
             ControlResult.IntentCreated(attempt),
             Vector(ManagedEvent.IntentRecorded(intent)),
             intent.recordedAt
+          )
+        )
+
+  private def retrySubmission(
+      state: ControlState,
+      key: SubmissionKey,
+      expectedEpoch: AttemptEpoch,
+      authorization: RetryAuthorization,
+      at: Instant
+  ): Either[ControlFailure, ControlCommit] =
+    checkedEpoch(state, key, expectedEpoch).flatMap { current =>
+      retryAuthorized(current, authorization).flatMap { _ =>
+        current.intent.epoch.next.left
+          .map(_ => ControlFailure.EpochExhausted(key))
+          .map { nextEpoch =>
+            val nextIntent = current.intent.copy(epoch = nextEpoch)
+            val updated = current.copy(
+              intent = nextIntent,
+              phase = ManagedPhase.IntentRecorded,
+              observation = ManagedObservation.Unobserved,
+              accounting = ManagedAccounting.Unobserved,
+              cancellation = ManagedCancellation.NotRequested,
+              updatedAt = at
+            )
+            val outbox = OutboxEntry(
+              submitOutboxId(nextIntent),
+              OutboxAction.Submit(key, nextEpoch),
+              OutboxStatus.Pending,
+              at
+            )
+            commit(
+              state.copy(
+                attempts = state.attempts.updated(key, updated),
+                outbox = state.outbox.updated(outbox.id, outbox)
+              ),
+              ControlResult.SubmissionRetried(updated, outbox, authorization),
+              Vector(
+                ManagedEvent.SubmissionRetried(
+                  key,
+                  current.intent.epoch,
+                  nextEpoch,
+                  authorization
+                )
+              ),
+              at
+            )
+          }
+      }
+    }
+
+  private def retryAuthorized(
+      current: ManagedAttempt,
+      authorization: RetryAuthorization
+  ): Either[ControlFailure, Unit] =
+    current.phase match
+      case _: ManagedPhase.SubmissionRejected | _: ManagedPhase.SubmissionUnavailable =>
+        Right(())
+      case _: ManagedPhase.Terminal =>
+        authorization match
+          case _: RetryAuthorization.Manual => Right(())
+          case _: RetryAuthorization.Automatic
+              if current.intent.retrySafety == RetrySafety.SafeForAutomaticRetry =>
+            Right(())
+          case _: RetryAuthorization.Automatic =>
+            Left(
+              ControlFailure.RetryNotAuthorized(
+                current.intent.submissionKey,
+                current.intent.retrySafety
+              )
+            )
+      case phase =>
+        Left(
+          ControlFailure.InvalidPhase(
+            current.intent.submissionKey,
+            phase,
+            "retry-submission"
           )
         )
 

@@ -1,7 +1,9 @@
 package io.github.bbuchsbaum.scalaslurm.managed
 
 import cats.data.NonEmptyVector
+import cats.effect.Deferred
 import cats.effect.IO
+import cats.effect.Outcome
 import cats.effect.Ref
 import cats.effect.Resource
 import cats.syntax.all.*
@@ -183,6 +185,14 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
       ControlCommand.ClaimSubmission(value.submissionKey, later),
       ControlCommand.RecordSubmission(value.submissionKey, value.epoch, accepted, later),
       ControlCommand.RecoverSubmissionClaim(value.submissionKey, value.epoch, evidence, later),
+      ControlCommand.RetrySubmission(
+        value.submissionKey,
+        value.epoch,
+        RetryAuthorization.Manual(
+          RetryReason.from("operator authorized a new scheduler submission").toOption.get
+        ),
+        later
+      ),
       ControlCommand.ReconcileBinding(value.submissionKey, value.epoch, job, evidence, later),
       ControlCommand.RecordObservations(NonEmptyVector.one(job), observation, later),
       ControlCommand.RecordAccounting(NonEmptyVector.one(job), accounting, later),
@@ -239,6 +249,104 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
     }
   }
 
+  test("cancellation before append leaves no record and the next revision remains replayable") {
+    exerciseCommitCancellation(JournalCommitBoundary.BeforeAppend, firstCommitSurvives = false)
+  }
+
+  test("cancellation after force publishes the committed state before it is observed") {
+    exerciseCommitCancellation(JournalCommitBoundary.AfterForce, firstCommitSurvives = true)
+  }
+
+  test("cancellation after publication preserves unique revisions across restart") {
+    exerciseCommitCancellation(JournalCommitBoundary.AfterPublication, firstCommitSurvives = true)
+  }
+
+  test("an epoch retry remains atomic under cancellation and replays with its new outbox") {
+    temporaryDirectory.use { directory =>
+      val path = directory.resolve("retry-cancellation.journal")
+      val value = intent("retry-cancellation")
+      val retry = ControlCommand.RetrySubmission(
+        value.submissionKey,
+        value.epoch,
+        RetryAuthorization.Automatic(
+          RetryReason.from("sbatch executable was restored").toOption.get
+        ),
+        later.plusSeconds(2L)
+      )
+      val unavailable = SubmissionAttempt.InvocationFailed(
+        InvocationResult.SpawnFailed(
+          SpawnFailureKind.ExecutableMissing,
+          Diagnostics.one(Diagnostic("sbatch-missing", "sbatch was not found")),
+          evidence
+        )
+      )
+      for
+        reached <- Deferred[IO, Unit]
+        release <- Deferred[IO, Unit]
+        armed <- Ref.of[IO, Boolean](false)
+        probe = new JournalCommitProbe[IO]:
+          def checkpoint(boundary: JournalCommitBoundary): IO[Unit] =
+            if boundary != JournalCommitBoundary.AfterForce then IO.unit
+            else
+              armed.get.ifM(
+                reached.complete(()).void *> release.get,
+                IO.unit
+              )
+        _ <- FileJournalControlStore
+          .openWithProbe[IO](path, JournalLimits.default, probe)
+          .use { store =>
+            for
+              _ <- store.transact(ControlCommand.RecordIntent(value))
+              _ <- store.transact(ControlCommand.ClaimSubmission(value.submissionKey, later))
+              _ <- store.transact(
+                ControlCommand.RecordSubmission(
+                  value.submissionKey,
+                  value.epoch,
+                  unavailable,
+                  later.plusSeconds(1L)
+                )
+              )
+              _ <- armed.set(true)
+              transaction <- store.transact(retry).start
+              _ <- reached.get
+              cancellation <- transaction.cancel.start
+              _ <- IO.cede.replicateA_(8)
+              _ <- release.complete(()).void
+              _ <- cancellation.join
+              outcome <- transaction.join
+              _ = assert(outcome.isInstanceOf[Outcome.Canceled[IO, Throwable, ?]])
+              snapshot <- store.snapshot
+              _ = assertEquals(snapshot.attempts(value.submissionKey).intent.epoch.value, 2L)
+              _ = assertEquals(
+                snapshot.attempts(value.submissionKey).phase,
+                ManagedPhase.IntentRecorded
+              )
+              _ <- armed.set(false)
+              _ <- store.transact(
+                ControlCommand.ClaimSubmission(value.submissionKey, later.plusSeconds(3L))
+              )
+            yield ()
+          }
+        _ <- FileJournalControlStore.open[IO](path).use { reopened =>
+          for
+            snapshot <- reopened.snapshot
+            attempt = snapshot.attempts(value.submissionKey)
+            _ = assertEquals(attempt.intent.epoch.value, 2L)
+            _ = assert(attempt.phase.isInstanceOf[ManagedPhase.Submitting])
+            _ = assert(
+              snapshot.outbox.values.exists(
+                _.action == OutboxAction.Submit(
+                  value.submissionKey,
+                  AttemptEpoch.from(2L).toOption.get
+                )
+              )
+            )
+          yield ()
+        }
+      yield ()
+    }
+  }
+
   private def temporaryDirectory: Resource[IO, Path] =
     Resource.make(IO.blocking(Files.createTempDirectory("scala-slurm-managed-")))(directory =>
       IO.blocking {
@@ -252,6 +360,75 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
           .foreach(path => Files.deleteIfExists(path))
       }.void
     )
+
+  private def exerciseCommitCancellation(
+      boundary: JournalCommitBoundary,
+      firstCommitSurvives: Boolean
+  ): IO[Unit] =
+    temporaryDirectory.use { directory =>
+      val path = directory.resolve(s"cancel-${boundary.toString}.journal")
+      val value = intent(s"cancel-${boundary.toString}")
+      for
+        reached <- Deferred[IO, Unit]
+        release <- Deferred[IO, Unit]
+        visited <- Ref.of[IO, Boolean](false)
+        probe = blockingProbe(boundary, reached, release, visited)
+        expectedRevision <- FileJournalControlStore
+          .openWithProbe[IO](path, JournalLimits.default, probe)
+          .use { store =>
+            for
+              transaction <- store.transact(ControlCommand.RecordIntent(value)).start
+              _ <- reached.get
+              cancellation <- transaction.cancel.start
+              _ <- IO.cede.replicateA_(8)
+              _ <- release.complete(()).void
+              _ <- cancellation.join
+              outcome <- transaction.join
+              afterCancellation <- store.snapshot
+              _ = assert(outcome.isInstanceOf[Outcome.Canceled[IO, Throwable, ?]])
+              _ =
+                if firstCommitSurvives then
+                  assertEquals(afterCancellation.revision.value, 1L)
+                  assert(afterCancellation.attempts.contains(value.submissionKey))
+                else assertEquals(afterCancellation, ControlState.empty)
+              next =
+                if firstCommitSurvives then
+                  ControlCommand.ClaimSubmission(value.submissionKey, later)
+                else ControlCommand.RecordIntent(value)
+              result <- store.transact(next)
+              _ = assert(result.isRight)
+              snapshot <- store.snapshot
+            yield snapshot.revision.value
+          }
+        _ <- FileJournalControlStore.open[IO](path).use { reopened =>
+          for
+            snapshot <- reopened.snapshot
+            page <- reopened.events(EventCursor.origin, 10)
+            cursors = page.events.map(_.cursor.value)
+            _ = assertEquals(snapshot.revision.value, expectedRevision)
+            _ = assertEquals(cursors, (1L to expectedRevision).toVector)
+            _ = assertEquals(cursors.distinct, cursors)
+            _ = assert(snapshot.attempts.contains(value.submissionKey))
+          yield ()
+        }
+      yield ()
+    }
+
+  private def blockingProbe(
+      target: JournalCommitBoundary,
+      reached: Deferred[IO, Unit],
+      release: Deferred[IO, Unit],
+      visited: Ref[IO, Boolean]
+  ): JournalCommitProbe[IO] = new JournalCommitProbe[IO]:
+    def checkpoint(boundary: JournalCommitBoundary): IO[Unit] =
+      if boundary != target then IO.unit
+      else
+        visited
+          .modify(alreadyVisited => true -> !alreadyVisited)
+          .flatMap(firstVisit =>
+            if firstVisit then reached.complete(()).void *> release.get
+            else IO.unit
+          )
 
   private def persistAndReopen(
       path: Path,

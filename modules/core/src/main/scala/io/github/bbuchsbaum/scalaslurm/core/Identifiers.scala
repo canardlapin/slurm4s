@@ -94,7 +94,14 @@ object AttemptEpoch:
   val initial: Type = 1L
   def from(raw: Long): Either[ValidationFailure, Type] =
     Either.cond(raw > 0L, raw, ValidationFailure("attemptEpoch", "must be positive"))
-  extension (epoch: Type) def value: Long = epoch
+  extension (epoch: Type)
+    def value: Long = epoch
+    def next: Either[ValidationFailure, Type] =
+      Either.cond(
+        epoch < Long.MaxValue,
+        epoch + 1L,
+        ValidationFailure("attemptEpoch", "cannot advance beyond Long.MaxValue")
+      )
 type AttemptEpoch = AttemptEpoch.Type
 
 object EventCursor:

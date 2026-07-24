@@ -36,7 +36,8 @@ final case class JobRequest[A](
     payload: Payload[A],
     resources: ResourceRequest,
     environment: Map[String, String] = Map.empty,
-    array: Option[JobArrayRequest] = None
+    array: Option[JobArrayRequest] = None,
+    retrySafety: RetrySafety = RetrySafety.Unknown
 )
 
 enum CapabilitySupport derives CanEqual:
