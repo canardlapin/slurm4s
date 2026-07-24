@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DME5ERHEDMAGVKMVAHJGC","kind":"note","note_kind":"note","op":"20260724T142031.801708Z-p33035-c0000-ra8b8-h811816","text":"Published resource-safe local/SSH/durable facades and compact SlurmTask call lowering; updated docs/examples; repository-wide sbt test and formatting gate passes.","ts":"2026-07-24T14:20:31.801708Z","v":1}

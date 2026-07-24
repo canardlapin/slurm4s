@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7EWFPBM03FNDRA15GG9692","kind":"note","note_kind":"progress","op":"20260723T125527.589226Z-p49767-c0003-rb19b-h8f1426","text":"Adding explicit authorized resubmission, epoch bump/reset/history semantics, core retry-safety provenance, wire persistence, and stale-evidence tests.","ts":"2026-07-23T12:55:27.589226Z","v":1}

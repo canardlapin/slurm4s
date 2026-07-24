@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMBDBD2W54J56SM0EKVTD","kind":"note","note_kind":"progress","op":"20260723T124202.434057Z-p41242-c0003-r60de-h68557a","text":"Making the durable append plus in-memory publication one masked commit, with deterministic probes at before-append, after-force, and after-publication boundaries.","ts":"2026-07-23T12:42:02.434057Z","v":1}

@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMBT1KRZJ7C0ZMBBM50CD","kind":"note","note_kind":"note","op":"20260724T145204.402207Z-p44815-c0000-rcd45-hbdc386","text":"Contained per-request handler failures and added redaction, continuation, framing-separation, and client-classification tests.","ts":"2026-07-24T14:52:04.402207Z","v":1}

@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DME5ERHEDMAGVKMVAHJGC","kind":"note","note_kind":"decision","op":"20260724T141942.044465Z-p32651-c0000-rbe0f-h0f0974","text":"Did not add awaitValue: the current agent has no remote registered-task/result endpoint, and a convenience method without that authority would be a fictitious API.","ts":"2026-07-24T14:19:42.044465Z","v":1}
