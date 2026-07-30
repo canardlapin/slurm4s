@@ -6,7 +6,7 @@
 
 ## Decision
 
-`scala-slurm-observability` provides an optional `TelemetryScheduler[F]` decorator and
+`slurm4s-observability` provides an optional `TelemetryScheduler[F]` decorator and
 `SchedulerTelemetrySink[F]` algebra. The decorator records one completed operation summary for
 capability discovery, submission, observation, accounting, and cancellation. A log, metrics, or
 trace adapter can consume that stable summary without becoming a dependency of the scheduler

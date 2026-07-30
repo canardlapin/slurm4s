@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Product requirements for scala-slurm, a typed, effectful, evidence-preserving Scala 3 interface to Slurm for local and SSH-mediated execution.">
-  <title>scala-slurm — Product Requirements Document</title>
+  <meta name="description" content="Product requirements for slurm4s, a typed, effectful, evidence-preserving Scala 3 interface to Slurm for local and SSH-mediated execution.">
+  <title>slurm4s — Product Requirements Document</title>
   <style>
     :root {
       color-scheme: light;
@@ -433,7 +433,7 @@
   <header class="hero">
     <div class="hero-inner">
       <p class="eyebrow">Founding product requirements · 22 July 2026</p>
-      <h1>scala-slurm</h1>
+      <h1>slurm4s</h1>
       <p class="lede">A typed, effectful, evidence-preserving Scala 3 interface to Slurm that remains truthful under queueing, partial failure, disconnection, requeue, opaque workloads, and typed remote computation.</p>
       <div class="meta" aria-label="Document metadata">
         <span class="pill">Status: founding draft</span>
@@ -479,7 +479,7 @@
       <section id="summary">
         <span class="section-number">01 · Executive summary</span>
         <h2>A low-level Slurm library built around truth, not happy paths</h2>
-        <p><strong>scala-slurm</strong> will provide Scala 3 applications with a composable interface to Slurm on the HPC system itself and from remote clients over SSH. It will expose Slurm's scheduling primitives without collapsing the different meanings of command invocation, scheduler acceptance, queue state, workload execution, logs, and typed results.</p>
+        <p><strong>slurm4s</strong> will provide Scala 3 applications with a composable interface to Slurm on the HPC system itself and from remote clients over SSH. It will expose Slurm's scheduling primitives without collapsing the different meanings of command invocation, scheduler acceptance, queue state, workload execution, logs, and typed results.</p>
         <p>The library has two related surfaces:</p>
         <ol>
           <li><strong>A raw typed scheduler interface</strong> for submission, observation, accounting, cancellation, capabilities, and logs.</li>
@@ -630,7 +630,7 @@
           </div>
         </div>
         <div class="callout warning">
-          <strong>Trust boundary.</strong> An opaque script is user-supplied code running with that user's Unix and Slurm authority. scala-slurm will avoid introducing additional command-injection paths, but it is not a workload sandbox.
+          <strong>Trust boundary.</strong> An opaque script is user-supplied code running with that user's Unix and Slurm authority. slurm4s will avoid introducing additional command-injection paths, but it is not a workload sandbox.
         </div>
       </section>
 
@@ -865,7 +865,7 @@ object Payload:
 
         <h3>Remote mode</h3>
         <p>The client uses the site's configured system OpenSSH executable and normal host aliases, host-key policy, agent, proxy, and MFA behavior. It starts or attaches to a fixed remote command:</p>
-        <pre><code>ssh &lt;configured-options&gt; &lt;host&gt; scala-slurm-agent serve --stdio</code></pre>
+        <pre><code>ssh &lt;configured-options&gt; &lt;host&gt; slurm4s-agent serve --stdio</code></pre>
         <p>The client and agent exchange framed, versioned messages. The remote command remains constant; user values are protocol data rather than interpolated shell fragments. The agent invokes Slurm commands locally on the cluster and owns only user-level state.</p>
 
         <h3>Agent lifecycle</h3>
@@ -1151,16 +1151,16 @@ enum MemoryRequest:
           <table>
             <thead><tr><th>Module</th><th>Responsibility</th><th>Introduced</th></tr></thead>
             <tbody>
-              <tr><td><code>scala-slurm-core</code></td><td>Pure IDs, requests, states, diagnostics, capabilities, workload/result contracts, laws</td><td>v0.1</td></tr>
-              <tr><td><code>scala-slurm-cli</code></td><td>Command construction, versioned DTOs/parsers, CLI scheduler interpreter</td><td>v0.1</td></tr>
-              <tr><td><code>scala-slurm-local</code></td><td>FS2 process execution on the target system</td><td>v0.1</td></tr>
-              <tr><td><code>scala-slurm-testkit</code></td><td>Fake scheduler, model reducer, virtual clock, fixtures, transport and fault injection</td><td>v0.1</td></tr>
-              <tr><td><code>scala-slurm-protocol</code></td><td>Versioned client-agent frames and durable wire values</td><td>v0.2</td></tr>
-              <tr><td><code>scala-slurm-agent</code></td><td>Remote application, local scheduler execution, log paging, worker supervision</td><td>v0.2</td></tr>
-              <tr><td><code>scala-slurm-ssh</code></td><td>System OpenSSH bootstrap, framing, reconnect, agent installation capability</td><td>v0.2</td></tr>
-              <tr><td><code>scala-slurm-managed</code></td><td>Control store, journal, outbox, reconciliation, coalesced observation</td><td>v0.3</td></tr>
-              <tr><td><code>scala-slurm-worker</code></td><td>Structured events, result envelopes, operation registry, typed task runtime</td><td>v0.4</td></tr>
-              <tr><td><code>scala-slurm-rest</code></td><td>Optional versioned <code>slurmrestd</code> interpreter</td><td>v0.5+</td></tr>
+              <tr><td><code>slurm4s-core</code></td><td>Pure IDs, requests, states, diagnostics, capabilities, workload/result contracts, laws</td><td>v0.1</td></tr>
+              <tr><td><code>slurm4s-cli</code></td><td>Command construction, versioned DTOs/parsers, CLI scheduler interpreter</td><td>v0.1</td></tr>
+              <tr><td><code>slurm4s-local</code></td><td>FS2 process execution on the target system</td><td>v0.1</td></tr>
+              <tr><td><code>slurm4s-testkit</code></td><td>Fake scheduler, model reducer, virtual clock, fixtures, transport and fault injection</td><td>v0.1</td></tr>
+              <tr><td><code>slurm4s-protocol</code></td><td>Versioned client-agent frames and durable wire values</td><td>v0.2</td></tr>
+              <tr><td><code>slurm4s-agent</code></td><td>Remote application, local scheduler execution, log paging, worker supervision</td><td>v0.2</td></tr>
+              <tr><td><code>slurm4s-ssh</code></td><td>System OpenSSH bootstrap, framing, reconnect, agent installation capability</td><td>v0.2</td></tr>
+              <tr><td><code>slurm4s-managed</code></td><td>Control store, journal, outbox, reconciliation, coalesced observation</td><td>v0.3</td></tr>
+              <tr><td><code>slurm4s-worker</code></td><td>Structured events, result envelopes, operation registry, typed task runtime</td><td>v0.4</td></tr>
+              <tr><td><code>slurm4s-rest</code></td><td>Optional versioned <code>slurmrestd</code> interpreter</td><td>v0.5+</td></tr>
             </tbody>
           </table>
         </div>
@@ -1280,7 +1280,7 @@ enum MemoryRequest:
           <table>
             <thead><tr><th>Question</th><th>Provisional direction</th><th>Decision point</th></tr></thead>
             <tbody>
-              <tr><td>Published organization, package, and module coordinates?</td><td>Use <code>scala-slurm</code> as the working product name; defer coordinates until build scaffold.</td><td>Phase 0</td></tr>
+              <tr><td>Published organization, package, and module coordinates?</td><td>Use <code>slurm4s</code> as the working product name; defer coordinates until build scaffold.</td><td>Phase 0</td></tr>
               <tr><td>Minimum supported Slurm versions?</td><td>Choose from access to real sites and fixture availability rather than current-latest alone.</td><td>Phase 0–1</td></tr>
               <tr><td>Default durable store?</td><td>Define <code>ControlStore[F]</code>; pilot a transactional embedded SQLite reference implementation.</td><td>Phase 3</td></tr>
               <tr><td>Agent framing format?</td><td>Length-prefixed canonical JSON first; preserve protocol version and bounded frames.</td><td>Phase 2</td></tr>
@@ -1330,14 +1330,14 @@ enum MemoryRequest:
         </div>
 
         <div class="callout">
-          <strong>Document authority.</strong> Until code and more focused ADRs exist, this PRD is the founding product and architecture contract for scala-slurm. Feasibility findings may refine it, but implementation must not silently weaken its uncertainty, durability, or evidence boundaries.
+          <strong>Document authority.</strong> Until code and more focused ADRs exist, this PRD is the founding product and architecture contract for slurm4s. Feasibility findings may refine it, but implementation must not silently weaken its uncertainty, durability, or evidence boundaries.
         </div>
       </section>
     </main>
   </div>
 
   <footer class="footer">
-    <p><strong>scala-slurm</strong> · Founding product requirements · 22 July 2026</p>
+    <p><strong>slurm4s</strong> · Founding product requirements · 22 July 2026</p>
     <p>Designed for truthful interaction with Slurm's asynchronous and failure-prone operational reality.</p>
   </footer>
 </body>

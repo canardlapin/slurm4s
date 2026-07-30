@@ -7,7 +7,7 @@
 ## Decision
 
 The v1 baseline uses standard Slurm commands. Each command is a closed `SlurmExecutable` value
-and an argument vector; scala-slurm never renders these values as a shell command. The local
+and an argument vector; slurm4s never renders these values as a shell command. The local
 runner maps that closed value to a configured executable path, disables inherited environment,
 applies an allowlist, drains stdout and stderr concurrently, retains each stream independently up
 to a byte limit capped by a local safety maximum, and kills the process through its resource

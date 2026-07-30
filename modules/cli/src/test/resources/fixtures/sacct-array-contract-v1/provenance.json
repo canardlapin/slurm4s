@@ -1,0 +1,21 @@
+{
+  "fixtureVersion": 1,
+  "contractSource": "schedmd-sacct-manual",
+  "sourceUrl": "https://slurm.schedmd.com/sacct.html",
+  "retrievedAt": "2026-07-24",
+  "command": [
+    "sacct",
+    "--noheader",
+    "--parsable2",
+    "--array",
+    "--allocations",
+    "--format=JobID,State,ExitCode,Reason",
+    "--jobs=9100_0,9100_1,9100_2,9100_3,9100_4"
+  ],
+  "clusterCapture": false,
+  "captureNote": "A live Trillium capture was attempted on 2026-07-24 but non-interactive SSH authentication was unavailable. Rows are explicit contract/regression cases derived from the authoritative SchedMD JobID and --array documentation; they are not represented as site output.",
+  "stdout": {
+    "bytes": 339,
+    "sha256": "9608c8eb998d292cf3178c5b5f997f372df7bfb879e1896875b6b350756d0738"
+  }
+}

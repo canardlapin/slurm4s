@@ -189,7 +189,7 @@
       },
       "mcs_label": "",
       "memory_per_tres": "",
-      "name": "scala-slurm-fixture",
+      "name": "slurm4s-fixture",
       "network": "",
       "nodes": "",
       "nice": 0,

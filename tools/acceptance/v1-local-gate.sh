@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_directory=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repository_root=$(cd "$script_directory/../.." && pwd)
-cache_root=${SCALA_SLURM_CACHE_ROOT:-${TMPDIR:-/tmp}/scala-slurm-v1-gate}
+cache_root=${SLURM4S_CACHE_ROOT:-${TMPDIR:-/tmp}/slurm4s-v1-gate}
 
 mkdir -p "$cache_root/coursier" "$cache_root/sbt" "$cache_root/ivy"
 
@@ -23,4 +23,4 @@ env \
   test \
   worker/packageBin
 
-echo 'scala-slurm v1 local evidence gate passed'
+echo 'slurm4s v1 local evidence gate passed'

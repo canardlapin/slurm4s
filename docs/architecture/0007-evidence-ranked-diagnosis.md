@@ -6,7 +6,7 @@
 
 ## Decision
 
-`scala-slurm-core` exposes a pure `Assessment[FailureDiagnosis]` with three outcomes:
+`slurm4s-core` exposes a pure `Assessment[FailureDiagnosis]` with three outcomes:
 `Confirmed`, `Suspected`, and `Undetermined`. Diagnosis combines already-observed submission,
 scheduler, accounting, worker, structured-result, and log evidence; it performs no effects and
 owns no polling, file, process, stream, or durable state.

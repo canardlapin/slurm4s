@@ -1,5 +1,5 @@
-# Minimal R producer for scala-slurm result envelope v1.
-# Requires jsonlite and openssl; these are workload helpers, not scala-slurm runtime dependencies.
+# Minimal R producer for slurm4s result envelope v1.
+# Requires jsonlite and openssl; these are workload helpers, not slurm4s runtime dependencies.
 
 sha256 <- function(bytes) {
   paste0("sha256:", as.character(openssl::sha256(bytes)))
@@ -22,7 +22,7 @@ encode_envelope <- function(payload) {
   }
   document <- list(
     protocol = list(major = 1L, minor = 0L),
-    schema = "scala-slurm.result-envelope",
+    schema = "slurm4s.result-envelope",
     payload = payload
   )
   text <- jsonlite::toJSON(canonicalize(document), auto_unbox = TRUE, null = "null", digits = NA)

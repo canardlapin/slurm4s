@@ -37,7 +37,7 @@ Status vocabulary:
 | F-11 | Local complete | Digest conflict, lost response, acceptance search, restart, and epoch-fence cases across managed tests | Exactly-once scheduler execution is not claimed. |
 | F-12 | Local complete | `WorkloadSuite`, opaque declared-output inspection in `WorkerRuntimeSuite` | Declared files still require independent filesystem observation. |
 | F-13 | Local complete | `StructuredResultCodecSuite`, Python byte-exact fixture, Python/R producers, Scala worker runtime | R is a reference example rather than a golden CI fixture. |
-| F-14 | Local complete | `WorkerRuntimeSuite`, `ResultAttachmentSuite`, compile-checked `scala-slurm-examples` module | Remote typed submission requires a target-side worker/launcher assembly. |
+| F-14 | Local complete | `WorkerRuntimeSuite`, `ResultAttachmentSuite`, compile-checked `slurm4s-examples` module | Remote typed submission requires a target-side worker/launcher assembly. |
 | F-15 | Local complete | Managed/native `FileTaskContext` cases in `WorkerRuntimeSuite`, ADR 0005 | Native context remains explicitly lower assurance. |
 | F-16 | Local complete | `ObservationCoordinatorSuite`, 4,096-job `ObservationScaleSuite` | Deterministic call counts do not model site latency or federation. |
 | F-17 | External pending | `JobArraySuite`, array parser/command tests, typed-array lowering in `WorkerRuntimeSuite` | Real Slurm array execution/accounting attribution is still required. |
@@ -68,7 +68,7 @@ tools/acceptance/v1-local-gate.sh
 
 The gate checks shell syntax, verifies the fail-closed fake-Slurm acceptance harness, validates
 that every F-01…F-18 and Q-01…Q-10 row remains present, runs formatting, executes the complete
-Scala 3.7.4 test suite, and packages the worker. `SCALA_SLURM_CACHE_ROOT` may point sbt and Coursier
+Scala 3.7.4 test suite, and packages the worker. `SLURM4S_CACHE_ROOT` may point sbt and Coursier
 at a writable cache root.
 
 At this snapshot, formatting passed, all **154 tests** passed, and `worker/packageBin` succeeded.

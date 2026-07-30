@@ -70,7 +70,7 @@ After establishing an authenticated shell on the site, copy or invoke:
 
 ```shell
 tools/acceptance/real-site-smoke.sh \
-  --output "$PWD/scala-slurm-site-capture" \
+  --output "$PWD/slurm4s-site-capture" \
   --data-parser v0.0.43
 ```
 
@@ -79,7 +79,7 @@ array smoke with the account/partition/QoS arguments required by the site:
 
 ```shell
 tools/acceptance/real-site-smoke.sh \
-  --output "$PWD/scala-slurm-site-smoke" \
+  --output "$PWD/slurm4s-site-smoke" \
   --data-parser v0.0.43 \
   --submit \
   --sbatch-arg=--account=REDACT_BEFORE_IMPORT \

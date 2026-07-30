@@ -1,6 +1,6 @@
-# scala-slurm
+# slurm4s
 
-scala-slurm is a Scala 3 library for truthful, low-level interaction with Slurm locally and
+slurm4s is a Scala 3 library for truthful, low-level interaction with Slurm locally and
 through a fixed agent protocol over OpenSSH. It models command invocation, scheduler acceptance,
 observation freshness, workload execution, logs, and typed result validation as distinct facts.
 
@@ -14,16 +14,17 @@ tests are the implementation authority.
 
 | Module | Boundary |
 | --- | --- |
-| `scala-slurm-core` | Pure IDs, evidence, requests, outcomes, result contracts, codecs, reducers |
-| `scala-slurm-cli` | Fixed command vectors, version-scoped parsers, capability probes, truthful scheduler interpreter |
-| `scala-slurm-local` | Cats Effect/FS2 process execution, private script staging, cursor-based local logs |
-| `scala-slurm-protocol` | Bounded framing, versioned messages, handshake, typed scheduler wire codecs |
-| `scala-slurm-agent` | Fixed stdio server, local scheduler assembly, page-based remote log service |
-| `scala-slurm-ssh` | System OpenSSH argv, bounded bidirectional process lifecycle, typed remote API |
-| `scala-slurm-managed` | Durable intent, command journal, outbox, reconciliation, cursored events, coalesced observation |
-| `scala-slurm-worker` | Declared-output inspection, typed launch staging, worker events, atomic result envelopes, registered task runtime, managed I/O contexts |
-| `scala-slurm-observability` | Optional bounded redacted scheduler events for log, metric, and trace adapters; never control authority |
-| `scala-slurm-testkit` | Pure attempt replay plus deterministic command/fault scripts |
+| `remote-exec-kernel` | Provider-neutral validated IDs, codecs, diagnostics/freshness, retry provenance, failure reports, and atomic filesystem mechanics |
+| `slurm4s-core` | Slurm requests, scheduler evidence/outcomes, result contracts, and reducers; depends downward on the neutral kernel |
+| `slurm4s-cli` | Fixed command vectors, version-scoped parsers, capability probes, truthful scheduler interpreter |
+| `slurm4s-local` | Cats Effect/FS2 process execution, private script staging, cursor-based local logs |
+| `slurm4s-protocol` | Bounded framing, versioned messages, handshake, typed scheduler wire codecs |
+| `slurm4s-agent` | Fixed stdio server, local scheduler assembly, page-based remote log service |
+| `slurm4s-ssh` | System OpenSSH argv, bounded bidirectional process lifecycle, typed remote API |
+| `slurm4s-managed` | Durable intent, command journal, outbox, reconciliation, cursored events, coalesced observation |
+| `slurm4s-worker` | Declared-output inspection, typed launch staging, worker events, atomic result envelopes, registered task runtime, managed I/O contexts |
+| `slurm4s-observability` | Optional bounded redacted scheduler events for log, metric, and trace adapters; never control authority |
+| `slurm4s-testkit` | Deterministic scheduler, command, log-read, and effect-failure programs with call traces |
 
 The core module depends on Cats and Circe but contains no Cats Effect or FS2 runtime values.
 Routine operational failures are data. An effect fails only for caller cancellation, defects, or
@@ -42,6 +43,8 @@ sbt scalafmtCheckAll
 The foundation and compatibility decisions are recorded in
 [`docs/architecture/0001-foundation-boundaries.md`](docs/architecture/0001-foundation-boundaries.md)
 and [`docs/compatibility.md`](docs/compatibility.md).
+Provider-neutral ownership and the compatibility window are recorded in
+[`docs/architecture/0010-provider-neutral-kernel.md`](docs/architecture/0010-provider-neutral-kernel.md).
 
 The local CLI implementation is described in
 [`docs/architecture/0002-local-cli-vertical.md`](docs/architecture/0002-local-cli-vertical.md).
@@ -71,21 +74,33 @@ Registered Scala operations can expose a compact call shape while retaining expl
 codecs in the worker definition:
 
 ```scala
-val request =
-  Increment(41).request(submissionKey, jobName, resources, maximumResultBytes)
+val options =
+  RemoteTaskOptions(submissionKey, jobName, resources, maximumResultBytes)
+
+val answer: IO[Int] =
+  remote
+    .submitOrRaise(Increment(41), options)
+    .flatMap(_.awaitValue)
 ```
 
-The current remote agent still accepts opaque scripts only. Target-side registered-task staging
-and typed result reattachment remain explicit rather than being hidden behind a façade that cannot
-yet honor them.
+`submit` is the non-throwing form and returns `Either[RemoteSubmitFailure, RemoteTaskHandle]`.
+`submitOrRaise` and `awaitValue` are explicit conveniences; their exceptions retain the typed
+failure or complete `RemoteExecutionResult`. Persist `handle.descriptor` to reattach from a new
+process: `RemoteTaskDescriptor.encode` and `decode` provide the bounded, versioned durable form,
+and `remote.attach(descriptor, Increment.outputCodec)` resumes polling.
 
-To install the agent on an HPC host, package the `agent` module as the executable
-`scala-slurm-agent` and configure a private workspace:
+To enable registered tasks, the target agent needs a private workspace and an application worker
+executable containing the same versioned task registry:
 
 ```shell
-export SCALA_SLURM_WORKSPACE=/path/to/private/scala-slurm
-scala-slurm-agent serve --stdio
+export SLURM4S_WORKSPACE=/path/to/private/slurm4s
+export SLURM4S_WORKER_EXECUTABLE=/path/to/my-registered-worker
+export SLURM4S_WORKER_RELEASE_ID=my-worker-2026-07-24
+export SLURM4S_WORKER_RELEASE_DIGEST=sha256:deployed-worker-content
+export SLURM4S_ALLOWED_ENVIRONMENT=LANG,OMP_NUM_THREADS
+slurm4s-agent serve --stdio
 ```
 
-The command is intended to be launched by the library over OpenSSH. Its stdout is reserved for
-framed protocol bytes.
+The worker distribution owns the registered Scala implementations; the protocol sends only an
+operation/version descriptor and bounded encoded input. The agent command is launched by the
+library over OpenSSH, and its stdout is reserved for framed protocol bytes.

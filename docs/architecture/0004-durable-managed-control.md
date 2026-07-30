@@ -6,7 +6,7 @@
 
 ## Decision
 
-The optional managed surface is implemented in `scala-slurm-managed`. Its authority is a
+The optional managed surface is implemented in `slurm4s-managed`. Its authority is a
 `ControlStore[F]` containing canonical submission intent, attempt projection, transactional
 outbox, and an append-only committed event journal. `ManagedController[F]` coordinates that store
 with the existing transport-neutral `Scheduler[F]`; it does not make a fiber, SSH connection,
@@ -51,7 +51,7 @@ Each transaction is:
 
 - a four-byte bounded length followed by canonical versioned JSON;
 - tagged with prior and resulting store revisions;
-- bound to schema `scala-slurm.control-command` and protocol major 1;
+- bound to schema `slurm4s.control-command` and protocol major 1;
 - protected by a SHA-256 checksum over the canonical command JSON;
 - appended under one lifetime file lock and forced to stable storage before the in-memory
   projection changes.

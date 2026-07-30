@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMCMRQDRWYA7GJDT3SHZ3","kind":"reserve_open","mode":"exclusive","op":"20260730T132645.957089Z-p99440-c0000-r959e-h0cb365","paths":["modules/ssh/src/main/scala/io/github/bbuchsbaum/scalaslurm/ssh/SshAgentWireClient.scala"],"reservation_id":"rv-01KYSK9FE5EP30G3WYNJJW9WBT","ts":"2026-07-30T13:26:45.957089Z","ttl_s":3600,"v":1}

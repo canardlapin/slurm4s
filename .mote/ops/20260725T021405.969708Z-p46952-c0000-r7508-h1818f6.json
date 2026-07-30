@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KYB7YZ2PM2J6D59AAHXQWXJA","kind":"note","note_kind":"progress","op":"20260725T021405.969708Z-p46952-c0000-r7508-h1818f6","text":"Post-close packaging confirmation: sbt +package passed in scala-slurm (13 projects, Scala 3.7.4) and Sojourn (8 projects, Scala 3.7.4).","ts":"2026-07-25T02:14:05.969708Z","v":1}

@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMCTNVM199YXWB0F12TXK","kind":"note","note_kind":"progress","op":"20260724T221550.378533Z-p33649-c0003-re5ff-h5d6e71","text":"Make worker event delivery bounded, non-authoritative, and diagnostically visible","ts":"2026-07-24T22:15:50.378533Z","v":1}

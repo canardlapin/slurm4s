@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMC5075C5VA0MSKXPDQYD","kind":"note","note_kind":"progress","op":"20260724T145950.938701Z-p52239-c0003-r5eee-h390b20","text":"Align sacct argv and parser around documented JobID array identity and isolate row failures","ts":"2026-07-24T14:59:50.938701Z","v":1}

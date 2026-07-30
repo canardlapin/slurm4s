@@ -8,14 +8,20 @@
 
 Remote control uses the user's system OpenSSH client and a small Scala agent on the HPC login
 host. The local process argv ends in the invariant command
-`TARGET scala-slurm-agent serve --stdio`. It includes `-T -o RequestTTY=no`; workload names,
-scripts, arguments, resource requests, job identifiers, log locators, and cursors travel only in
-protocol frames. Connection configuration is limited to typed OpenSSH options before the target.
-A target cannot begin with `-` or contain whitespace or control characters.
+`TARGET slurm4s-agent serve --stdio`. It includes
+`-T -o RequestTTY=no -o BatchMode=yes`; workload names, scripts, arguments, resource requests, job
+identifiers, log locators, and cursors travel only in protocol frames. Connection configuration is
+limited to typed OpenSSH options before the target. A target cannot begin with `-` or contain
+whitespace or control characters.
 
-The library does not implement SSH, read private keys, persist credentials, force `BatchMode`, or
-replace host-key policy. Normal OpenSSH configuration remains authoritative for identities,
-agents, known hosts, proxy jumps, control sockets, and interactive authentication. The
+The library does not implement SSH, read private keys, persist credentials, or replace host-key
+policy. Normal OpenSSH configuration remains authoritative for identities, agents, known hosts,
+proxy jumps, and control sockets. Non-interactive authentication is the safe default so a missing
+credential fails within the typed process outcome rather than waiting for input.
+`SshAuthentication.ConfiguredInteractive` is an explicit compatibility opt-in that emits
+`BatchMode=no`. In that mode the calling application owns the local controlling terminal,
+authentication prompts, and exchange timeout; slurm4s still does not allocate a remote TTY or
+route prompts through protocol stdin. The
 [OpenBSD ssh manual](https://man.openbsd.org/OpenBSD-7.7/ssh.1) specifies that `-T` disables
 pseudo-terminal allocation and that standard input/output are forwarded to a remote command. The
 [OpenBSD ssh_config manual](https://man.openbsd.org/OpenBSD-current/man/ssh_config) documents the
@@ -35,12 +41,13 @@ advertised oversized payload. Envelopes carry a request ID, `{major, minor}` pro
 message kind, method or response status, body, and retained additive extensions.
 
 Handshake negotiates the smaller frame limit and an intersection of features. Major-version
-mismatch is a distinct value. The P2 method set is capabilities, opaque ExitOnly script
-submission, observation, accounting, cancellation, and bounded log reads. Registered typed tasks
-and typed result envelopes remain a P4 protocol addition; they are rejected rather than silently
-treated as opaque scripts.
+mismatch is a distinct value. The method set includes capabilities, opaque ExitOnly script
+submission, registered-task submission, observation, accounting, cancellation, bounded log
+reads, and bounded typed-result reads. An agent advertises registered tasks and typed results only
+when a target worker is configured and the negotiated frame can carry their owned wire forms.
+Registered tasks are never silently treated as opaque scripts.
 
-The agent executable requires `SCALA_SLURM_WORKSPACE`, assembles the same `SlurmCliScheduler` used
+The agent executable requires `SLURM4S_WORKSPACE`, assembles the same `SlurmCliScheduler` used
 locally, confines script and log access to that private workspace, and emits protocol bytes only
 on stdout while serving. It invokes the standard Slurm commands by argv, never through a shell.
 The stdio server can accept fragmented or coalesced frames and drains its response stream through
@@ -79,7 +86,8 @@ unavailable and carries degradation reasons. Callers must opt into those weaker 
 
 - The framing suite covers every two-part split, coalesced frames, pre-allocation size rejection,
   zero lengths, and truncated EOF.
-- The stdio suite drives a handshake through fragmented frames and checks the exact fixed command.
+- The command suite proves both default `BatchMode=yes` argv and explicit interactive opt-in. The
+  stdio suite drives a handshake through fragmented frames and checks the exact fixed command.
 - One scheduler scenario suite runs capabilities, submission, observation, accounting, and
   cancellation directly and through encoded agent frames, then compares the complete domain
   results.
@@ -89,4 +97,3 @@ unavailable and carries degradation reasons. Callers must opt into those weaker 
   failure, and protocol-major mismatch.
 - A disconnect-after-acceptance test proves that losing a client session does not invoke
   cancellation.
-

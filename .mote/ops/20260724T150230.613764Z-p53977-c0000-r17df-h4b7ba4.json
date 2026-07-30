@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMC5075C5VA0MSKXPDQYD","kind":"note","note_kind":"note","op":"20260724T150230.613764Z-p53977-c0000-r17df-h4b7ba4","text":"Corrected array accounting identity and row isolation; split authenticated real-site capture into a non-blocking follow-up rather than mislabeling synthetic data.","ts":"2026-07-24T15:02:30.613764Z","v":1}

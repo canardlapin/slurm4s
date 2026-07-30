@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal standard-library producer for scala-slurm result envelope v1."""
+"""Minimal standard-library producer for slurm4s result envelope v1."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def output_entry(root: Path, relative: str) -> dict[str, Any]:
 def encode_envelope(payload: dict[str, Any]) -> bytes:
     document = {
         "protocol": {"major": 1, "minor": 0},
-        "schema": "scala-slurm.result-envelope",
+        "schema": "slurm4s.result-envelope",
         "payload": payload,
     }
     return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()

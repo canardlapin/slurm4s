@@ -1,0 +1,109 @@
+package io.github.bbuchsbaum.slurm4s.protocol
+
+import io.github.bbuchsbaum.slurm4s.core.*
+import io.github.bbuchsbaum.slurm4s.core.codec.CodecFailure
+import io.github.bbuchsbaum.slurm4s.core.codec.VersionedJson
+import io.github.bbuchsbaum.slurm4s.core.codec.WireEnvelope
+
+import java.time.Instant
+
+/** Transport form of a registered task. It contains an operation descriptor and already-encoded
+  * input bytes, never a Scala function, closure, codec implementation, or suspended effect.
+  */
+final case class RemoteRegisteredTaskRequest(
+    submissionKey: SubmissionKey,
+    name: JobName,
+    operation: RegisteredOperation,
+    inputBytes: Vector[Byte],
+    resources: ResourceRequest,
+    environment: Map[EnvName, String],
+    maximumResultBytes: ByteLimit,
+    declaredOutputs: Vector[RelativeOutputPath],
+    retrySafety: RetrySafety
+) derives CanEqual
+
+/** Durable, path-free locator interpreted relative to the agent's private worker workspace. */
+final case class RemoteResultRef(
+    attemptId: AttemptId,
+    attemptEpoch: AttemptEpoch
+) derives CanEqual
+
+final case class RemoteRegisteredSubmission(
+    resultRef: RemoteResultRef,
+    resultHandle: DurableResultHandle,
+    submission: SubmissionAttempt
+) derives CanEqual
+
+enum RemoteResultRead derives CanEqual:
+  case Pending(observedAt: Instant)
+  case Available(
+      storedHandle: DurableResultHandle,
+      envelopeBytes: Vector[Byte],
+      observedAt: Instant
+  )
+  case Failed(
+      diagnostics: Diagnostics,
+      evidence: EvidenceBundle,
+      observedAt: Instant
+  )
+
+object RemoteTaskWireLimits:
+  val MaximumHandleBytes: ByteLimit = ByteLimit.defaultEvidence
+  val MaximumDescriptorBytes: ByteLimit = ByteLimit.maximumCommandCapture
+
+enum RemoteTaskDescriptorCodecFailure derives CanEqual:
+  case TooLarge(actualBytes: Long, maximumBytes: Int)
+  case Envelope(failure: CodecFailure)
+  case WrongSchema(received: String)
+  case Invalid(message: String)
+
+object RemoteRegisteredSubmissionCodec:
+  private val SchemaName = "slurm4s.remote-task-descriptor"
+
+  def encode(
+      value: RemoteRegisteredSubmission,
+      maximumBytes: ByteLimit = RemoteTaskWireLimits.MaximumDescriptorBytes
+  ): Either[RemoteTaskDescriptorCodecFailure, Vector[Byte]] =
+    for
+      schema <- SchemaId
+        .from(SchemaName)
+        .left
+        .map(problem => RemoteTaskDescriptorCodecFailure.Invalid(problem.reason))
+      payload <- AgentDomainJson
+        .encodeRemoteSubmission(value)
+        .left
+        .map(RemoteTaskDescriptorCodecFailure.Invalid.apply)
+      bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, payload))
+      _ <- bounded(bytes.size.toLong, maximumBytes)
+    yield bytes
+
+  def decode(
+      bytes: Vector[Byte],
+      maximumBytes: ByteLimit = RemoteTaskWireLimits.MaximumDescriptorBytes
+  ): Either[RemoteTaskDescriptorCodecFailure, RemoteRegisteredSubmission] =
+    for
+      _ <- bounded(bytes.size.toLong, maximumBytes)
+      envelope <- VersionedJson
+        .decode(bytes)
+        .left
+        .map(RemoteTaskDescriptorCodecFailure.Envelope.apply)
+      _ <- Either.cond(
+        envelope.schema.value == SchemaName,
+        (),
+        RemoteTaskDescriptorCodecFailure.WrongSchema(envelope.schema.value)
+      )
+      value <- AgentDomainJson
+        .decodeRemoteSubmission(envelope.payload)
+        .left
+        .map(RemoteTaskDescriptorCodecFailure.Invalid.apply)
+    yield value
+
+  private def bounded(
+      actualBytes: Long,
+      maximumBytes: ByteLimit
+  ): Either[RemoteTaskDescriptorCodecFailure, Unit] =
+    Either.cond(
+      actualBytes <= maximumBytes.value.toLong,
+      (),
+      RemoteTaskDescriptorCodecFailure.TooLarge(actualBytes, maximumBytes.value)
+    )

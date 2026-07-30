@@ -199,7 +199,7 @@ if ((${#sbatch_arguments[@]} > 0)); then
 fi
 submission_argv+=(
   --parsable
-  --job-name=scala-slurm-smoke
+  --job-name=slurm4s-smoke
   "--output=$stdout_template"
   "--error=$stderr_template"
   --time=1

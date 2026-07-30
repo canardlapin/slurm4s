@@ -12,7 +12,7 @@ ThisBuild / tlJdkRelease := Some(17)
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"), JavaSpec.temurin("21"))
 ThisBuild / tlCiScalafmtCheck := true
 ThisBuild / tlCiHeaderCheck := false
-ThisBuild / scalacOptions += "-Xmax-inlines:64"
+ThisBuild / scalacOptions ++= Seq("-Xmax-inlines:64", "-language:strictEquality")
 ThisBuild / Test / fork := true
 
 lazy val commonSettings = Seq(
@@ -28,6 +28,7 @@ lazy val root = project
   .in(file("."))
   .enablePlugins(NoPublishPlugin)
   .aggregate(
+    kernel,
     core,
     cli,
     protocol,
@@ -40,17 +41,31 @@ lazy val root = project
     observability,
     examples
   )
-  .settings(name := "scala-slurm")
+  .settings(name := "slurm4s")
+
+lazy val kernel = project
+  .in(file("modules/kernel"))
+  .settings(commonSettings)
+  .settings(
+    name := "remote-exec-kernel",
+    libraryDependencies ++= Seq(
+      Libraries.catsCore,
+      Libraries.catsEffect,
+      Libraries.scodecBits
+    )
+  )
 
 lazy val core = project
   .in(file("modules/core"))
+  .dependsOn(kernel)
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-core",
+    name := "slurm4s-core",
     libraryDependencies ++= Seq(
       Libraries.catsCore,
       Libraries.circeCore,
-      Libraries.circeParser
+      Libraries.circeParser,
+      Libraries.scodecBits
     )
   )
 
@@ -58,18 +73,19 @@ lazy val cli = project
   .in(file("modules/cli"))
   .dependsOn(core)
   .settings(commonSettings)
-  .settings(name := "scala-slurm-cli")
+  .settings(name := "slurm4s-cli")
 
 lazy val protocol = project
   .in(file("modules/protocol"))
   .dependsOn(core)
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-protocol",
+    name := "slurm4s-protocol",
     libraryDependencies ++= Seq(
       Libraries.circeCore,
       Libraries.circeGeneric,
-      Libraries.circeParser
+      Libraries.circeParser,
+      Libraries.scodecBits
     )
   )
 
@@ -78,16 +94,16 @@ lazy val testkit = project
   .dependsOn(core, cli)
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-testkit",
+    name := "slurm4s-testkit",
     libraryDependencies += Libraries.catsEffect
   )
 
 lazy val local = project
   .in(file("modules/local"))
-  .dependsOn(core, cli, testkit % "test->compile")
+  .dependsOn(kernel, core, cli, testkit % "test->compile")
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-local",
+    name := "slurm4s-local",
     libraryDependencies ++= Seq(
       Libraries.catsEffect,
       Libraries.fs2Core,
@@ -97,24 +113,24 @@ lazy val local = project
 
 lazy val agent = project
   .in(file("modules/agent"))
-  .dependsOn(core, protocol, cli, local)
+  .dependsOn(core, protocol, cli, local, worker)
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-agent",
+    name := "slurm4s-agent",
     libraryDependencies ++= Seq(
       Libraries.catsEffect,
       Libraries.fs2Core,
       Libraries.fs2Io
     ),
-    Compile / mainClass := Some("io.github.bbuchsbaum.scalaslurm.agent.AgentMain")
+    Compile / mainClass := Some("io.github.bbuchsbaum.slurm4s.agent.AgentMain")
   )
 
 lazy val ssh = project
   .in(file("modules/ssh"))
-  .dependsOn(core, protocol, agent, testkit % "test->compile")
+  .dependsOn(core, protocol, agent, worker, testkit % "test->compile")
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-ssh",
+    name := "slurm4s-ssh",
     libraryDependencies ++= Seq(
       Libraries.catsEffect,
       Libraries.fs2Core,
@@ -127,7 +143,7 @@ lazy val managed = project
   .dependsOn(core, protocol, testkit % "test->compile")
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-managed",
+    name := "slurm4s-managed",
     libraryDependencies ++= Seq(
       Libraries.catsEffect,
       Libraries.fs2Core,
@@ -139,10 +155,10 @@ lazy val managed = project
 
 lazy val worker = project
   .in(file("modules/worker"))
-  .dependsOn(core, protocol)
+  .dependsOn(kernel, core, protocol)
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-worker",
+    name := "slurm4s-worker",
     libraryDependencies ++= Seq(
       Libraries.catsEffect,
       Libraries.fs2Core,
@@ -152,10 +168,10 @@ lazy val worker = project
 
 lazy val observability = project
   .in(file("modules/observability"))
-  .dependsOn(core)
+  .dependsOn(core, testkit % "test->compile")
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-observability",
+    name := "slurm4s-observability",
     libraryDependencies += Libraries.catsEffect
   )
 
@@ -165,10 +181,10 @@ lazy val examples = project
   .dependsOn(core, cli, protocol, local, agent, ssh, managed, worker, observability)
   .settings(commonSettings)
   .settings(
-    name := "scala-slurm-examples"
+    name := "slurm4s-examples"
   )
 
 addCommandAlias(
   "checkFormatting",
-  ";core/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
+  ";kernel/scalafmtCheckAll;core/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
 )

@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMDT1TT5NFBY1XV875QSM","kind":"note","note_kind":"progress","op":"20260725T004920.568874Z-p11334-c0003-rbeac-hdf4cc8","text":"Completing atomic local script staging by extracting the shared primitive into a scheduler-neutral kernel module while preserving the worker facade.","ts":"2026-07-25T00:49:20.568874Z","v":1}

@@ -1,0 +1,27 @@
+{
+  "fixtureSchemaVersion": 1,
+  "fixtureId": "synthetic-slurm-parser-edge-v1",
+  "clusterCapture": false,
+  "generatedAt": "2026-07-30T00:00:00Z",
+  "contract": "scontrol key-boundary parsing and squeue requested-row isolation",
+  "streams": {
+    "scontrol": {
+      "file": "scontrol.txt",
+      "bytes": 134,
+      "sha256": "eaba7dbe4c90aae7c3532c3828036fd3c34b817b6bce9ac77a89879cc1f7f884"
+    },
+    "squeue": {
+      "file": "squeue.json",
+      "bytes": 327,
+      "sha256": "06868e54b9fd91b663cce6d2ce381c31d13eae113efae39c44f59fcaa7203afb"
+    }
+  },
+  "coverage": [
+    "spaced values",
+    "unknown state and reason",
+    "empty fields",
+    "non-ASCII text",
+    "unknown fields",
+    "mixed good and malformed unrelated records"
+  ]
+}

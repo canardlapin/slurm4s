@@ -35,8 +35,8 @@ These values contain no Cats Effect or FS2 runtime objects.
 ## Wire protocol
 
 `ResultEnvelopeCodec`, `WorkerEventCodec`, `DurableResultHandleCodec`, and `TaskInvocationCodec`
-use canonical UTF-8 JSON under protocol major 1 and schemas `scala-slurm.result-envelope`,
-`scala-slurm.worker-event`, `scala-slurm.result-handle`, and `scala-slurm.task-invocation`.
+use canonical UTF-8 JSON under protocol major 1 and schemas `slurm4s.result-envelope`,
+`slurm4s.worker-event`, `slurm4s.result-handle`, and `slurm4s.task-invocation`.
 Decoders apply byte ceilings before parsing or Base64 allocation. Input, result, envelope, and
 event records have independent limits. Output count is bounded, output paths are relative, and
 duplicate paths are rejected.
@@ -48,7 +48,7 @@ lock. A completed target is never overwritten by another library publisher.
 
 The Python golden fixture proves that a non-Scala producer is accepted and re-encodes to the same
 bytes. The Python example uses only the standard library. The R helper uses `jsonlite` and
-`openssl`, neither of which becomes a scala-slurm runtime dependency.
+`openssl`, neither of which becomes a slurm4s runtime dependency.
 
 ## Registered Scala runtime
 

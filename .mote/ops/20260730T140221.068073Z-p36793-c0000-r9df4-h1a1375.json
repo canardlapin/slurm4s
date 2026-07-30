@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KYNA5E517YB38ZAAP970X8YY","kind":"reserve_open","mode":"exclusive","op":"20260730T140221.068073Z-p36793-c0000-r9df4-h1a1375","paths":["project/Dependencies.scala","build.sbt","docs/architecture/0012-scodec-bits-byte-storage.md"],"reservation_id":"rv-01KYSNAMGCGG7MPTTM0C98Q6AQ","ts":"2026-07-30T14:02:21.068073Z","ttl_s":3600,"v":1}

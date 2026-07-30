@@ -1,11 +1,11 @@
 # Compile-checked public API examples
 
-The `scala-slurm-examples` module is executable documentation. Its main sources compile against
+The `slurm4s-examples` module is executable documentation. Its main sources compile against
 the published modules on Scala 3.7.4, but the examples module itself is not published. This makes
 API drift a build failure without adding an examples artifact to the library surface.
 
 The complete source is
-`modules/examples/src/main/scala/io/github/bbuchsbaum/scalaslurm/examples/PublicApiExamples.scala`.
+`modules/examples/src/main/scala/io/github/bbuchsbaum/slurm4s/examples/PublicApiExamples.scala`.
 It covers the following low-level workflows.
 
 ## Opaque scripts: local and remote
@@ -27,7 +27,7 @@ The acquired `RemoteSlurm[F]` delegates the `AgentApi[F]` operations. If negotia
 operation returns that same `AgentCall.Failed` value; resource acquisition does not erase
 authentication, transport, or protocol failure.
 
-The SSH command is a fixed argument vector that starts `scala-slurm-agent serve --stdio`. The
+The SSH command is a fixed argument vector that starts `slurm4s-agent serve --stdio`. The
 request is a bounded protocol frame; no user script or argument is interpolated into a shell
 command.
 
@@ -93,9 +93,23 @@ check submission identity, attempt epoch, operation, schema, worker release, res
 and declared output evidence before returning `ExecutionResult[Int]`. A workload failure, invalid
 result, or indeterminate read remains distinct from a typed success.
 
-Remote typed submission remains a separate protocol milestone. The current SSH agent publishes
-opaque submission, observation, accounting, cancellation, and bounded log reads; it does not
-pretend that a target-side `RegisteredTaskLauncher` is already remotely available.
+`RemoteSlurm.submit(task(input), options)` now sends an owned, versioned registered-operation
+request to the target agent. The target `RegisteredTaskLauncher` stages only encoded input and a
+fixed worker launch, then returns a durable path-free result reference together with the complete
+`SubmissionAttempt`. `RemoteTaskHandle.await` performs bounded result reads and validates attempt
+epoch, operation, schema, worker release, declared outputs, and result limits. Its descriptor can
+be persisted and attached through a newly negotiated `RemoteSlurm`.
+
+For the compact exception-based edge, use:
+
+```scala
+remote
+  .submitOrRaise(task(41), options)
+  .flatMap(_.awaitValue)
+```
+
+The application worker installed on the HPC still owns the task registry. The protocol never
+ships a Scala function, codec implementation, or suspended effect.
 
 The examples tests exercise validation, log resumption, remote failure separation, bounded empty
 restart recovery, and typed schema binding without requiring Slurm or SSH.

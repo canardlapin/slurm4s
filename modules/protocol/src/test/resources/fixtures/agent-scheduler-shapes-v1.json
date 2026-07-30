@@ -1,0 +1,1020 @@
+{
+  "submissions" : {
+    "accepted" : {
+      "Completed" : {
+        "value" : {
+          "Accepted" : {
+            "job" : {
+              "jobId" : "4242",
+              "cluster" : "alpha",
+              "arrayIndex" : 7
+            },
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "rejected" : {
+      "Completed" : {
+        "value" : {
+          "Rejected" : {
+            "diagnostics" : [
+              {
+                "code" : "shape-fixture",
+                "message" : "a stable diagnostic",
+                "fields" : {
+                  "field" : "value"
+                }
+              },
+              {
+                "code" : "shape-fixture-second",
+                "message" : "another stable diagnostic",
+                "fields" : {
+
+                }
+              }
+            ],
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "preparation-failed" : {
+      "PreparationFailed" : {
+        "diagnostics" : [
+          {
+            "code" : "shape-fixture",
+            "message" : "a stable diagnostic",
+            "fields" : {
+              "field" : "value"
+            }
+          },
+          {
+            "code" : "shape-fixture-second",
+            "message" : "another stable diagnostic",
+            "fields" : {
+
+            }
+          }
+        ]
+      }
+    },
+    "invocation-exited" : {
+      "InvocationFailed" : {
+        "result" : {
+          "Exited" : {
+            "exitCode" : 3,
+            "stdout" : {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            },
+            "stderr" : {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            }
+          }
+        }
+      }
+    },
+    "invocation-timed-out" : {
+      "InvocationFailed" : {
+        "result" : {
+          "TimedOut" : {
+            "after" : 1500,
+            "stdout" : {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            },
+            "stderr" : {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            }
+          }
+        }
+      }
+    },
+    "acceptance-unknown-response-lost" : {
+      "Completed" : {
+        "value" : {
+          "AcceptanceUnknown" : {
+            "reason" : {
+              "ResponseLost" : {
+
+              }
+            },
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "acceptance-unknown-transport-interrupted" : {
+      "Completed" : {
+        "value" : {
+          "AcceptanceUnknown" : {
+            "reason" : {
+              "TransportInterrupted" : {
+
+              }
+            },
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "acceptance-unknown-response-unparseable" : {
+      "Completed" : {
+        "value" : {
+          "AcceptanceUnknown" : {
+            "reason" : {
+              "ResponseUnparseable" : {
+
+              }
+            },
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "acceptance-unknown-persistence-interrupted" : {
+      "Completed" : {
+        "value" : {
+          "AcceptanceUnknown" : {
+            "reason" : {
+              "PersistenceInterrupted" : {
+
+              }
+            },
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "acceptance-unknown-unclassified" : {
+      "Completed" : {
+        "value" : {
+          "AcceptanceUnknown" : {
+            "reason" : {
+              "Unclassified" : {
+
+              }
+            },
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "invocation-spawn-executable-missing" : {
+      "InvocationFailed" : {
+        "result" : {
+          "SpawnFailed" : {
+            "kind" : {
+              "ExecutableMissing" : {
+
+              }
+            },
+            "diagnostics" : [
+              {
+                "code" : "shape-fixture",
+                "message" : "a stable diagnostic",
+                "fields" : {
+                  "field" : "value"
+                }
+              },
+              {
+                "code" : "shape-fixture-second",
+                "message" : "another stable diagnostic",
+                "fields" : {
+
+                }
+              }
+            ],
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "invocation-spawn-permission-denied" : {
+      "InvocationFailed" : {
+        "result" : {
+          "SpawnFailed" : {
+            "kind" : {
+              "PermissionDenied" : {
+
+              }
+            },
+            "diagnostics" : [
+              {
+                "code" : "shape-fixture",
+                "message" : "a stable diagnostic",
+                "fields" : {
+                  "field" : "value"
+                }
+              },
+              {
+                "code" : "shape-fixture-second",
+                "message" : "another stable diagnostic",
+                "fields" : {
+
+                }
+              }
+            ],
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "invocation-spawn-working-directory-missing" : {
+      "InvocationFailed" : {
+        "result" : {
+          "SpawnFailed" : {
+            "kind" : {
+              "WorkingDirectoryMissing" : {
+
+              }
+            },
+            "diagnostics" : [
+              {
+                "code" : "shape-fixture",
+                "message" : "a stable diagnostic",
+                "fields" : {
+                  "field" : "value"
+                }
+              },
+              {
+                "code" : "shape-fixture-second",
+                "message" : "another stable diagnostic",
+                "fields" : {
+
+                }
+              }
+            ],
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "invocation-spawn-environment-invalid" : {
+      "InvocationFailed" : {
+        "result" : {
+          "SpawnFailed" : {
+            "kind" : {
+              "EnvironmentInvalid" : {
+
+              }
+            },
+            "diagnostics" : [
+              {
+                "code" : "shape-fixture",
+                "message" : "a stable diagnostic",
+                "fields" : {
+                  "field" : "value"
+                }
+              },
+              {
+                "code" : "shape-fixture-second",
+                "message" : "another stable diagnostic",
+                "fields" : {
+
+                }
+              }
+            ],
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "invocation-spawn-resource-unavailable" : {
+      "InvocationFailed" : {
+        "result" : {
+          "SpawnFailed" : {
+            "kind" : {
+              "ResourceUnavailable" : {
+
+              }
+            },
+            "diagnostics" : [
+              {
+                "code" : "shape-fixture",
+                "message" : "a stable diagnostic",
+                "fields" : {
+                  "field" : "value"
+                }
+              },
+              {
+                "code" : "shape-fixture-second",
+                "message" : "another stable diagnostic",
+                "fields" : {
+
+                }
+              }
+            ],
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "invocation-spawn-spawn-unknown" : {
+      "InvocationFailed" : {
+        "result" : {
+          "SpawnFailed" : {
+            "kind" : {
+              "Unknown" : {
+
+              }
+            },
+            "diagnostics" : [
+              {
+                "code" : "shape-fixture",
+                "message" : "a stable diagnostic",
+                "fields" : {
+                  "field" : "value"
+                }
+              },
+              {
+                "code" : "shape-fixture-second",
+                "message" : "another stable diagnostic",
+                "fields" : {
+
+                }
+              }
+            ],
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "cancellations" : {
+    "acknowledged" : {
+      "Completed" : {
+        "value" : {
+          "Acknowledged" : {
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "not-found" : {
+      "Completed" : {
+        "value" : {
+          "NotFound" : {
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "rejected" : {
+      "Completed" : {
+        "value" : {
+          "Rejected" : {
+            "diagnostics" : [
+              {
+                "code" : "shape-fixture",
+                "message" : "a stable diagnostic",
+                "fields" : {
+                  "field" : "value"
+                }
+              },
+              {
+                "code" : "shape-fixture-second",
+                "message" : "another stable diagnostic",
+                "fields" : {
+
+                }
+              }
+            ],
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "unknown" : {
+      "Completed" : {
+        "value" : {
+          "Unknown" : {
+            "diagnostics" : [
+              {
+                "code" : "shape-fixture",
+                "message" : "a stable diagnostic",
+                "fields" : {
+                  "field" : "value"
+                }
+              },
+              {
+                "code" : "shape-fixture-second",
+                "message" : "another stable diagnostic",
+                "fields" : {
+
+                }
+              }
+            ],
+            "evidence" : {
+              "primary" : {
+                "source" : {
+                  "CommandStdout" : {
+                    "command" : "squeue"
+                  }
+                },
+                "observedAt" : "2026-07-25T12:00:00Z",
+                "bytesBase64" : "AH+A/w==",
+                "originalByteCount" : 4
+              },
+              "related" : [
+                {
+                  "source" : {
+                    "CommandStdout" : {
+                      "command" : "squeue"
+                    }
+                  },
+                  "observedAt" : "2026-07-25T12:00:00Z",
+                  "bytesBase64" : "AH+A/w==",
+                  "originalByteCount" : 4
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "invocation-failed" : {
+      "InvocationFailed" : {
+        "result" : {
+          "Exited" : {
+            "exitCode" : 1,
+            "stdout" : {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            },
+            "stderr" : {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            }
+          }
+        }
+      }
+    }
+  },
+  "capabilities" : {
+    "succeeded" : {
+      "Succeeded" : {
+        "value" : {
+          "slurmVersion" : "25.05.6",
+          "cluster" : "alpha",
+          "structuredQueue" : {
+            "Supported" : {
+
+            }
+          },
+          "structuredAccounting" : {
+            "Unsupported" : {
+
+            }
+          },
+          "accounting" : {
+            "Unknown" : {
+              "diagnostics" : [
+                {
+                  "code" : "shape-fixture",
+                  "message" : "a stable diagnostic",
+                  "fields" : {
+                    "field" : "value"
+                  }
+                },
+                {
+                  "code" : "shape-fixture-second",
+                  "message" : "another stable diagnostic",
+                  "fields" : {
+
+                  }
+                }
+              ]
+            }
+          },
+          "arrays" : {
+            "Supported" : {
+
+            }
+          },
+          "rawEvidence" : [
+            {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            }
+          ]
+        }
+      }
+    },
+    "empty" : {
+      "Empty" : {
+        "observedAt" : "2026-07-25T12:00:00Z",
+        "evidence" : {
+          "primary" : {
+            "source" : {
+              "CommandStdout" : {
+                "command" : "squeue"
+              }
+            },
+            "observedAt" : "2026-07-25T12:00:00Z",
+            "bytesBase64" : "AH+A/w==",
+            "originalByteCount" : 4
+          },
+          "related" : [
+            {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            }
+          ]
+        }
+      }
+    },
+    "invocation-failed" : {
+      "InvocationFailed" : {
+        "result" : {
+          "Exited" : {
+            "exitCode" : 2,
+            "stdout" : {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            },
+            "stderr" : {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            }
+          }
+        }
+      }
+    },
+    "parse-failed" : {
+      "ParseFailed" : {
+        "diagnostics" : [
+          {
+            "code" : "shape-fixture",
+            "message" : "a stable diagnostic",
+            "fields" : {
+              "field" : "value"
+            }
+          },
+          {
+            "code" : "shape-fixture-second",
+            "message" : "another stable diagnostic",
+            "fields" : {
+
+            }
+          }
+        ],
+        "evidence" : {
+          "primary" : {
+            "source" : {
+              "CommandStdout" : {
+                "command" : "squeue"
+              }
+            },
+            "observedAt" : "2026-07-25T12:00:00Z",
+            "bytesBase64" : "AH+A/w==",
+            "originalByteCount" : 4
+          },
+          "related" : [
+            {
+              "source" : {
+                "CommandStdout" : {
+                  "command" : "squeue"
+                }
+              },
+              "observedAt" : "2026-07-25T12:00:00Z",
+              "bytesBase64" : "AH+A/w==",
+              "originalByteCount" : 4
+            }
+          ]
+        }
+      }
+    }
+  }
+}

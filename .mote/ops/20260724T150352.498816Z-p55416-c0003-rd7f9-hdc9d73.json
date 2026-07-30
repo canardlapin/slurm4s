@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMCAB7NF865GCJTS8APBJ","kind":"note","note_kind":"progress","op":"20260724T150352.498816Z-p55416-c0003-rd7f9-hdc9d73","text":"Move JobRequest environment keys behind EnvName and make local override rejection typed and loud","ts":"2026-07-24T15:03:52.498816Z","v":1}

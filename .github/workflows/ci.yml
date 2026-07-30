@@ -224,5 +224,5 @@ jobs:
       - name: Submit Dependencies
         uses: scalacenter/sbt-dependency-submission@v2
         with:
-          modules-ignore: scala-slurm-examples_3 scala-slurm_3
+          modules-ignore: slurm4s-examples_3 slurm4s_3
           configs-ignore: test scala-tool scala-doc-tool test-internal

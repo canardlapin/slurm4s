@@ -1,0 +1,10 @@
+9100_[0-7%2]|PENDING|0:0|None
+9100_0|COMPLETED|0:0|None
+9100_0.batch|COMPLETED|0:0|None
+9100_1|OUT_OF_MEMORY|0:9|OutOfMemory
+9100_1.extern|COMPLETED|0:0|None
+9100_2|TIMEOUT|0:15|TimeLimit
+9100_3|FUTURE_STATE|Unknown|FutureReason
+9100_4|FAILED|not-an-exit|MalformedRequestedRow
+9999|FAILED|2:0|UnrelatedJob
+malformed-row-without-delimiters

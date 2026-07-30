@@ -40,7 +40,7 @@ receive a narrower classification, while unknown exit-255 failures remain transp
 ## Managed journal
 
 The reference managed store persists bounded, length-framed canonical JSON records under schema
-`scala-slurm.control-command` and protocol major 1. Each record carries contiguous prior/new store
+`slurm4s.control-command` and protocol major 1. Each record carries contiguous prior/new store
 revisions, a typed command, and a checksum of the canonical command object. Unknown major or
 schema, checksum mismatch, revision gap, or an invalid replay transition is corruption. Only an
 incomplete final frame is uncommitted and may be truncated during open.
@@ -55,11 +55,11 @@ replay and committed-event cursor laws.
 
 The worker protocol defines four canonical JSON schemas at protocol major 1:
 
-- `scala-slurm.worker-event` for bounded start, progress, process-exit, failure, and
+- `slurm4s.worker-event` for bounded start, progress, process-exit, failure, and
   result-publication records;
-- `scala-slurm.result-envelope` for one atomic-last structured result.
-- `scala-slurm.result-handle` for type-erased durable reattachment identity and limits.
-- `scala-slurm.task-invocation` for registered operation identity and bounded encoded input.
+- `slurm4s.result-envelope` for one atomic-last structured result.
+- `slurm4s.result-handle` for type-erased durable reattachment identity and limits.
+- `slurm4s.task-invocation` for registered operation identity and bounded encoded input.
 
 A result envelope binds submission key, attempt ID and epoch, optional Slurm binding, script or
 registered-operation identity, result schema, status, bounded value bytes, output paths, output
@@ -81,7 +81,7 @@ operation, worker release, and observed output size/digest before invoking `Resu
 
 A target-side worker distribution used by `RegisteredTaskLauncher` implements the fixed argv
 contract `run --invocation PATH --result PATH --events PATH`. These paths are library-generated,
-quoted launch data; input values remain inside `scala-slurm.task-invocation`. Changing the command
+quoted launch data; input values remain inside `slurm4s.task-invocation`. Changing the command
 shape requires a worker-launch protocol version rather than an unannounced script change.
 
 ## Slurm
@@ -112,5 +112,21 @@ interpreter fails as an unsupported parser rather than decoding a different vers
 
 Array identity is part of compatibility. The CLI renders and matches `jobId_arrayIndex`, parses
 `array_job_id` plus `array_task_id` from structured queue output, and parses the numeric suffix in
-accounting `JobIDRaw`. A response that omits an element or reports a sibling cannot satisfy that
+the accounting `JobID` field, which `sacct --array` expands to one row per task. `JobIDRaw` is
+deliberately not requested: it reports the underlying sequential id rather than the array identity
+the caller submitted. A response that omits an element or reports a sibling cannot satisfy that
 element's observation or result contract.
+
+Leaving the queue is not a query failure. `squeue --jobs` exits non-zero once a named job is no
+longer queued, which is how every job ends. Only the documented
+`slurm_load_jobs error: Invalid job id specified` diagnostic is recognized, and only as absence,
+conservatively in the same way as the SSH transport's exit-255 handling. Any other non-zero exit
+remains an invocation failure.
+
+Absence is claimed only for jobs the response actually accounts for. A readable response names
+everything still queued, so whatever it omits is genuinely gone. An unreadable response allows that
+claim only when a single job was named, because it is then the job that was rejected. An unreadable
+response naming several jobs yields `squeue-absence-ambiguous`: some of those jobs may still be
+running, and reporting them absent would be a fabricated answer rather than a cautious one. Whether
+`squeue` emits partial queue state alongside the diagnostic is not yet established by capture, and
+this rule is correct under either behaviour.

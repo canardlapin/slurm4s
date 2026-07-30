@@ -1,0 +1,17 @@
+{
+  "jobs": [
+    {
+      "job_id": 9300,
+      "job_state": ["FUTURE_STATE"],
+      "state_reason": "Waiting for café nodes",
+      "comment": "",
+      "site_metadata": {
+        "label": "α|β"
+      }
+    },
+    {
+      "job_id": 9999,
+      "comment": "malformed unrelated row intentionally lacks job_state"
+    }
+  ]
+}

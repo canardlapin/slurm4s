@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMCZJFWN5R7PH7JH5N9PR","kind":"note","note_kind":"progress","op":"20260730T133046.041801Z-p3627-c0003-r9d80-h8dc4c1","text":"Adding bounded-cache recent event paging, unlocked old-cursor fallback with transient-tail retry, and deterministic no-scan/nonblocking-writer proofs.","ts":"2026-07-30T13:30:46.041801Z","v":1}

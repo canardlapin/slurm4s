@@ -17,7 +17,7 @@
     "sbatch",
     "--parsable",
     "--array=0-1%1",
-    "--job-name=scala-slurm-fixture",
+    "--job-name=slurm4s-fixture",
     "--wrap=/usr/bin/true"
   ],
   "slurmVersion": "25.05.6",
@@ -32,9 +32,9 @@
   "exitCode": 0,
   "streams": {
     "stdout": {
-      "bytes": 8698,
+      "bytes": 8694,
       "truncated": false,
-      "sha256": "f1973d25706a0ee64cbd5d3f5ada3185091e7adc2dcd28fafc7d6a9deb31838f"
+      "sha256": "f7f8d2560e2255a72da84d2cdb53a9ac2a8b13819685d9c27dd2556a5fa4901b"
     },
     "stderr": {
       "bytes": 0,

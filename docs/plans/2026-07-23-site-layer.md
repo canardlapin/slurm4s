@@ -1,4 +1,4 @@
-# Plan: scala-slurm compute layer ("Site" layer)
+# Plan: slurm4s compute layer ("Site" layer)
 
 ## Context
 
@@ -197,7 +197,7 @@ during development.
 
 ## Phase 3 — `modules/site`
 
-New sbt module `scala-slurm-site` depending on core, managed, worker, ssh, local
+New sbt module `slurm4s-site` depending on core, managed, worker, ssh, local
 (+ `testkit % "test->compile"`); add to the root aggregate AND the hand-enumerated
 `checkFormatting` alias in `build.sbt`; publishes (no `publish/skip`).
 Scheduler-neutral vocabulary; Slurm words stay below the boundary.
@@ -274,6 +274,6 @@ acceptance evidence against disposable-slurm.
 
 Phase 3 now lives in the standalone `~/code/scala/sojourn` repo (artifact
 `sojourn-core`, package `io.github.bbuchsbaum.sojourn`); ADR-0010 moved there as
-ADR-0001. Phases 0/2 remain scala-slurm work; phases 3b-3e execute in sojourn
-against locally-published scala-slurm artifacts (0.1.0-SNAPSHOT via
+ADR-0001. Phases 0/2 remain slurm4s work; phases 3b-3e execute in sojourn
+against locally-published slurm4s artifacts (0.1.0-SNAPSHOT via
 `core/publishLocal`, widening to managed/worker/ssh/local at integration).

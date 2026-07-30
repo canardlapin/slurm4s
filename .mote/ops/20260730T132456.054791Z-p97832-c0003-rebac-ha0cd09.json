@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMCG3XW05W694X458N01R","kind":"note","note_kind":"progress","op":"20260730T132456.054791Z-p97832-c0003-rebac-ha0cd09","text":"Implementing non-interactive OpenSSH authentication as the default, explicit interactive opt-in, argv proof, and ADR ownership documentation.","ts":"2026-07-30T13:24:56.054791Z","v":1}

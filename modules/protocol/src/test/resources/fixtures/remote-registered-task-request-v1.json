@@ -1,0 +1,30 @@
+{
+  "wireVersion": 1,
+  "submissionKey": "remote-increment-41",
+  "name": "remote-increment",
+  "operation": {
+    "id": "example.increment",
+    "version": "1",
+    "inputSchema": "example.int-input.v1",
+    "outputSchema": "example.int-result.v1"
+  },
+  "inputBase64": "AH+A/w==",
+  "resources": {
+    "cpusPerTask": 2,
+    "tasks": 1,
+    "nodes": null,
+    "memory": {
+      "kind": "per-node",
+      "mebibytes": 2048
+    },
+    "wallTimeMinutes": 30
+  },
+  "environment": {
+    "LANG": "C.UTF-8"
+  },
+  "maximumResultBytes": 2048,
+  "declaredOutputs": [
+    "results/out.bin"
+  ],
+  "retrySafety": "safe-for-automatic-retry"
+}

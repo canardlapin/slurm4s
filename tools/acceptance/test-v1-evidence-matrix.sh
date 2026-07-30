@@ -24,13 +24,13 @@ for prefix in F Q; do
 done
 
 required_paths=(
-  modules/core/src/main/scala/io/github/bbuchsbaum/scalaslurm/core/FailureDiagnosis.scala
-  modules/examples/src/main/scala/io/github/bbuchsbaum/scalaslurm/examples/PublicApiExamples.scala
-  modules/ssh/src/test/scala/io/github/bbuchsbaum/scalaslurm/ssh/SshAgentConformanceSuite.scala
-  modules/managed/src/main/scala/io/github/bbuchsbaum/scalaslurm/managed/ManagedRequestPolicy.scala
-  modules/managed/src/test/scala/io/github/bbuchsbaum/scalaslurm/managed/ObservationScaleSuite.scala
-  modules/observability/src/main/scala/io/github/bbuchsbaum/scalaslurm/observability/SchedulerTelemetry.scala
-  modules/worker/src/test/scala/io/github/bbuchsbaum/scalaslurm/worker/WorkerRuntimeSuite.scala
+  modules/core/src/main/scala/io/github/bbuchsbaum/slurm4s/core/FailureDiagnosis.scala
+  modules/examples/src/main/scala/io/github/bbuchsbaum/slurm4s/examples/PublicApiExamples.scala
+  modules/ssh/src/test/scala/io/github/bbuchsbaum/slurm4s/ssh/SshAgentConformanceSuite.scala
+  modules/managed/src/main/scala/io/github/bbuchsbaum/slurm4s/managed/ManagedRequestPolicy.scala
+  modules/managed/src/test/scala/io/github/bbuchsbaum/slurm4s/managed/ObservationScaleSuite.scala
+  modules/observability/src/main/scala/io/github/bbuchsbaum/slurm4s/observability/SchedulerTelemetry.scala
+  modules/worker/src/test/scala/io/github/bbuchsbaum/slurm4s/worker/WorkerRuntimeSuite.scala
   modules/cli/src/test/resources/fixtures/slurm-25.05.6-v0.0.43-actual/provenance.json
   tools/acceptance/real-site-smoke.sh
 )

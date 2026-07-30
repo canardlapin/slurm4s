@@ -6,8 +6,8 @@
 
 ## Decision
 
-scala-slurm is published under `io.github.bbuchsbaum` with package root
-`io.github.bbuchsbaum.scalaslurm`. The build uses sbt 1.11.7, Scala 3.7.4 as its sole publication
+slurm4s is published under `io.github.bbuchsbaum` with package root
+`io.github.bbuchsbaum.slurm4s`. The build uses sbt 1.11.7, Scala 3.7.4 as its sole publication
 and verification baseline, and JDK 17 as the minimum runtime. Changing the Scala minor line is an
 explicit compatibility decision rather than an incidental current-release refresh.
 sbt 2 is deliberately deferred until its plugin ecosystem has accumulated more production use;
@@ -15,7 +15,7 @@ this is a build-only choice and does not affect library semantics.
 
 Dependencies are exact pins. Cats Core is admitted for functional data and validation. Cats
 Effect and FS2 are confined to interpreter/application modules. Circe supplies the JSON AST and
-parser, while scala-slurm owns version negotiation and canonical bytes. MUnit and ScalaCheck are
+parser, while slurm4s owns version negotiation and canonical bytes. MUnit and ScalaCheck are
 the initial executable specification tools. sbt-scalafmt remains on the 2.5 line because 2.6 has
 raised its minimum sbt version beyond this build baseline; that migration must be intentional.
 

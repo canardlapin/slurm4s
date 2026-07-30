@@ -28,7 +28,7 @@ change could make previously committed history unreadable.
 This boundary prevents accidental persistence of environment credentials through the managed API
 by default. It does not inspect arbitrary opaque script bytes, arguments, staged files, or declared
 public values for hidden secrets. Callers must not embed credentials in those workload artifacts.
-SSH authentication remains owned by system OpenSSH; scala-slurm does not read or journal its
+SSH authentication remains owned by system OpenSSH; slurm4s does not read or journal its
 private keys, agents, or authentication tokens.
 
 Secret references and target-side secret resolution may be added as a separate typed capability.

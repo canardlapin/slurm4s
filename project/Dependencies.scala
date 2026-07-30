@@ -7,6 +7,7 @@ object Dependencies {
     val catsEffect = "3.7.0"
     val fs2 = "3.13.0"
     val circe = "0.14.16"
+    val scodecBits = "1.2.4"
     val munit = "1.3.0"
     val munitCatsEffect = "2.2.0"
     val scalaCheck = "1.19.0"
@@ -20,6 +21,7 @@ object Dependencies {
     val circeCore = "io.circe" %% "circe-core" % Versions.circe
     val circeGeneric = "io.circe" %% "circe-generic" % Versions.circe
     val circeParser = "io.circe" %% "circe-parser" % Versions.circe
+    val scodecBits = "org.scodec" %% "scodec-bits" % Versions.scodecBits
     val munit = "org.scalameta" %% "munit" % Versions.munit
     val munitScalaCheck = "org.scalameta" %% "munit-scalacheck" % Versions.munit
     val munitCatsEffect = "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect

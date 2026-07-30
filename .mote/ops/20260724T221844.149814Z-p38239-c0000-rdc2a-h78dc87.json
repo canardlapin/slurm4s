@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KY7DMCTNVM199YXWB0F12TXK","kind":"note","note_kind":"note","op":"20260724T221844.149814Z-p38239-c0000-rdc2a-h78dc87","text":"Made worker events bounded observability only; authoritative result publication and typed task failures no longer depend on the sink.","ts":"2026-07-24T22:18:44.149814Z","v":1}

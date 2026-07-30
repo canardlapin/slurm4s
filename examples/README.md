@@ -15,5 +15,5 @@ inspection, and structured mode publishes the v1 envelope last.
 
 Compile-checked Scala 3.7.4 usage for local submission, framed SSH submission, declared outputs,
 resumable logs, durable recovery, and typed tasks lives in
-`modules/examples/src/main/scala/io/github/bbuchsbaum/scalaslurm/examples/PublicApiExamples.scala`.
+`modules/examples/src/main/scala/io/github/bbuchsbaum/slurm4s/examples/PublicApiExamples.scala`.
 The accompanying guide is `docs/examples/public-api.md`.

@@ -8,7 +8,7 @@ tools/acceptance/v1-local-gate.sh
 
 It validates the requirement matrix, shell harness, Scala 3.7.4 formatting/tests, and worker
 package. It does not contact a cluster and cannot satisfy the external P5 evidence gates. Set
-`SCALA_SLURM_CACHE_ROOT` when sbt and Coursier need a specific writable cache root. The audited
+`SLURM4S_CACHE_ROOT` when sbt and Coursier need a specific writable cache root. The audited
 status is recorded in `docs/acceptance/v1-evidence.md`.
 
 ## Real-site capture
