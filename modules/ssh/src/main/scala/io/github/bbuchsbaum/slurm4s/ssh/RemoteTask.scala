@@ -117,7 +117,10 @@ final class RemoteTaskHandle[F[_]: Async, A] private[ssh] (
     val descriptor: RemoteTaskDescriptor,
     contract: ResultContract.Structured[A],
     policy: RemoteAwaitPolicy,
-    accountingArrayIndex: Option[ArrayIndex]
+    accountingArrayIndex: Option[ArrayIndex],
+    // Shared across the handles of one batch, so awaiting N elements does not open N simultaneous
+    // SSH processes. A lone handle has no one to share with and passes `unbounded`.
+    budget: RemoteExchangeBudget[F]
 ):
   def submission: SubmissionAttempt = descriptor.submission.submission
   def resultHandle: DurableResultHandle = descriptor.submission.resultHandle
@@ -154,7 +157,7 @@ final class RemoteTaskHandle[F[_]: Async, A] private[ssh] (
       attempt: Long,
       failures: Int
   ): F[RemoteExecutionResult[A]] =
-    remote.readResult(resultRef, resultHandle.maximumEnvelopeBytes).flatMap {
+    budget.use(remote.readResult(resultRef, resultHandle.maximumEnvelopeBytes)).flatMap {
       case AgentCall.Failed(failure) =>
         // Losing one round trip says nothing about the job, which is still running and will still
         // publish its result. Ride it out rather than discarding a wait with hours left.
@@ -232,7 +235,7 @@ final class RemoteTaskHandle[F[_]: Async, A] private[ssh] (
     job match
       case None        => AccountingProbe.Inconclusive.pure[F]
       case Some(value) =>
-        remote.accounting(NonEmptyVector.one(value)).map {
+        budget.use(remote.accounting(NonEmptyVector.one(value))).map {
           case AgentCall.Failed(failure) =>
             AccountingProbe.Unavailable(RemoteExecutionResult.AgentUnavailable(failure))
           case AgentCall.Succeeded(result @ SchedulerQueryResult.InvocationFailed(_)) =>
@@ -310,7 +313,8 @@ private[ssh] object RemoteTasks:
                     RemoteTaskDescriptor(submission),
                     contract,
                     options.awaitPolicy,
-                    None
+                    None,
+                    RemoteExchangeBudget.unbounded[F]
                   )
                 }
             }
@@ -343,7 +347,14 @@ private[ssh] object RemoteTasks:
         .from(codec, handle.maximumResultBytes, handle.declaredOutputs)
         .left
         .map(RemoteSubmitFailure.InvalidOptions.apply)
-    yield RemoteTaskHandle(remote, descriptor, contract, policy, None)
+    yield RemoteTaskHandle(
+      remote,
+      descriptor,
+      contract,
+      policy,
+      None,
+      RemoteExchangeBudget.unbounded[F]
+    )
 
   private def validatePolicy(policy: RemoteAwaitPolicy): Either[RemoteSubmitFailure, Unit] =
     Either.cond(
