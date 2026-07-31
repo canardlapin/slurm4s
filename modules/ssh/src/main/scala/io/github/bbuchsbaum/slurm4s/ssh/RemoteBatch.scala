@@ -8,7 +8,7 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
-import io.github.bbuchsbaum.slurm4s.worker.SlurmBatch
+import io.github.bbuchsbaum.slurm4s.task.SlurmBatch
 
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files

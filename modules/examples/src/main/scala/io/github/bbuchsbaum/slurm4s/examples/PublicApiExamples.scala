@@ -9,6 +9,7 @@ import fs2.io.process.Processes
 import io.github.bbuchsbaum.slurm4s.protocol.AgentApi
 import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
+import io.github.bbuchsbaum.slurm4s.task.*
 import io.github.bbuchsbaum.slurm4s.local.*
 import io.github.bbuchsbaum.slurm4s.managed.*
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall

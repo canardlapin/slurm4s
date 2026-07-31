@@ -42,6 +42,7 @@ lazy val root = project
     kernel,
     core,
     batch,
+    task,
     cli,
     protocol,
     testkit,
@@ -60,9 +61,11 @@ lazy val kernel = project
   .settings(commonSettings)
   .settings(
     name := "remote-exec-kernel",
+    // No Cats Effect: ADR 0001 confines it to interpreter and application modules, and the only
+    // reason this artifact carried it was a set of Sync-shaped convenience wrappers over blocking
+    // calls that every production caller already bypassed.
     libraryDependencies ++= Seq(
       Libraries.catsCore,
-      Libraries.catsEffect,
       Libraries.scodecBits
     )
   )
@@ -93,6 +96,15 @@ lazy val batch = project
   .settings(commonSettings)
   .settings(
     name := "slurm4s-batch",
+    libraryDependencies += Libraries.catsCore
+  )
+
+lazy val task = project
+  .in(file("modules/task"))
+  .dependsOn(core, batch)
+  .settings(commonSettings)
+  .settings(
+    name := "slurm4s-task",
     libraryDependencies += Libraries.catsCore
   )
 
@@ -148,14 +160,15 @@ lazy val agent = project
 
 lazy val ssh = project
   .in(file("modules/ssh"))
-  // The SSH client no longer depends on the agent (server) module: AgentApi moved to
-  // protocol, where the wire contract belongs. The remaining worker edge is the typed task/batch
-  // vocabulary and is tracked separately.
+  // The SSH client depends on neither the agent (server) nor the worker (execution) module.
+  // AgentApi moved to protocol, where the wire contract belongs, and the submittable half of a task
+  // moved to `task` as TaskDefinition — a client sends an operation and encoded input, it never
+  // executes anything, so it has no business naming `run`.
   .dependsOn(
     core,
     batch,
+    task,
     protocol,
-    worker,
     // Test-only: the conformance suites drive a real in-process agent. A client may TEST against a
     // server; it may not COMPILE against one.
     agent % "test->compile",
@@ -188,7 +201,7 @@ lazy val managed = project
 
 lazy val worker = project
   .in(file("modules/worker"))
-  .dependsOn(kernel, core, batch, protocol)
+  .dependsOn(kernel, core, batch, task, protocol)
   .settings(commonSettings)
   .settings(
     name := "slurm4s-worker",
@@ -211,7 +224,19 @@ lazy val observability = project
 lazy val examples = project
   .in(file("modules/examples"))
   .enablePlugins(NoPublishPlugin)
-  .dependsOn(core, batch, cli, protocol, local, agent, ssh, managed, worker, observability)
+  .dependsOn(
+    core,
+    batch,
+    task,
+    cli,
+    protocol,
+    local,
+    agent,
+    ssh,
+    managed,
+    worker,
+    observability
+  )
   .settings(commonSettings)
   .settings(
     name := "slurm4s-examples"
@@ -219,5 +244,5 @@ lazy val examples = project
 
 addCommandAlias(
   "checkFormatting",
-  ";kernel/scalafmtCheckAll;core/scalafmtCheckAll;batch/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
+  ";kernel/scalafmtCheckAll;core/scalafmtCheckAll;batch/scalafmtCheckAll;task/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
 )

@@ -11,8 +11,8 @@ import io.github.bbuchsbaum.slurm4s.protocol.AgentApi
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
 import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
-import io.github.bbuchsbaum.slurm4s.worker.SlurmTaskCall
-import io.github.bbuchsbaum.slurm4s.worker.SlurmBatch
+import io.github.bbuchsbaum.slurm4s.task.SlurmTaskCall
+import io.github.bbuchsbaum.slurm4s.task.SlurmBatch
 
 import java.nio.charset.StandardCharsets
 

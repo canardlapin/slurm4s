@@ -5,7 +5,7 @@ import cats.effect.Async
 import cats.syntax.all.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
-import io.github.bbuchsbaum.slurm4s.worker.SlurmTaskCall
+import io.github.bbuchsbaum.slurm4s.task.SlurmTaskCall
 
 import scala.concurrent.duration.*
 

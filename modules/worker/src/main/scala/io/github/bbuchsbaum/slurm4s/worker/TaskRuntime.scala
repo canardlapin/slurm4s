@@ -9,11 +9,7 @@ import io.github.bbuchsbaum.slurm4s.core.*
 
 import scala.concurrent.duration.*
 
-trait ScalaTask[I, O]:
-  def operation: OperationRef[I, O]
-  def inputCodec: InputCodec[I]
-  def outputCodec: ResultCodec[O]
-  def retrySafety: RetrySafety = RetrySafety.Unknown
+trait ScalaTask[I, O] extends io.github.bbuchsbaum.slurm4s.task.TaskDefinition[I, O]:
   def run(input: I, context: TaskContext[IO]): IO[O]
 
 object TaskInvocations:

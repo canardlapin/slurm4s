@@ -8,6 +8,7 @@ import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.agent.*
 import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
+import io.github.bbuchsbaum.slurm4s.task.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 import io.github.bbuchsbaum.slurm4s.worker.*
 

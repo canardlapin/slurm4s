@@ -1,7 +1,5 @@
 package io.github.bbuchsbaum.remoteexec.kernel
 
-import cats.effect.kernel.Sync
-
 import java.nio.channels.FileChannel
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.FileAlreadyExistsException
@@ -49,7 +47,10 @@ import scala.util.control.NonFatal
   * filesystem must establish it for that deployment rather than assume it here.
   *
   * The kernel owns mechanics only. It contains no scheduler, worker, queue, lease, retry, or spool
-  * policy.
+  * policy — and no effect type. Every operation here is a blocking call returning a value; wrapping
+  * it in `F` is the caller's business. ADR 0001 confines Cats Effect to interpreter and application
+  * modules, and `Sync`-shaped convenience wrappers were the sole reason this artifact depended on
+  * it. Callers use `Sync[F].blocking(AtomicFiles.…Blocking(…))`.
   */
 object AtomicFiles:
   private val localLockStripes: Array[AnyRef] = Array.fill(64)(new AnyRef)
@@ -80,13 +81,6 @@ object AtomicFiles:
       }
     catch case NonFatal(error) => Left(writeFailureOf(error, target))
 
-  def writeNew[F[_]: Sync](
-      target: Path,
-      bytes: Vector[Byte],
-      executable: Boolean = false
-  ): F[Either[WriteFailure, Unit]] =
-    Sync[F].blocking(writeNewBlocking(target, bytes, executable))
-
   /** Idempotently publish stable bytes.
     *
     * The post-move collision check is essential: two concurrent identical writers both succeed
@@ -105,19 +99,9 @@ object AtomicFiles:
       }
     catch case NonFatal(error) => Left(writeFailureOf(error, target))
 
-  def writeStable[F[_]: Sync](
-      target: Path,
-      bytes: Vector[Byte],
-      executable: Boolean = false
-  ): F[Either[WriteFailure, Unit]] =
-    Sync[F].blocking(writeStableBlocking(target, bytes, executable))
-
   def replaceBlocking(target: Path, bytes: Vector[Byte]): Either[WriteFailure, Unit] =
     try stageAndMove(target, bytes, executable = false, replaceExisting = true)
     catch case NonFatal(error) => Left(writeFailureOf(error, target))
-
-  def replace[F[_]: Sync](target: Path, bytes: Vector[Byte]): F[Either[WriteFailure, Unit]] =
-    Sync[F].blocking(replaceBlocking(target, bytes))
 
   /** Publish exactly once across processes.
     *
@@ -138,12 +122,6 @@ object AtomicFiles:
             .map(_ => digestOf(bytes))
       }
     catch case NonFatal(error) => Left(writeFailureOf(error, target))
-
-  def publishOnce[F[_]: Sync](
-      target: Path,
-      bytes: Vector[Byte]
-  ): F[Either[WriteFailure, ContentDigest]] =
-    Sync[F].blocking(publishOnceBlocking(target, bytes))
 
   /** Atomically move a regular non-symlink source into a claimant-private destination. */
   def claimBlocking(from: Path, to: Path): Either[ClaimFailure, Path] =
@@ -171,9 +149,6 @@ object AtomicFiles:
         Left(ClaimFailure.AtomicMoveUnavailable(from.toString))
       case NonFatal(error) =>
         Left(ClaimFailure.Io(safeMessage(error)))
-
-  def claim[F[_]: Sync](from: Path, to: Path): F[Either[ClaimFailure, Path]] =
-    Sync[F].blocking(claimBlocking(from, to))
 
   /** True for files this object creates as publication machinery rather than content.
     *
