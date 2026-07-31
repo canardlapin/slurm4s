@@ -423,19 +423,28 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
           task.resultContract
         )
       )
-      handle = DurableResultHandle(
-        request.submissionKey,
+      // The handle is DERIVED from the prepared attempt rather than built beside it, so the
+      // schema, limits and declared outputs it advertises cannot drift from the plan that reads
+      // the result.
+      launchSpec <- LaunchSpec.fromRequest(schedulerRequest)
+      prepared = PreparedAttempt(
+        PreparedJob(
+          launchSpec,
+          ResultPlan(
+            task.operation.outputSchema,
+            task.resultContract,
+            invocation.maximumResultBytes,
+            settings.maximumEnvelopeBytes,
+            invocation.declaredOutputs
+          ),
+          io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles.digestOf(scriptBytes)
+        ),
         attemptId,
         attemptEpoch,
-        None,
         WorkloadOperation.Registered(task.operation.id, task.operation.version),
-        task.operation.outputSchema,
-        invocation.maximumResultBytes,
-        settings.maximumEnvelopeBytes,
-        invocation.declaredOutputs,
-        settings.workerRelease,
-        request.retrySafety
+        settings.workerRelease
       )
+      handle = prepared.durableHandle(None)
     yield PreparedRegisteredSubmission(
       schedulerRequest,
       invocation,

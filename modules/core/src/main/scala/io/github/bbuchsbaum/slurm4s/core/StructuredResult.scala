@@ -26,6 +26,62 @@ final case class ResultEnvelope private (
     completedAt: Instant
 ) derives CanEqual
 
+/** How to read a result of type `A`: the typed half of a prepared workload.
+  *
+  * The schema is explicit rather than taken from the contract, because it is the *operation* that
+  * names the result schema — an exit-only contract has no schema of its own, yet the attempt still
+  * has one to record.
+  */
+final case class ResultPlan[A](
+    schema: ResultSchemaId,
+    contract: ResultContract[A],
+    maximumResultBytes: ByteLimit,
+    maximumEnvelopeBytes: ByteLimit,
+    declaredOutputs: Vector[RelativeOutputPath]
+)
+
+/** Reusable prepared content: what to launch, and how to read what it produces.
+  *
+  * Deliberately carries no attempt identity. A retry is a new attempt at the *same* prepared job,
+  * so baking an attempt into this would force re-preparation — and re-digesting — for something the
+  * launch never changed.
+  */
+final case class PreparedJob[A](
+    launch: LaunchSpec,
+    resultPlan: ResultPlan[A],
+    digest: ContentDigest
+)
+
+/** One attempt at a prepared job: the prepared content plus the identity that fences it. */
+final case class PreparedAttempt[A](
+    job: PreparedJob[A],
+    attemptId: AttemptId,
+    epoch: AttemptEpoch,
+    operation: WorkloadOperation,
+    workerRelease: WorkerRelease
+):
+
+  /** The durable, type-erased projection of this attempt.
+    *
+    * Derived rather than constructed alongside the plan. Building the two independently is how a
+    * handle comes to disagree with the plan it is supposed to describe — a handle claiming one
+    * result schema while the codec decodes another, or limits that drifted apart.
+    */
+  def durableHandle(bound: Option[JobRef]): DurableResultHandle =
+    DurableResultHandle(
+      job.launch.submissionKey,
+      attemptId,
+      epoch,
+      bound,
+      operation,
+      job.resultPlan.schema,
+      job.resultPlan.maximumResultBytes,
+      job.resultPlan.maximumEnvelopeBytes,
+      job.resultPlan.declaredOutputs,
+      workerRelease,
+      job.launch.retrySafety
+    )
+
 final case class DurableResultHandle(
     submissionKey: SubmissionKey,
     attemptId: AttemptId,
