@@ -24,6 +24,42 @@ class RemoteSchedulerSuite extends munit.CatsEffectSuite:
     }
   }
 
+  /** P8.A3: loss after writing the cancellation request can yield only cancellation-unknown.
+    *
+    * `scancel` may already have run, so reporting a plain invocation failure asserts a safely
+    * repeatable non-cancellation that the client cannot know to be true.
+    */
+  test("disconnect after cancellation write is cancellation unknown, not invocation failure") {
+    val failure =
+      AgentFailure.TransportDisconnected(
+        afterRequestWrite = true,
+        diagnostic = "response channel closed",
+        evidence = None
+      )
+    val remote = RemoteSlurm[IO](AgentCall.Failed(failure))
+
+    remote.scheduler.cancel(job).map {
+      case CancellationAttempt.Completed(CancellationResult.Unknown(diagnostics, _)) =>
+        assertEquals(diagnostics.values.head.code, "cancellation-acknowledgement-unknown")
+      case other => fail(s"expected cancellation uncertainty, observed $other")
+    }
+  }
+
+  test("disconnect before the cancellation write stays a typed invocation failure") {
+    val failure =
+      AgentFailure.TransportDisconnected(
+        afterRequestWrite = false,
+        diagnostic = "not connected",
+        evidence = None
+      )
+    val remote = RemoteSlurm[IO](AgentCall.Failed(failure))
+
+    remote.scheduler.cancel(job).map {
+      case CancellationAttempt.InvocationFailed(_) => ()
+      case other => fail(s"expected a repeatable invocation failure, observed $other")
+    }
+  }
+
   test("disconnect before a query is a typed invocation failure") {
     val failure =
       AgentFailure.TransportDisconnected(
@@ -41,6 +77,9 @@ class RemoteSchedulerSuite extends munit.CatsEffectSuite:
       case other => fail(s"expected typed invocation failure, observed $other")
     }
   }
+
+  private val job: JobRef =
+    JobRef(JobId.from("9001").toOption.get, None, None)
 
   private val request: JobRequest[NoResult] =
     JobRequest(

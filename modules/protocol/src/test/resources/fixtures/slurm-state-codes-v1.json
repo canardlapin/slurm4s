@@ -42,6 +42,15 @@
     "code": "special-exit"
   },
   {
+    "code": "boot-fail"
+  },
+  {
+    "code": "deadline"
+  },
+  {
+    "code": "suspended"
+  },
+  {
     "code": "unknown",
     "raw": "FUTURE_STATE"
   }

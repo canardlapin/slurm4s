@@ -10,12 +10,16 @@ object RelativeOutputPath:
   def from(raw: String): Either[ValidationFailure, Type] =
     IdentifierRules.text("relativeOutputPath", raw, 4096).flatMap { path =>
       val segments = path.split('/').toVector
+      // "." is rejected alongside ".." so that a/./b and a/b cannot be two distinct values naming
+      // one file. Duplicate detection in OutputManifest and DeclaredOutputs compares these values
+      // as strings, so two spellings of one path would pass the check and then collide on write.
       Either.cond(
-        !path.startsWith("/") && segments.forall(segment => segment.nonEmpty && segment != ".."),
+        !path.startsWith("/") && segments
+          .forall(segment => segment.nonEmpty && segment != ".." && segment != "."),
         path,
         ValidationFailure(
           "relativeOutputPath",
-          "must be relative and must not contain empty or '..' segments"
+          "must be relative and must not contain empty, '.', or '..' segments"
         )
       )
     }
@@ -81,12 +85,43 @@ enum ResultMode derives CanEqual:
   case DeclaredOutputs
   case Structured
 
-final case class ResultContractDescriptor(
+/** The mode-dependent shape of a result contract.
+  *
+  * Constructed only through [[ResultContractDescriptor.from]] or by the `ResultContract` cases in
+  * this file. A public `apply`/`copy` allowed a descriptor claiming `Structured` with no schema, or
+  * `ExitOnly` with declared outputs — states no `ResultContract` can produce and no consumer knows
+  * how to honour.
+  */
+final case class ResultContractDescriptor private[core] (
     mode: ResultMode,
     schema: Option[ResultSchemaId],
     maxBytes: ByteLimit,
     declaredOutputs: Vector[RelativeOutputPath]
 ) derives CanEqual
+
+object ResultContractDescriptor:
+  def from(
+      mode: ResultMode,
+      schema: Option[ResultSchemaId],
+      maxBytes: ByteLimit,
+      declaredOutputs: Vector[RelativeOutputPath]
+  ): Either[ValidationFailure, ResultContractDescriptor] =
+    if declaredOutputs.distinct.size != declaredOutputs.size then
+      Left(ValidationFailure("declaredOutputs", "must not contain duplicate paths"))
+    else
+      mode match
+        case ResultMode.ExitOnly if schema.isDefined =>
+          Left(ValidationFailure("resultContract", "exit-only results carry no schema"))
+        case ResultMode.ExitOnly if declaredOutputs.nonEmpty =>
+          Left(ValidationFailure("resultContract", "exit-only results declare no outputs"))
+        case ResultMode.DeclaredOutputs if schema.isDefined =>
+          Left(ValidationFailure("resultContract", "declared-output results carry no schema"))
+        case ResultMode.DeclaredOutputs if declaredOutputs.isEmpty =>
+          Left(ValidationFailure("declaredOutputs", "must contain at least one path"))
+        case ResultMode.Structured if schema.isEmpty =>
+          Left(ValidationFailure("resultContract", "structured results require a schema"))
+        case _ =>
+          Right(ResultContractDescriptor(mode, schema, maxBytes, declaredOutputs))
 
 sealed trait ResultContract[A] derives CanEqual:
   def descriptor: ResultContractDescriptor

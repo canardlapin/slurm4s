@@ -136,7 +136,12 @@ final class SshAgentWireClient[F[_]: Monad](
       AgentCall.Failed(
         AgentFailure.AuthenticationFailed("OpenSSH authentication failed", Some(stderr))
       )
-    else if exitCode == 126 || exitCode == 127 || normalized.contains("not found") then
+    else if exitCode == 126 || exitCode == 127 then
+      // 126 (found but not executable) and 127 (not found) are the only exits that prove the agent
+      // never ran. Matching "not found" anywhere in stderr also caught login-shell noise such as
+      // `module: command not found` on a connection that dropped after the request was written, and
+      // AgentUnavailable does not carry the write flag — so a queued job was reported as never
+      // submitted.
       AgentCall.Failed(
         AgentFailure.AgentUnavailable("slurm4s-agent is unavailable", Some(stderr))
       )
@@ -149,10 +154,18 @@ final class SshAgentWireClient[F[_]: Monad](
         )
       )
 
+  /** OpenSSH-shaped authentication diagnostics only.
+    *
+    * A bare "permission denied" also matches a remote program reporting an inaccessible file, and
+    * misreading that as an authentication failure loses the write flag exactly as the "not found"
+    * match did. Where the message is ambiguous the classification falls through to a transport
+    * disconnect, which preserves uncertainty instead of asserting a cause.
+    */
   private def authenticationMarker(text: String): Boolean =
-    text.contains("permission denied") ||
-      text.contains("authentication failed") ||
-      text.contains("too many authentication failures")
+    text.contains("permission denied (") ||
+      text.contains("permission denied, please try again") ||
+      text.contains("too many authentication failures") ||
+      text.contains("no supported authentication methods available")
 
   private def diagnostic(payload: Json): String =
     payload.hcursor.get[String]("message").getOrElse(payload.noSpaces)

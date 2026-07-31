@@ -451,7 +451,14 @@ object FailureDiagnosis:
     case SlurmState.TimedOut    => Some(FailureCause.TimeLimitExceeded)
     case SlurmState.NodeFailure => Some(FailureCause.NodeFailure)
     case SlurmState.Preempted   => Some(FailureCause.Preempted)
-    case _                      => None
+    // The node never came up, which is infrastructure rather than workload.
+    case SlurmState.BootFail => Some(FailureCause.NodeFailure)
+    // A deadline the scheduler enforced; the nearest neutral cause is a time constraint.
+    case SlurmState.Deadline => Some(FailureCause.TimeLimitExceeded)
+    case SlurmState.Pending | SlurmState.Running | SlurmState.Completing | SlurmState.Completed |
+        SlurmState.Suspended | SlurmState.Requeued | SlurmState.RequeueHeld |
+        SlurmState.RequeueFederation | SlurmState.SpecialExit | SlurmState.Unknown(_) =>
+      None
 
   private def outcomeCause(value: WorkloadOutcome): Option[FailureCause] = value match
     case WorkloadOutcome.Completed(exitCode) if exitCode != 0 =>

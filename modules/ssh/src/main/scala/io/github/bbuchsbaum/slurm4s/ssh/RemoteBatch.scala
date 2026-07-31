@@ -502,9 +502,7 @@ final class RemoteScriptBatchElementHandle[F[_]: Async, I] private[ssh] (
             AccountingProbe.Unavailable(RemoteScriptExecutionResult.SchedulerUnavailable(result))
           case AgentCall.Succeeded(SchedulerQueryResult.Succeeded(batch)) =>
             batch.records.toVector
-              .find(record =>
-                record.job.jobId == value.jobId && record.job.arrayIndex == value.arrayIndex
-              )
+              .find(record => record.job.key == value.key)
               .flatMap(record =>
                 record.outcome.map(
                   RemoteScriptExecutionResult.WorkloadTerminated(_, record.evidence)

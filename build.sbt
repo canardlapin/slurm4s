@@ -7,12 +7,21 @@ ThisBuild / startYear := Some(2026)
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers := List(tlGitHubDev("bbuchsbaum", "Bradley Buchsbaum"))
 ThisBuild / scalaVersion := Versions.scala3
-ThisBuild / crossScalaVersions := Seq(Versions.scala3)
+ThisBuild / crossScalaVersions := Seq(Versions.scala3, Versions.scala3Next)
+// Scala 3 versions share `_3` artifact coordinates, so cross-publishing both lines would try to
+// publish the same artifact twice. 3.8.4 is a verification lane only; publication comes from the
+// LTS baseline alone.
+ThisBuild / publish / skip := scalaVersion.value != Versions.scala3
 ThisBuild / tlJdkRelease := Some(17)
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"), JavaSpec.temurin("21"))
 ThisBuild / tlCiScalafmtCheck := true
 ThisBuild / tlCiHeaderCheck := false
 ThisBuild / scalacOptions ++= Seq("-Xmax-inlines:64", "-language:strictEquality")
+// sbt-typelevel defaults this to false. Two plan documents claimed -Werror was already in CI; it
+// was not, and enabling it immediately exposed two non-exhaustive matches over SlurmState that the
+// green test suite had missed. Exhaustivity is load-bearing here: the scheduler state model is
+// matched in several places that deliberately carry no catch-all.
+ThisBuild / tlFatalWarnings := true
 ThisBuild / Test / fork := true
 
 lazy val commonSettings = Seq(
@@ -20,7 +29,9 @@ lazy val commonSettings = Seq(
     Libraries.munit % Test,
     Libraries.munitCatsEffect % Test,
     Libraries.munitScalaCheck % Test,
-    Libraries.scalaCheck % Test
+    Libraries.scalaCheck % Test,
+    Libraries.catsLaws % Test,
+    Libraries.disciplineMunit % Test
   )
 )
 

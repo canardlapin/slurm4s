@@ -20,7 +20,14 @@ object StoreRevision:
 
   extension (revision: Type)
     def value: Long = revision
-    def next: Type = revision + 1L
+
+    /** Refuses rather than wrapping; see `EventCursor.next`. */
+    def next: Either[ValidationFailure, Type] =
+      Either.cond(
+        revision < Long.MaxValue,
+        revision + 1L,
+        ValidationFailure("storeRevision", "cannot advance beyond Long.MaxValue")
+      )
   given CanEqual[Type, Type] = CanEqual.derived
   given Order[Type] = Order.from((left, right) => java.lang.Long.compare(left, right))
   given Ordering[Type] = summon[Order[Type]].toOrdering

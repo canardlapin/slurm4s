@@ -33,6 +33,38 @@ final case class NativeOption private (name: String, value: String) derives CanE
 object NativeOption:
   private val Name = "[a-z][a-z0-9-]*".r
 
+  /** Option names the library renders itself.
+    *
+    * Native options are appended after the typed ones and `sbatch` honours the last occurrence of a
+    * repeated option, so a native `output` silently replaces the log path the planner established,
+    * and a native `parsable` breaks the response parser outright. Name syntax was validated but
+    * name *ownership* was not, and the site allowlist is an allowlist — it can admit these, never
+    * reserve them. Rejecting here means a conflicting option cannot be constructed at all.
+    */
+  private val Reserved: Set[String] = Set(
+    "account",
+    "array",
+    "constraint",
+    "container",
+    "cpus-per-task",
+    "error",
+    "export",
+    "format",
+    "gres",
+    "job-name",
+    "jobs",
+    "json",
+    "mem",
+    "mem-per-cpu",
+    "nodes",
+    "ntasks",
+    "output",
+    "parsable",
+    "partition",
+    "qos",
+    "time"
+  )
+
   def from(name: String, value: String): Either[ValidationFailure, NativeOption] =
     for
       checkedName <- IdentifierRules.text("nativeOptionName", name, 100)
@@ -40,6 +72,14 @@ object NativeOption:
         Name.matches(checkedName),
         (),
         ValidationFailure("nativeOptionName", "must be a lower-case Slurm option name")
+      )
+      _ <- Either.cond(
+        !Reserved.contains(checkedName),
+        (),
+        ValidationFailure(
+          "nativeOptionName",
+          s"'$checkedName' is rendered by slurm4s and cannot be overridden natively"
+        )
       )
       checkedValue <- IdentifierRules.text("nativeOptionValue", value, 4096)
     yield NativeOption(checkedName, checkedValue)

@@ -19,7 +19,10 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
   private val extraPath = RelativeOutputPath.from("results/debug.txt").toOption.get
   private val release = WorkerRelease(
     WorkerReleaseId.from("test-worker-1").toOption.get,
-    ContentDigest.from("sha256:test-worker-release").toOption.get
+    ContentDigest
+      .from("sha256:655bbec80c848cb7f5a6c0393c6490459beec02f8526a7c855c4f1f8b6c38410")
+      .toOption
+      .get
   )
   private val inputLimit = ByteLimit.from(1024).toOption.get
   private val resultLimit = ByteLimit.from(1024).toOption.get

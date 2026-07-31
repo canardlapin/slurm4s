@@ -70,7 +70,35 @@ type ResultSchemaId = ResultSchemaId.Type
 object WorkerReleaseId extends TextIdentifier("workerReleaseId", 255)
 type WorkerReleaseId = WorkerReleaseId.Type
 
-object ContentDigest extends TextIdentifier("contentDigest", 200)
+/** A content digest, structurally validated as `sha256:<64 lowercase hex>`.
+  *
+  * A generic bounded-text identifier accepted `"x"` as a digest, so nothing prevented an arbitrary
+  * label from standing in for content identity — including on decode, where every value arriving
+  * from the wire was taken at face value.
+  */
+object ContentDigest:
+  opaque type Type = String
+
+  private val Sha256 = "sha256:[0-9a-f]{64}".r
+
+  def from(raw: String): Either[ValidationFailure, Type] =
+    if raw == null then Left(ValidationFailure("contentDigest", "must not be null"))
+    else if !Sha256.matches(raw) then
+      Left(
+        ValidationFailure("contentDigest", "must be sha256:<64 lowercase hex characters>")
+      )
+    else Right(raw)
+
+  def unsafeFrom(raw: String): Type =
+    from(raw).fold(problem => throw new IllegalArgumentException(problem.reason), identity)
+
+  extension (id: Type) def value: String = id
+
+  given CanEqual[Type, Type] = CanEqual.derived
+  given Order[Type] = Order.from((left, right) => left.compareTo(right))
+  given Ordering[Type] = summon[Order[Type]].toOrdering
+  given Show[Type] = Show.show(identity)
+
 type ContentDigest = ContentDigest.Type
 
 object AttemptEpoch:

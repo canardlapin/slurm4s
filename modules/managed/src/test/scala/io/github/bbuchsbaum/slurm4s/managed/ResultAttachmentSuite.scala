@@ -13,11 +13,17 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
   private val resultLimit = ByteLimit.from(4096).toOption.get
   private val envelopeLimit = ByteLimit.from(65536).toOption.get
   private val outputPath = RelativeOutputPath.from("results/value.txt").toOption.get
-  private val outputDigest = ContentDigest.from("sha256:output").toOption.get
+  private val outputDigest = ContentDigest
+    .from("sha256:e0ee8bb50685e05fa0f47ed04203ae953fdfd055f5bd2892ea186504254f8c3a")
+    .toOption
+    .get
   private val output = OutputEntry.from(outputPath, 8L, outputDigest).toOption.get
   private val release = WorkerRelease(
     WorkerReleaseId.from("managed-worker-1").toOption.get,
-    ContentDigest.from("sha256:managed-worker").toOption.get
+    ContentDigest
+      .from("sha256:ff828dfdff707e2276692cf65d461572268370fdebfd7b584be0dc0efa5e08d7")
+      .toOption
+      .get
   )
   private val operation = RegisteredOperation(
     OperationId.from("example.typed").toOption.get,

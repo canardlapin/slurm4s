@@ -18,7 +18,77 @@ enum SlurmState derives CanEqual:
   case RequeueHeld
   case RequeueFederation
   case SpecialExit
+  case BootFail
+  case Deadline
+  case Suspended
   case Unknown(raw: String)
+
+/** A state flag reported alongside a base state.
+  *
+  * SchedMD documents base states and flags as separate vocabularies. This enum carries the flag
+  * half so it survives parsing; folding the two together is what made `CANCELLED+`
+  * indistinguishable from `CANCELLED`. Separating them inside `SlurmState` itself is P8.D3.
+  */
+enum SlurmStateFlag derives CanEqual:
+  case Completing
+  case Configuring
+  case PowerUpNode
+  case StageOut
+  case Resizing
+  case Requeued
+  case RequeueFederation
+  case RequeueHold
+  case Revoked
+  case Signaling
+  case SpecialExit
+  case Stopped
+  case ReservationDeleteHold
+  case LaunchFailed
+  case UpdateDb
+  case Unknown(raw: String)
+
+/** Whether the scheduler will report further transitions for a job.
+  *
+  * Derived in exactly one place. Three classifiers previously hand-wrote their own terminal sets
+  * and all three omitted `BOOT_FAIL` and `DEADLINE`, so a job finished at the site was polled until
+  * the awaiter's 24-hour default expired.
+  */
+enum Terminality derives CanEqual:
+  case Terminal
+  case Active
+  case Indeterminate
+
+object Terminality:
+
+  /** Total over `SlurmState` on purpose: no catch-all, so a new state cannot be added without
+    * deciding its terminality here.
+    */
+  def of(state: SlurmState): Terminality = state match
+    case SlurmState.Completed | SlurmState.Failed | SlurmState.Cancelled | SlurmState.OutOfMemory |
+        SlurmState.TimedOut | SlurmState.NodeFailure | SlurmState.Preempted | SlurmState.BootFail |
+        SlurmState.Deadline =>
+      Terminality.Terminal
+    case SlurmState.Pending | SlurmState.Running | SlurmState.Completing | SlurmState.Suspended |
+        SlurmState.Requeued | SlurmState.RequeueHeld | SlurmState.RequeueFederation |
+        SlurmState.SpecialExit =>
+      Terminality.Active
+    case SlurmState.Unknown(_) =>
+      Terminality.Indeterminate
+
+/** A scheduler-reported state: at most one base state plus any number of flags.
+  *
+  * `state` stays `Unknown` when a surface reports only a flag, because some CLI surfaces show a
+  * flag in place of the hidden base state. Manufacturing a base state to make the model total would
+  * be a lie, and an `Indeterminate` terminality is the honest consequence.
+  */
+final case class StateReport(
+    state: SlurmState,
+    flags: Vector[SlurmStateFlag],
+    truncated: Boolean
+) derives CanEqual
+
+object StateReport:
+  def of(state: SlurmState): StateReport = StateReport(state, Vector.empty, truncated = false)
 
 enum InterruptionClass derives CanEqual:
   case NotInterrupted
@@ -31,14 +101,15 @@ enum InterruptionClass derives CanEqual:
 
 object InterruptionClass:
   def classify(state: SlurmState): InterruptionClass = state match
-    case SlurmState.Pending | SlurmState.Running | SlurmState.Completing | SlurmState.Completed =>
+    case SlurmState.Pending | SlurmState.Running | SlurmState.Completing | SlurmState.Completed |
+        SlurmState.Suspended =>
       InterruptionClass.NotInterrupted
     case SlurmState.Requeued | SlurmState.RequeueHeld | SlurmState.RequeueFederation |
         SlurmState.SpecialExit =>
       InterruptionClass.Requeueing
-    case SlurmState.NodeFailure =>
+    case SlurmState.NodeFailure | SlurmState.BootFail =>
       InterruptionClass.InfrastructureFailure
-    case SlurmState.Preempted | SlurmState.TimedOut =>
+    case SlurmState.Preempted | SlurmState.TimedOut | SlurmState.Deadline =>
       InterruptionClass.SchedulerPolicy
     case SlurmState.Cancelled =>
       InterruptionClass.Cancellation
@@ -79,8 +150,10 @@ final case class JobObservation(
     reason: Option[String],
     rawFields: Map[String, String],
     evidence: EvidenceBundle,
-    timing: JobTiming = JobTiming.unknown
-) derives CanEqual
+    timing: JobTiming = JobTiming.unknown,
+    flags: Vector[SlurmStateFlag] = Vector.empty
+) derives CanEqual:
+  def terminality: Terminality = Terminality.of(state)
 
 final case class ExitStatus(code: Int, signal: Option[Int]) derives CanEqual
 

@@ -52,7 +52,10 @@ class JobArraySuite extends munit.FunSuite:
     val schema = ResultSchemaId.from("array.result.v1").toOption.get
     val release = WorkerRelease(
       WorkerReleaseId.from("worker-v1").toOption.get,
-      ContentDigest.from("sha256:worker").toOption.get
+      ContentDigest
+        .from("sha256:87eba76e7f3164534045ba922e7770fb58bbd14ad732bbf5ba6f11cc56989e6e")
+        .toOption
+        .get
     )
     val contract = ResultContractDescriptor(
       ResultMode.Structured,

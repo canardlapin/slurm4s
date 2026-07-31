@@ -31,8 +31,14 @@ class WorkloadSuite extends munit.FunSuite:
   test("output validation distinguishes missing, extra, size, and digest failures") {
     val expected = RelativeOutputPath.from("results/model.rds").toOption.get
     val extra = RelativeOutputPath.from("results/debug.txt").toOption.get
-    val firstDigest = ContentDigest.from("sha256:first").toOption.get
-    val secondDigest = ContentDigest.from("sha256:second").toOption.get
+    val firstDigest = ContentDigest
+      .from("sha256:a7937b64b8caa58f03721bb6bacf5c78cb235febe0e70b1b84cd99541461a08e")
+      .toOption
+      .get
+    val secondDigest = ContentDigest
+      .from("sha256:16367aacb67a4a017c8da8ab95682ccb390863780f7114dda0a0e0c55644c7c4")
+      .toOption
+      .get
     val reported = OutputEntry.from(expected, 12L, firstDigest).toOption.get
     val actual = OutputEntry.from(expected, 13L, secondDigest).toOption.get
     val unexpected = OutputEntry.from(extra, 1L, firstDigest).toOption.get

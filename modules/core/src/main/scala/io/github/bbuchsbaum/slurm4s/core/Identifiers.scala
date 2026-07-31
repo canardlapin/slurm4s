@@ -69,7 +69,16 @@ object EventCursor:
     from(raw).fold(problem => throw new IllegalArgumentException(problem.reason), identity)
   extension (cursor: Type)
     def value: Long = cursor
-    def next: Type = cursor + 1L
+
+    /** Refuses rather than wrapping: `+ 1L` past `Long.MaxValue` would produce a negative cursor,
+      * violating this type's own `from` invariant and inverting its `Order`.
+      */
+    def next: Either[ValidationFailure, Type] =
+      Either.cond(
+        cursor < Long.MaxValue,
+        cursor + 1L,
+        ValidationFailure("eventCursor", "cannot advance beyond Long.MaxValue")
+      )
   given CanEqual[Type, Type] = CanEqual.derived
   given Order[Type] = Order.from((left, right) => java.lang.Long.compare(left, right))
   given Ordering[Type] = summon[Order[Type]].toOrdering

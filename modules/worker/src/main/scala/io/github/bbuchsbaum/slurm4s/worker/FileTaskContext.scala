@@ -191,7 +191,11 @@ object FileTaskContext:
         visited += 1
         if visited.toLong > maximumVisited then throw new TooManyFiles
         val path = iterator.next()
-        if Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) then
+        // Atomic publication leaves its sidecar lock beside the published file; it is machinery,
+        // not a declared output, and counting it would report every published output as unexpected.
+        if Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) &&
+          !io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles.isInfrastructure(path)
+        then
           builder += path
           count += 1
           if count > maximum then throw new TooManyFiles

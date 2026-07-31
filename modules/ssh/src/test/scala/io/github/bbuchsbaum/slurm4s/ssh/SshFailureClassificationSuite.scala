@@ -38,6 +38,59 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     yield ()
   }
 
+  /** P8.A4: "not found" anywhere in remote stderr must not steal the write flag.
+    *
+    * A login shell that prints `module: command not found` while the connection drops after the
+    * request frame was written would otherwise classify as `AgentUnavailable`, whose construction
+    * discards `requestWriteCompleted`. The scheduler adapter then reports a definite "never
+    * submitted" for a job that may well be queued.
+    */
+  test("remote noise containing 'not found' does not become agent absence") {
+    val dropped = SshProcessOutcome.Exited(
+      255,
+      requestWriteCompleted = true,
+      emptyEvidence(EvidenceSource.CommandStdout("ssh")),
+      textEvidence("module: command not found\nConnection closed by remote host")
+    )
+
+    client(dropped).roundTrip(request).map { result =>
+      failure(result) match
+        case AgentFailure.TransportDisconnected(afterRequestWrite, _, _) =>
+          assert(afterRequestWrite, "the completed request write must survive classification")
+        case other =>
+          fail(s"expected a transport disconnect that preserves the write flag, observed $other")
+    }
+  }
+
+  test("a remote permission-denied message is not mistaken for ssh authentication failure") {
+    val dropped = SshProcessOutcome.Exited(
+      255,
+      requestWriteCompleted = true,
+      emptyEvidence(EvidenceSource.CommandStdout("ssh")),
+      textEvidence("cat: /scratch/secret: Permission denied\nConnection closed by remote host")
+    )
+
+    client(dropped).roundTrip(request).map { result =>
+      failure(result) match
+        case AgentFailure.TransportDisconnected(afterRequestWrite, _, _) =>
+          assert(afterRequestWrite, "the completed request write must survive classification")
+        case other => fail(s"expected a transport disconnect, observed $other")
+    }
+  }
+
+  test("exit 126 is agent absence even without a recognizable message") {
+    val absent = SshProcessOutcome.Exited(
+      126,
+      requestWriteCompleted = true,
+      emptyEvidence(EvidenceSource.CommandStdout("ssh")),
+      textEvidence("")
+    )
+
+    client(absent).roundTrip(request).map { result =>
+      assert(failure(result).isInstanceOf[AgentFailure.AgentUnavailable])
+    }
+  }
+
   test("valid remote CLI failure is not collapsed into a transport failure") {
     val response = request.withBody(
       AgentBody.Response(

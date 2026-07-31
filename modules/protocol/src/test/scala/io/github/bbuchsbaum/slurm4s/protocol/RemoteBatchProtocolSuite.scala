@@ -206,7 +206,10 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
   ): RemoteRegisteredBatchSubmission =
     val release = WorkerRelease(
       WorkerReleaseId.from("worker-1").toOption.get,
-      ContentDigest.from("sha256:worker-1").toOption.get
+      ContentDigest
+        .from("sha256:13029f9e83d15b3d437c2a7568fc1ca7990ecf3ff79bef6da08f13ff5ae12af8")
+        .toOption
+        .get
     )
     val elements = request.elements.map { element =>
       val attempt = AttemptId.from(s"batch-${element.index.value}").toOption.get

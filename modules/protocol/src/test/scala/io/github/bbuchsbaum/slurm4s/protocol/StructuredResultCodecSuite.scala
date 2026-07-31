@@ -48,7 +48,10 @@ class StructuredResultCodecSuite extends munit.FunSuite:
       ),
       workerRelease = WorkerRelease(
         WorkerReleaseId.from("worker-1").toOption.get,
-        ContentDigest.from("sha256:worker").toOption.get
+        ContentDigest
+          .from("sha256:87eba76e7f3164534045ba922e7770fb58bbd14ad732bbf5ba6f11cc56989e6e")
+          .toOption
+          .get
       ),
       observedAt = Instant.parse("2026-07-22T12:00:00Z"),
       payload = WorkerEventPayload.Progress(
@@ -110,7 +113,10 @@ class StructuredResultCodecSuite extends munit.FunSuite:
       valueLimit,
       WorkerRelease(
         WorkerReleaseId.from("wire-worker").toOption.get,
-        ContentDigest.from("sha256:wire-worker").toOption.get
+        ContentDigest
+          .from("sha256:3564222fe977cf468c6d61ae1cb5793096f8ffc4a7c8b02401b9a2402b7f5bf1")
+          .toOption
+          .get
       ),
       RetrySafety.NoAutomaticRetry
     )

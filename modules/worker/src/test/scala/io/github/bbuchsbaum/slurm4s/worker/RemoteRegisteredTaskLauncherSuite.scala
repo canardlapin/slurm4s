@@ -17,7 +17,10 @@ class RemoteRegisteredTaskLauncherSuite extends munit.CatsEffectSuite:
   private val outputLimit = ByteLimit.from(8192).toOption.get
   private val release = WorkerRelease(
     WorkerReleaseId.from("remote-worker-1").toOption.get,
-    ContentDigest.from("sha256:remote-worker-1").toOption.get
+    ContentDigest
+      .from("sha256:f2d58b10a6afdd905632763ca78e97095c341e354c582aa9f45ade25a9102813")
+      .toOption
+      .get
   )
 
   private val temporaryRoot = FunFixture[Path](

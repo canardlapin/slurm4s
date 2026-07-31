@@ -26,7 +26,10 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
   )
   private val release = WorkerRelease(
     WorkerReleaseId.from("remote-suite-worker").toOption.get,
-    ContentDigest.from("sha256:remote-suite-worker").toOption.get
+    ContentDigest
+      .from("sha256:cda5a842e205eebd05cf9c9b7b07f330686141b37efc45fbc3bcf3ca530a3379")
+      .toOption
+      .get
   )
   private val job = JobRef(JobId.from("9001").toOption.get, None, None)
   private val evidence = EvidenceBundle(

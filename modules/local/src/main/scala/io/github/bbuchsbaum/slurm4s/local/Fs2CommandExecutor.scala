@@ -21,6 +21,7 @@ import io.github.bbuchsbaum.slurm4s.core.*
 import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.nio.file.NoSuchFileException
+import scala.util.control.NonFatal
 import java.util.Locale
 import scala.concurrent.duration.*
 
@@ -82,6 +83,13 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
           Resource.eval(spawnFailure(command, spawnFailureKindOf(error), error))
         case error: SecurityException =>
           Resource.eval(spawnFailure(command, SpawnFailureKind.PermissionDenied, error))
+        // ProcessBuilder also rejects invalid process values with unchecked exceptions —
+        // IllegalArgumentException for a malformed command vector, UnsupportedOperationException
+        // where the platform refuses the request, NullPointerException for a null element. Those
+        // are spawn failures like any other and must stay inside InvocationResult rather than
+        // escaping the typed outcome algebra as a raised throwable.
+        case NonFatal(error) =>
+          Resource.eval(spawnFailure(command, SpawnFailureKind.EnvironmentInvalid, error))
         case error => Resource.eval(Async[F].raiseError(error))
       }
 

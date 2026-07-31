@@ -136,11 +136,8 @@ final class ObservationCoordinator[F[_]: Temporal](
       }
     case _ => Vector.empty
 
-  private def terminalState(state: SlurmState): Boolean = state match
-    case SlurmState.Completed | SlurmState.Failed | SlurmState.Cancelled | SlurmState.OutOfMemory |
-        SlurmState.TimedOut | SlurmState.NodeFailure | SlurmState.Preempted =>
-      true
-    case _ => false
+  private def terminalState(state: SlurmState): Boolean =
+    Terminality.of(state) == Terminality.Terminal
 
   private def accountingSucceeded(result: SchedulerQueryResult[AccountingBatch]): Boolean =
     result.isInstanceOf[SchedulerQueryResult.Succeeded[?]]

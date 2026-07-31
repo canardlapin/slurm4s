@@ -19,6 +19,7 @@ import io.github.bbuchsbaum.slurm4s.protocol.FrameCodec
 
 import java.io.IOException
 import scala.concurrent.duration.*
+import scala.util.control.NonFatal
 
 final case class SshExchangePolicy(
     timeout: DurationMillis,
@@ -130,7 +131,10 @@ final class SystemSshProcessRunner[F[_]: Async](using Processes[F]) extends SshP
       .handleErrorWith {
         case error: IOException       => Resource.eval(spawnFailure(error))
         case error: SecurityException => Resource.eval(spawnFailure(error))
-        case error                    => Resource.eval(Async[F].raiseError(error))
+        // An invalid process value reaches ProcessBuilder as an unchecked exception rather than an
+        // IOException; it is still a spawn failure and belongs inside the typed outcome.
+        case NonFatal(error) => Resource.eval(spawnFailure(error))
+        case error           => Resource.eval(Async[F].raiseError(error))
       }
 
   private def run(

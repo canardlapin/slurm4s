@@ -35,7 +35,10 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
   private val envelopeLimit = ByteLimit.from(4096).toOption.get
   private val release = WorkerRelease(
     WorkerReleaseId.from("remote-batch-suite").toOption.get,
-    ContentDigest.from("sha256:remote-batch-suite").toOption.get
+    ContentDigest
+      .from("sha256:d62cda998641da37d50d2c72f39a8959870099488717535d5eed51b10d2e35f2")
+      .toOption
+      .get
   )
   private val awaitPolicy = RemoteAwaitPolicy(
     DurationMillis.from(1L).toOption.get,

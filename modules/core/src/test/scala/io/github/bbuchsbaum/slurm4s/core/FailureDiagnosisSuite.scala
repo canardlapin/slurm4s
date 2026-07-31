@@ -151,7 +151,9 @@ class FailureDiagnosisSuite extends munit.FunSuite:
       ),
       WorkerRelease(
         WorkerReleaseId.from("worker-1").fold(problem => fail(problem.toString), identity),
-        ContentDigest.from("sha256:worker").fold(problem => fail(problem.toString), identity)
+        ContentDigest
+          .from("sha256:87eba76e7f3164534045ba922e7770fb58bbd14ad732bbf5ba6f11cc56989e6e")
+          .fold(problem => fail(problem.toString), identity)
       ),
       observedAt,
       WorkerEventPayload.Failed("python-error", "task raised")

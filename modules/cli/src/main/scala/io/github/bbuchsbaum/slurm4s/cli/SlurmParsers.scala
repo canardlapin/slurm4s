@@ -121,10 +121,10 @@ object SqueueJsonV0043:
       observations <-
         if matchedJobs.isEmpty then Right(Vector.empty)
         else
-          state(fields)
+          stateReport(fields)
             .toRight(diagnostics("invalid-squeue-job", "job_state is required"))
-            .map { stateText =>
-              val parsedState = SlurmStateParser.parse(stateText)
+            .map { report =>
+              val parsedState = report.state
               val reportedCluster = fields("cluster")
                 .flatMap(_.asString)
                 .flatMap(ClusterName.from(_).toOption)
@@ -142,7 +142,8 @@ object SqueueJsonV0043:
                   reason = reason,
                   rawFields = raw,
                   evidence = EvidenceBundle(stdout),
-                  timing = timing
+                  timing = timing,
+                  flags = report.flags
                 )
               }
             }
@@ -205,9 +206,20 @@ object SqueueJsonV0043:
               .left
               .map(problem => diagnostics("invalid-array-task-expression", problem))
 
-  private def state(fields: JsonObject): Option[String] =
+  /** `job_state` is an array in data-parser v0.0.4x precisely because a job carries composite
+    * state. Every element is retained; taking only the head made a base state indistinguishable
+    * from a base state plus flags.
+    */
+  private def stateReport(fields: JsonObject): Option[StateReport] =
     fields("job_state").flatMap { value =>
-      value.asString.orElse(value.asArray.flatMap(_.flatMap(_.asString).headOption))
+      value.asString
+        .map(SlurmStateParser.report)
+        .orElse(
+          value.asArray
+            .map(_.flatMap(_.asString).toVector)
+            .filter(_.nonEmpty)
+            .map(SlurmStateParser.reportOf)
+        )
     }
 
   private def rawFields(fields: JsonObject): Map[String, String] =
@@ -352,7 +364,7 @@ object SacctParsable2:
               )
         case _ => Left(diagnostics("invalid-exit-code", "exit code must have status:signal form"))
 
-  private def outcome(
+  private[cli] def outcome(
       state: SlurmState,
       exit: Option[ExitStatus],
       reason: String
@@ -367,9 +379,12 @@ object SacctParsable2:
       case SlurmState.TimedOut    => Some(WorkloadOutcome.TimeLimitExceeded)
       case SlurmState.Cancelled   => Some(WorkloadOutcome.Cancelled)
       case SlurmState.NodeFailure => Some(WorkloadOutcome.NodeFailure)
+      // The node never came up, so the workload outcome is infrastructure, not program failure.
+      case SlurmState.BootFail => Some(WorkloadOutcome.NodeFailure)
+      case SlurmState.Deadline => Some(WorkloadOutcome.TimeLimitExceeded)
       case SlurmState.Pending | SlurmState.Running | SlurmState.Completing | SlurmState.Requeued |
           SlurmState.RequeueHeld | SlurmState.RequeueFederation | SlurmState.SpecialExit |
-          SlurmState.Unknown(_) =>
+          SlurmState.Suspended | SlurmState.Unknown(_) =>
         None
 
   private def failedOutcome(
@@ -496,27 +511,88 @@ object ScontrolOneliner:
     SlurmTiming.fromText(fields, state)
 
 object SlurmStateParser:
-  def parse(raw: String): SlurmState =
-    raw.trim
-      .toUpperCase(Locale.ROOT)
-      .takeWhile(character => character != '+' && !character.isWhitespace) match
-      case "PENDING" | "PD"        => SlurmState.Pending
-      case "RUNNING" | "R"         => SlurmState.Running
-      case "COMPLETING" | "CG"     => SlurmState.Completing
-      case "COMPLETED" | "CD"      => SlurmState.Completed
-      case "FAILED" | "F"          => SlurmState.Failed
-      case "CANCELLED" | "CA"      => SlurmState.Cancelled
-      case "OUT_OF_MEMORY" | "OOM" => SlurmState.OutOfMemory
-      case "TIMEOUT" | "TO"        => SlurmState.TimedOut
-      case "NODE_FAIL" | "NF"      => SlurmState.NodeFailure
-      case "PREEMPTED" | "PR"      => SlurmState.Preempted
-      case "REQUEUED" | "RQ"       => SlurmState.Requeued
-      case "REQUEUE_HOLD" | "RH"   => SlurmState.RequeueHeld
-      case "REQUEUE_FED" | "RF"    => SlurmState.RequeueFederation
-      case "SPECIAL_EXIT" | "SE"   => SlurmState.SpecialExit
-      case _                       => SlurmState.Unknown(raw)
 
-private object SlurmTiming:
+  /** The base state alone. Prefer `report` where the flags matter. */
+  def parse(raw: String): SlurmState = report(raw).state
+
+  /** Parse a textual state expression such as `RUNNING`, `CANCELLED+`, or `CANCELLED by 1000`.
+    *
+    * Only the first whitespace-delimited word is a state expression; `sacct` appends free text such
+    * as `by 1000` that must not be mistaken for flags. Within that word, `+` separates flags, and a
+    * trailing `+` means the surface truncated the state rather than naming a flag — recorded as
+    * `truncated`, never invented as a specific flag.
+    */
+  def report(raw: String): StateReport =
+    val normalized = Option(raw).getOrElse("").trim.toUpperCase(Locale.ROOT)
+    val expression = normalized.takeWhile(character => !character.isWhitespace)
+    fromTokens(
+      expression.split('+').iterator.filter(_.nonEmpty).toVector,
+      raw,
+      truncated = expression.endsWith("+")
+    )
+
+  /** Parse an array-valued `job_state`, whose first element is the base state. */
+  def reportOf(tokens: Vector[String]): StateReport =
+    fromTokens(
+      tokens.map(_.trim.toUpperCase(Locale.ROOT)).filter(_.nonEmpty),
+      tokens.mkString(","),
+      truncated = false
+    )
+
+  private def fromTokens(
+      tokens: Vector[String],
+      raw: String,
+      truncated: Boolean
+  ): StateReport =
+    tokens.headOption match
+      case None       => StateReport(SlurmState.Unknown(raw), Vector.empty, truncated)
+      case Some(head) =>
+        baseState(head) match
+          case Some(state) => StateReport(state, tokens.drop(1).map(flag), truncated)
+          case None        =>
+            // A surface may show a flag in place of the hidden base state. Report every token as a
+            // flag and leave the base state unknown rather than manufacturing one.
+            StateReport(SlurmState.Unknown(raw), tokens.map(flag), truncated)
+
+  private def baseState(token: String): Option[SlurmState] = token match
+    case "PENDING" | "PD"        => Some(SlurmState.Pending)
+    case "RUNNING" | "R"         => Some(SlurmState.Running)
+    case "COMPLETING" | "CG"     => Some(SlurmState.Completing)
+    case "COMPLETED" | "CD"      => Some(SlurmState.Completed)
+    case "FAILED" | "F"          => Some(SlurmState.Failed)
+    case "CANCELLED" | "CA"      => Some(SlurmState.Cancelled)
+    case "OUT_OF_MEMORY" | "OOM" => Some(SlurmState.OutOfMemory)
+    case "TIMEOUT" | "TO"        => Some(SlurmState.TimedOut)
+    case "NODE_FAIL" | "NF"      => Some(SlurmState.NodeFailure)
+    case "PREEMPTED" | "PR"      => Some(SlurmState.Preempted)
+    case "REQUEUED" | "RQ"       => Some(SlurmState.Requeued)
+    case "REQUEUE_HOLD" | "RH"   => Some(SlurmState.RequeueHeld)
+    case "REQUEUE_FED" | "RF"    => Some(SlurmState.RequeueFederation)
+    case "SPECIAL_EXIT" | "SE"   => Some(SlurmState.SpecialExit)
+    case "BOOT_FAIL" | "BF"      => Some(SlurmState.BootFail)
+    case "DEADLINE" | "DL"       => Some(SlurmState.Deadline)
+    case "SUSPENDED" | "S"       => Some(SlurmState.Suspended)
+    case _                       => None
+
+  private def flag(token: String): SlurmStateFlag = token match
+    case "COMPLETING" | "CG"       => SlurmStateFlag.Completing
+    case "CONFIGURING" | "CF"      => SlurmStateFlag.Configuring
+    case "POWER_UP_NODE" | "POWER" => SlurmStateFlag.PowerUpNode
+    case "STAGE_OUT" | "SO"        => SlurmStateFlag.StageOut
+    case "RESIZING" | "RS"         => SlurmStateFlag.Resizing
+    case "REQUEUED" | "RQ"         => SlurmStateFlag.Requeued
+    case "REQUEUE_FED" | "RF"      => SlurmStateFlag.RequeueFederation
+    case "REQUEUE_HOLD" | "RH"     => SlurmStateFlag.RequeueHold
+    case "REVOKED" | "RV"          => SlurmStateFlag.Revoked
+    case "SIGNALING" | "SI"        => SlurmStateFlag.Signaling
+    case "SPECIAL_EXIT" | "SE"     => SlurmStateFlag.SpecialExit
+    case "STOPPED" | "ST"          => SlurmStateFlag.Stopped
+    case "RESV_DEL_HOLD"           => SlurmStateFlag.ReservationDeleteHold
+    case "LAUNCH_FAILED"           => SlurmStateFlag.LaunchFailed
+    case "UPDATE_DB"               => SlurmStateFlag.UpdateDb
+    case other                     => SlurmStateFlag.Unknown(other)
+
+private[cli] object SlurmTiming:
   private val MissingText = Set("", "NONE", "N/A", "NA", "UNKNOWN", "(NULL)", "NULL")
   private val DayTime = "([0-9]+)-([0-9]+):([0-9]{2}):([0-9]{2})".r
   private val ClockTime = "([0-9]+):([0-9]{2}):([0-9]{2})".r
@@ -545,15 +621,18 @@ private object SlurmTiming:
         .fold[ObservedTimeLimit](ObservedTimeLimit.Unknown(None))(textTimeLimit)
     )
 
-  private def classifyStart(state: SlurmState, value: SchedulerTimestamp): JobStart =
+  private[cli] def classifyStart(state: SlurmState, value: SchedulerTimestamp): JobStart =
     state match
       case SlurmState.Pending => JobStart.Expected(value)
       case SlurmState.Running | SlurmState.Completing | SlurmState.Completed | SlurmState.Failed |
           SlurmState.Cancelled | SlurmState.OutOfMemory | SlurmState.TimedOut |
-          SlurmState.NodeFailure | SlurmState.Preempted =>
+          SlurmState.NodeFailure | SlurmState.Preempted | SlurmState.Suspended =>
         JobStart.Actual(value)
-      case SlurmState.Requeued | SlurmState.RequeueHeld | SlurmState.RequeueFederation |
-          SlurmState.SpecialExit | SlurmState.Unknown(_) =>
+      // BOOT_FAIL and DEADLINE are terminal but do not imply the job ever ran — a deadline commonly
+      // fires while the job is still pending — so the timestamp is reported, not claimed as actual.
+      case SlurmState.BootFail | SlurmState.Deadline | SlurmState.Requeued |
+          SlurmState.RequeueHeld | SlurmState.RequeueFederation | SlurmState.SpecialExit |
+          SlurmState.Unknown(_) =>
         JobStart.Reported(value)
 
   private def timestamp(value: Json): Option[SchedulerTimestamp] =

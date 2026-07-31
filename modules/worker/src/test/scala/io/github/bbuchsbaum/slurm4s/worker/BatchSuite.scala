@@ -22,7 +22,10 @@ class BatchSuite extends munit.CatsEffectSuite:
   )
   private val release = WorkerRelease(
     WorkerReleaseId.from("worker-batch-suite").toOption.get,
-    ContentDigest.from("sha256:worker-batch-suite").toOption.get
+    ContentDigest
+      .from("sha256:6fdc880d985593d8acde2c52dd3c3b67dba0d08c858a4d426dab5fac98af0373")
+      .toOption
+      .get
   )
   private val perTask = TaskResources(
     PositiveInt.from("cpus", 1).toOption.get,

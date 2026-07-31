@@ -1718,6 +1718,77 @@ object AgentDomainJson:
   private given [A: Encoder]: Encoder[SchedulerQueryResult[A]] = deriveEncoder
   private given [A: Decoder]: Decoder[SchedulerQueryResult[A]] = deriveDecoder
 
+  private given Encoder[SlurmStateFlag] = Encoder.instance {
+    case SlurmStateFlag.Unknown(raw) =>
+      Json.obj(
+        "code" -> Json.fromString("unknown"),
+        "raw" -> Json.fromString(raw)
+      )
+    case flag =>
+      Json.obj("code" -> Json.fromString(slurmStateFlagCode(flag)))
+  }
+  private given Decoder[SlurmStateFlag] = Decoder.instance { cursor =>
+    for
+      code <- cursor.get[String]("code")
+      raw <- cursor.get[Option[String]]("raw")
+      flag <- decodeSlurmStateFlag(code, raw, cursor)
+    yield flag
+  }
+
+  private def slurmStateFlagCode(flag: SlurmStateFlag): String = flag match
+    case SlurmStateFlag.Completing            => "completing"
+    case SlurmStateFlag.Configuring           => "configuring"
+    case SlurmStateFlag.PowerUpNode           => "power-up-node"
+    case SlurmStateFlag.StageOut              => "stage-out"
+    case SlurmStateFlag.Resizing              => "resizing"
+    case SlurmStateFlag.Requeued              => "requeued"
+    case SlurmStateFlag.RequeueFederation     => "requeue-federation"
+    case SlurmStateFlag.RequeueHold           => "requeue-hold"
+    case SlurmStateFlag.Revoked               => "revoked"
+    case SlurmStateFlag.Signaling             => "signaling"
+    case SlurmStateFlag.SpecialExit           => "special-exit"
+    case SlurmStateFlag.Stopped               => "stopped"
+    case SlurmStateFlag.ReservationDeleteHold => "reservation-delete-hold"
+    case SlurmStateFlag.LaunchFailed          => "launch-failed"
+    case SlurmStateFlag.UpdateDb              => "update-db"
+    case SlurmStateFlag.Unknown(_)            => "unknown"
+
+  private def decodeSlurmStateFlag(
+      code: String,
+      raw: Option[String],
+      cursor: HCursor
+  ): Decoder.Result[SlurmStateFlag] =
+    code match
+      case "completing"              => Right(SlurmStateFlag.Completing)
+      case "configuring"             => Right(SlurmStateFlag.Configuring)
+      case "power-up-node"           => Right(SlurmStateFlag.PowerUpNode)
+      case "stage-out"               => Right(SlurmStateFlag.StageOut)
+      case "resizing"                => Right(SlurmStateFlag.Resizing)
+      case "requeued"                => Right(SlurmStateFlag.Requeued)
+      case "requeue-federation"      => Right(SlurmStateFlag.RequeueFederation)
+      case "requeue-hold"            => Right(SlurmStateFlag.RequeueHold)
+      case "revoked"                 => Right(SlurmStateFlag.Revoked)
+      case "signaling"               => Right(SlurmStateFlag.Signaling)
+      case "special-exit"            => Right(SlurmStateFlag.SpecialExit)
+      case "stopped"                 => Right(SlurmStateFlag.Stopped)
+      case "reservation-delete-hold" => Right(SlurmStateFlag.ReservationDeleteHold)
+      case "launch-failed"           => Right(SlurmStateFlag.LaunchFailed)
+      case "update-db"               => Right(SlurmStateFlag.UpdateDb)
+      case "unknown"                 =>
+        raw
+          .filter(_.nonEmpty)
+          .map(value => Right(SlurmStateFlag.Unknown(value)))
+          .getOrElse(
+            Left(
+              DecodingFailure(
+                "unknown Slurm state flag requires non-empty raw text",
+                cursor.history
+              )
+            )
+          )
+      case other =>
+        Left(DecodingFailure(s"unsupported Slurm state flag code: $other", cursor.history))
+
   private given Encoder[SlurmState] = Encoder.instance {
     case SlurmState.Unknown(raw) =>
       Json.obj(
@@ -1829,14 +1900,18 @@ object AgentDomainJson:
     yield JobTiming(start, projectedEndAt, timeLimit)
   }
   private given Encoder[JobObservation] = Encoder.instance { value =>
+    // `flags` is emitted only when a flag was actually reported, so an observation without flags
+    // keeps the wire shape it had before flags existed and the decoder's default covers the rest.
     Json.obj(
-      "job" -> value.job.asJson,
-      "state" -> value.state.asJson,
-      "freshness" -> value.freshness.asJson,
-      "reason" -> value.reason.asJson,
-      "rawFields" -> value.rawFields.asJson,
-      "evidence" -> value.evidence.asJson,
-      "timing" -> value.timing.asJson
+      Vector(
+        "job" -> value.job.asJson,
+        "state" -> value.state.asJson,
+        "freshness" -> value.freshness.asJson,
+        "reason" -> value.reason.asJson,
+        "rawFields" -> value.rawFields.asJson,
+        "evidence" -> value.evidence.asJson,
+        "timing" -> value.timing.asJson
+      ) ++ Option.when(value.flags.nonEmpty)("flags" -> value.flags.asJson)*
     )
   }
   private given Decoder[JobObservation] = Decoder.instance { cursor =>
@@ -1848,7 +1923,10 @@ object AgentDomainJson:
       rawFields <- cursor.get[Map[String, String]]("rawFields")
       evidence <- cursor.get[EvidenceBundle]("evidence")
       timing <- cursor.get[Option[JobTiming]]("timing").map(_.getOrElse(JobTiming.unknown))
-    yield JobObservation(job, state, freshness, reason, rawFields, evidence, timing)
+      flags <- cursor
+        .get[Option[Vector[SlurmStateFlag]]]("flags")
+        .map(_.getOrElse(Vector.empty))
+    yield JobObservation(job, state, freshness, reason, rawFields, evidence, timing, flags)
   }
   private given Encoder[ExitStatus] = deriveEncoder
   private given Decoder[ExitStatus] = deriveDecoder
@@ -1968,6 +2046,9 @@ object AgentDomainJson:
     case SlurmState.RequeueHeld       => "requeue-held"
     case SlurmState.RequeueFederation => "requeue-federation"
     case SlurmState.SpecialExit       => "special-exit"
+    case SlurmState.BootFail          => "boot-fail"
+    case SlurmState.Deadline          => "deadline"
+    case SlurmState.Suspended         => "suspended"
     case SlurmState.Unknown(_)        => "unknown"
 
   private def decodeSlurmState(
@@ -1990,6 +2071,9 @@ object AgentDomainJson:
       case "requeue-held"       => Right(SlurmState.RequeueHeld)
       case "requeue-federation" => Right(SlurmState.RequeueFederation)
       case "special-exit"       => Right(SlurmState.SpecialExit)
+      case "boot-fail"          => Right(SlurmState.BootFail)
+      case "deadline"           => Right(SlurmState.Deadline)
+      case "suspended"          => Right(SlurmState.Suspended)
       case "unknown"            =>
         raw
           .filter(_.nonEmpty)

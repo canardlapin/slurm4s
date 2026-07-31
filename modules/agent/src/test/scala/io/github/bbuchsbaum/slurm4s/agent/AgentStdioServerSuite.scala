@@ -32,7 +32,7 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
       AgentRuntimeConfig.WorkspaceEnvironment -> "/tmp/slurm4s-agent",
       AgentRuntimeConfig.WorkerExecutableEnvironment -> "/tmp/slurm4s-worker",
       AgentRuntimeConfig.WorkerReleaseIdEnvironment -> "worker-v1",
-      AgentRuntimeConfig.WorkerReleaseDigestEnvironment -> "sha256:worker-v1",
+      AgentRuntimeConfig.WorkerReleaseDigestEnvironment -> "sha256:50f78b480f466c542a8fc083c27c1143d0d7f571dbac6ede72f7d70cc3f3fec2",
       AgentRuntimeConfig.AllowedEnvironmentNames -> "LANG,OMP_NUM_THREADS"
     )
 

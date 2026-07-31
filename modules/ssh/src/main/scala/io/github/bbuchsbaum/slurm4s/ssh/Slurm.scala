@@ -39,7 +39,9 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
   /** Transport-neutral scheduler view used by durable managed control.
     *
     * A disconnect after writing `sbatch` is preserved as acceptance uncertainty, never rewritten as
-    * a rejected or safely retryable submission.
+    * a rejected or safely retryable submission. The same law governs cancellation: loss after the
+    * cancellation request was written yields cancellation-unknown, because `scancel` may already
+    * have run and a plain invocation failure would assert a non-cancellation nobody can verify.
     */
   val scheduler: Scheduler[F] = new Scheduler[F]:
     def capabilities: F[SchedulerQueryResult[SchedulerCapabilities]] =
@@ -79,7 +81,24 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
     def cancel(job: JobRef): F[CancellationAttempt] =
       RemoteSlurm.this.cancel(job).flatMap {
         case AgentCall.Succeeded(value) => value.pure[F]
-        case AgentCall.Failed(failure)  =>
+        case AgentCall.Failed(
+              failure @ AgentFailure.TransportDisconnected(true, _, _)
+            ) =>
+          failureEvidence(failure).map(evidence =>
+            CancellationAttempt.Completed(
+              CancellationResult.Unknown(
+                Diagnostics.one(
+                  Diagnostic(
+                    "cancellation-acknowledgement-unknown",
+                    "transport was lost after the cancellation request was written; " +
+                      "scancel may already have run"
+                  )
+                ),
+                evidence
+              )
+            )
+          )
+        case AgentCall.Failed(failure) =>
           invocationFailure(failure).map(CancellationAttempt.InvocationFailed(_))
       }
 
