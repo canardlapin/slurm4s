@@ -112,6 +112,67 @@ enum RemoteExecutionResult[+A]:
 final case class RemoteTaskException(result: RemoteExecutionResult[?])
     extends RuntimeException("remote Slurm task did not produce a typed value")
 
+/** What one poll established about the work being awaited. */
+private[ssh] enum AwaitTick[+A] derives CanEqual:
+  /** The wait is over. */
+  case Done(result: A)
+
+  /** Nothing was learned this tick; keep waiting until the deadline. */
+  case Waiting
+
+  /** Transient blindness. Ride it out, and surrender to `outcome` if it persists. */
+  case Blind(outcome: A)
+
+/** The awaiting policy, applied in one place.
+  *
+  * Backoff, the accounting cadence, tolerance of transient blindness, and the deadline are decided
+  * here rather than at each call site. A second awaiting path that reimplemented them would drift,
+  * and this codebase has already paid for that pattern twice — three hand-written terminality
+  * classifiers, and two independent constructions of one durable handle.
+  */
+private[ssh] object RemoteAwaitDriver:
+  def run[F[_]: Async, A](
+      policy: RemoteAwaitPolicy,
+      timedOut: => A
+  )(tick: Long => F[AwaitTick[A]]): F[A] =
+    Async[F].monotonic.flatMap(started => loop(policy, timedOut, tick, started, 0L, 0))
+
+  private def loop[F[_]: Async, A](
+      policy: RemoteAwaitPolicy,
+      timedOut: => A,
+      tick: Long => F[AwaitTick[A]],
+      started: FiniteDuration,
+      attempt: Long,
+      failures: Int
+  ): F[A] =
+    tick(attempt).flatMap {
+      case AwaitTick.Done(result) => result.pure[F]
+      case AwaitTick.Waiting      =>
+        continueOr(policy, timedOut, tick, started, attempt, failures = 0)
+      case AwaitTick.Blind(outcome) =>
+        // Losing sight of the work says nothing about the work, which is still running and will
+        // still publish its result. Surrender only once blindness looks persistent, and report the
+        // blindness itself rather than a timeout: "I stopped being able to see it" is the honest
+        // account of what happened.
+        if failures + 1 >= policy.maximumConsecutiveObservationFailures.toInt then outcome.pure[F]
+        else continueOr(policy, outcome, tick, started, attempt, failures + 1)
+    }
+
+  private def continueOr[F[_]: Async, A](
+      policy: RemoteAwaitPolicy,
+      expired: => A,
+      tick: Long => F[AwaitTick[A]],
+      started: FiniteDuration,
+      attempt: Long,
+      failures: Int
+  ): F[A] =
+    Async[F].monotonic.flatMap { now =>
+      if now - started >= policy.timeout.value.millis then expired.pure[F]
+      else
+        Async[F].sleep(policy.intervalAfter(attempt).value.millis) *>
+          loop(policy, expired, tick, started, attempt + 1L, failures)
+    }
+
 final class RemoteTaskHandle[F[_]: Async, A] private[ssh] (
     remote: RemoteSlurm[F],
     val descriptor: RemoteTaskDescriptor,
@@ -149,85 +210,48 @@ final class RemoteTaskHandle[F[_]: Async, A] private[ssh] (
     }
 
   private def awaitResult(job: Option[JobRef]): F[RemoteExecutionResult[A]] =
-    Async[F].monotonic.flatMap(started => poll(started, job, attempt = 0L, failures = 0))
+    RemoteAwaitDriver.run(policy, awaitTimedOut)(readOnce(job, _))
 
-  private def poll(
-      started: FiniteDuration,
-      job: Option[JobRef],
-      attempt: Long,
-      failures: Int
-  ): F[RemoteExecutionResult[A]] =
+  private def awaitTimedOut: RemoteExecutionResult[A] =
+    RemoteExecutionResult.AwaitTimedOut(
+      Diagnostics.one(
+        Diagnostic(
+          "remote-await-timeout",
+          "the remote result did not become available before the await deadline"
+        )
+      )
+    )
+
+  /** One poll: read the result, and consult accounting on the policy's slower cadence. */
+  private def readOnce(job: Option[JobRef], attempt: Long): F[AwaitTick[RemoteExecutionResult[A]]] =
     budget.use(remote.readResult(resultRef, resultHandle.maximumEnvelopeBytes)).flatMap {
       case AgentCall.Failed(failure) =>
-        // Losing one round trip says nothing about the job, which is still running and will still
-        // publish its result. Ride it out rather than discarding a wait with hours left.
-        tolerate(
-          started,
-          job,
-          attempt,
-          failures + 1,
-          RemoteExecutionResult.AgentUnavailable(failure)
-        )
+        AwaitTick.Blind(RemoteExecutionResult.AgentUnavailable(failure)).pure[F]
       case AgentCall.Succeeded(RemoteResultRead.Available(stored, bytes, observedAt)) =>
-        RemoteExecutionResult
-          .Completed(
-            RemoteResultValidation.attach(resultHandle, stored, contract, bytes, observedAt)
+        AwaitTick
+          .Done(
+            RemoteExecutionResult.Completed(
+              RemoteResultValidation.attach(resultHandle, stored, contract, bytes, observedAt)
+            )
           )
           .pure[F]
       case AgentCall.Succeeded(RemoteResultRead.Failed(diagnostics, evidence, _)) =>
-        RemoteExecutionResult
-          .Completed(ExecutionResult.Indeterminate(diagnostics, evidence))
+        AwaitTick
+          .Done(
+            RemoteExecutionResult.Completed(ExecutionResult.Indeterminate(diagnostics, evidence))
+          )
           .pure[F]
       case AgentCall.Succeeded(RemoteResultRead.Pending(_)) =>
-        val accounting =
-          if policy.checksAccounting(attempt) then terminalAccounting(job)
-          else AccountingProbe.Inconclusive.pure[F]
-        accounting.flatMap {
-          case AccountingProbe.Terminal(result)    => result.pure[F]
-          case AccountingProbe.Unavailable(result) =>
+        if policy.checksAccounting(attempt) then
+          terminalAccounting(job).map {
+            case AccountingProbe.Terminal(result) => AwaitTick.Done(result)
             // Accounting is only the safety net for a job that died without publishing; the result
             // envelope remains the authority, so an unreadable probe must not end the wait.
-            tolerate(started, job, attempt, failures + 1, result)
-          case AccountingProbe.Inconclusive =>
-            Async[F].monotonic.flatMap { now =>
-              if now - started >= policy.timeout.value.millis then
-                RemoteExecutionResult
-                  .AwaitTimedOut(
-                    Diagnostics.one(
-                      Diagnostic(
-                        "remote-await-timeout",
-                        "the remote result did not become available before the await deadline"
-                      )
-                    )
-                  )
-                  .pure[F]
-              else
-                Async[F].sleep(policy.intervalAfter(attempt).value.millis) *>
-                  poll(started, job, attempt + 1L, failures = 0)
-            }
-        }
+            case AccountingProbe.Unavailable(result) => AwaitTick.Blind(result)
+            case AccountingProbe.Inconclusive        => AwaitTick.Waiting
+          }
+        else AwaitTick.Waiting.pure[F]
     }
-
-  /** Continue waiting through a transient observation failure, or surrender to a persistent one.
-    *
-    * Surrendering reports the observation failure itself rather than a timeout, because "I stopped
-    * being able to see the job" is the honest account of what happened.
-    */
-  private def tolerate(
-      started: FiniteDuration,
-      job: Option[JobRef],
-      attempt: Long,
-      failures: Int,
-      outcome: RemoteExecutionResult[A]
-  ): F[RemoteExecutionResult[A]] =
-    if failures >= policy.maximumConsecutiveObservationFailures.toInt then outcome.pure[F]
-    else
-      Async[F].monotonic.flatMap { now =>
-        if now - started >= policy.timeout.value.millis then outcome.pure[F]
-        else
-          Async[F].sleep(policy.intervalAfter(attempt).value.millis) *>
-            poll(started, job, attempt + 1L, failures)
-      }
 
   private def terminalAccounting(
       job: Option[JobRef]
