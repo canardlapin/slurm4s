@@ -3,6 +3,7 @@ package io.github.bbuchsbaum.slurm4s.worker
 import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all.*
+import io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles
 import io.github.bbuchsbaum.slurm4s.core.*
 
 import java.io.ByteArrayOutputStream
@@ -194,7 +195,7 @@ object FileTaskContext:
         // Atomic publication leaves its sidecar lock beside the published file; it is machinery,
         // not a declared output, and counting it would report every published output as unexpected.
         if Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) &&
-          !io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles.isInfrastructure(path)
+          !AtomicFiles.isInfrastructure(path)
         then
           builder += path
           count += 1

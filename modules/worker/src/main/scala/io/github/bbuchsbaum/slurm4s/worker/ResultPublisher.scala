@@ -2,6 +2,7 @@ package io.github.bbuchsbaum.slurm4s.worker
 
 import cats.effect.IO
 import cats.effect.kernel.Clock
+import io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.ResultEnvelopeCodec
 

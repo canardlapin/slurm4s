@@ -1,5 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.worker
 
+import io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles
+
 import cats.effect.IO
 import cats.syntax.all.*
 
