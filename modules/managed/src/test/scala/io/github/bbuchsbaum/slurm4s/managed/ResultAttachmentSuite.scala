@@ -138,7 +138,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       Vector.empty,
       later
     )
-    val staleHandle = handle.copy(attemptEpoch = AttemptEpoch.from(2L).toOption.get)
+    val staleHandle = rebuilt(handle, attemptEpoch = AttemptEpoch.from(2L).toOption)
     val stale = ResultAttachment.attach(
       attempt,
       staleHandle,
@@ -198,7 +198,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
     )
     val provenanceMismatch = ResultAttachment.attach(
       original,
-      originalHandle.copy(retrySafety = RetrySafety.SafeForAutomaticRetry),
+      rebuilt(originalHandle, retrySafety = Some(RetrySafety.SafeForAutomaticRetry)),
       contract,
       Vector.empty,
       Vector.empty,
@@ -236,8 +236,12 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
 
   test("file reattachment bounds reads and classifies an unavailable file") {
     val attempt = boundAttempt
-    val handle = durableHandle(attempt, contract).copy(
-      maximumEnvelopeBytes = ByteLimit.from(16).toOption.get
+    // Both bounds shrink together: an envelope smaller than the result it must carry is now a
+    // rejected state rather than a constructible one.
+    val handle = rebuilt(
+      durableHandle(attempt, contract),
+      maximumResultBytes = ByteLimit.from(16).toOption,
+      maximumEnvelopeBytes = ByteLimit.from(16).toOption
     )
     IO.blocking(Files.createTempFile("slurm4s-envelope", ".json"))
       .bracket { path =>
@@ -322,3 +326,31 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
   private def invalidCode[A](result: ExecutionResult[A]): String = result match
     case ExecutionResult.ResultInvalid(diagnostics, _) => diagnostics.toVector.head.code
     case other => fail(s"expected invalid result, received $other")
+
+  /** Rebuild a handle with overrides.
+    *
+    * `copy` is private now: a handle's bounds are its invariant, so every change goes back through
+    * the validating constructor rather than around it.
+    */
+  private def rebuilt(
+      handle: DurableResultHandle,
+      attemptEpoch: Option[AttemptEpoch] = None,
+      retrySafety: Option[RetrySafety] = None,
+      maximumResultBytes: Option[ByteLimit] = None,
+      maximumEnvelopeBytes: Option[ByteLimit] = None
+  ): DurableResultHandle =
+    DurableResultHandle
+      .from(
+        handle.submissionKey,
+        handle.attemptId,
+        attemptEpoch.getOrElse(handle.attemptEpoch),
+        handle.job,
+        handle.operation,
+        handle.resultSchema,
+        maximumResultBytes.getOrElse(handle.maximumResultBytes),
+        maximumEnvelopeBytes.getOrElse(handle.maximumEnvelopeBytes),
+        handle.declaredOutputs,
+        handle.workerRelease,
+        retrySafety.getOrElse(handle.retrySafety)
+      )
+      .fold(problem => fail(problem.reason), identity)

@@ -68,7 +68,7 @@ final case class PreparedAttempt[A](
     * result schema while the codec decodes another, or limits that drifted apart.
     */
   def durableHandle(bound: Option[JobRef]): DurableResultHandle =
-    DurableResultHandle(
+    DurableResultHandle.trusted(
       job.launch.submissionKey,
       attemptId,
       epoch,
@@ -82,7 +82,14 @@ final case class PreparedAttempt[A](
       job.launch.retrySafety
     )
 
-final case class DurableResultHandle(
+/** The durable, type-erased description of where an attempt's result will be and how to read it.
+  *
+  * Constructed only through [[DurableResultHandle.from]] or by projecting a [[PreparedAttempt]]. A
+  * public `apply`/`copy` let a handle exist that declared the same output twice, or an envelope
+  * limit smaller than the result it must contain — states no producer intends and no reader can
+  * honour, and which arrived unchecked from the wire on every decode.
+  */
+final case class DurableResultHandle private (
     submissionKey: SubmissionKey,
     attemptId: AttemptId,
     attemptEpoch: AttemptEpoch,
@@ -93,10 +100,23 @@ final case class DurableResultHandle(
     maximumEnvelopeBytes: ByteLimit,
     declaredOutputs: Vector[RelativeOutputPath],
     workerRelease: WorkerRelease,
-    retrySafety: RetrySafety = RetrySafety.Unknown
-) derives CanEqual
+    retrySafety: RetrySafety
+) derives CanEqual:
 
-final case class TaskInvocation(
+  /** Bind this handle to the job it turned out to run as.
+    *
+    * The only mutation a handle admits: binding cannot invalidate the bounds, and everything else
+    * about a handle is fixed at preparation.
+    */
+  def boundTo(value: JobRef): DurableResultHandle = copy(job = Some(value))
+
+/** What a worker is asked to run, bounded.
+  *
+  * Constructed only through [[TaskInvocation.from]]. ADR 0001 names the bounded envelope as the
+  * authority for a typed result; these bounds are that promise, and an unchecked `apply` meant a
+  * decoded invocation could carry input larger than the limit it declared for itself.
+  */
+final case class TaskInvocation private (
     submissionKey: SubmissionKey,
     attemptId: AttemptId,
     attemptEpoch: AttemptEpoch,
@@ -109,8 +129,123 @@ final case class TaskInvocation(
     maximumEnvelopeBytes: ByteLimit,
     maximumOutputBytes: ByteLimit,
     workerRelease: WorkerRelease,
-    retrySafety: RetrySafety = RetrySafety.Unknown
+    retrySafety: RetrySafety
 ) derives CanEqual
+
+object DurableResultHandle:
+  def from(
+      submissionKey: SubmissionKey,
+      attemptId: AttemptId,
+      attemptEpoch: AttemptEpoch,
+      job: Option[JobRef],
+      operation: WorkloadOperation,
+      resultSchema: ResultSchemaId,
+      maximumResultBytes: ByteLimit,
+      maximumEnvelopeBytes: ByteLimit,
+      declaredOutputs: Vector[RelativeOutputPath],
+      workerRelease: WorkerRelease,
+      retrySafety: RetrySafety = RetrySafety.Unknown
+  ): Either[ValidationFailure, DurableResultHandle] =
+    validateBounds(declaredOutputs, maximumResultBytes, maximumEnvelopeBytes).map(_ =>
+      DurableResultHandle(
+        submissionKey,
+        attemptId,
+        attemptEpoch,
+        job,
+        operation,
+        resultSchema,
+        maximumResultBytes,
+        maximumEnvelopeBytes,
+        declaredOutputs,
+        workerRelease,
+        retrySafety
+      )
+    )
+
+  private[core] def trusted(
+      submissionKey: SubmissionKey,
+      attemptId: AttemptId,
+      attemptEpoch: AttemptEpoch,
+      job: Option[JobRef],
+      operation: WorkloadOperation,
+      resultSchema: ResultSchemaId,
+      maximumResultBytes: ByteLimit,
+      maximumEnvelopeBytes: ByteLimit,
+      declaredOutputs: Vector[RelativeOutputPath],
+      workerRelease: WorkerRelease,
+      retrySafety: RetrySafety
+  ): DurableResultHandle =
+    DurableResultHandle(
+      submissionKey,
+      attemptId,
+      attemptEpoch,
+      job,
+      operation,
+      resultSchema,
+      maximumResultBytes,
+      maximumEnvelopeBytes,
+      declaredOutputs,
+      workerRelease,
+      retrySafety
+    )
+
+private[core] def validateBounds(
+    declaredOutputs: Vector[RelativeOutputPath],
+    maximumResultBytes: ByteLimit,
+    maximumEnvelopeBytes: ByteLimit
+): Either[ValidationFailure, Unit] =
+  if declaredOutputs.distinct.size != declaredOutputs.size then
+    Left(ValidationFailure("declaredOutputs", "must not contain duplicate paths"))
+  else if maximumResultBytes.value > maximumEnvelopeBytes.value then
+    Left(
+      ValidationFailure(
+        "maximumEnvelopeBytes",
+        "an envelope cannot be smaller than the result it must contain"
+      )
+    )
+  else Right(())
+
+object TaskInvocation:
+  def from(
+      submissionKey: SubmissionKey,
+      attemptId: AttemptId,
+      attemptEpoch: AttemptEpoch,
+      job: Option[JobRef],
+      operation: RegisteredOperation,
+      inputBytes: Vector[Byte],
+      declaredOutputs: Vector[RelativeOutputPath],
+      maximumInputBytes: ByteLimit,
+      maximumResultBytes: ByteLimit,
+      maximumEnvelopeBytes: ByteLimit,
+      maximumOutputBytes: ByteLimit,
+      workerRelease: WorkerRelease,
+      retrySafety: RetrySafety = RetrySafety.Unknown
+  ): Either[ValidationFailure, TaskInvocation] =
+    if inputBytes.size > maximumInputBytes.value then
+      Left(
+        ValidationFailure(
+          "inputBytes",
+          s"encoded input is ${inputBytes.size} bytes; the declared maximum is ${maximumInputBytes.value}"
+        )
+      )
+    else
+      validateBounds(declaredOutputs, maximumResultBytes, maximumEnvelopeBytes).map(_ =>
+        TaskInvocation(
+          submissionKey,
+          attemptId,
+          attemptEpoch,
+          job,
+          operation,
+          inputBytes,
+          declaredOutputs,
+          maximumInputBytes,
+          maximumResultBytes,
+          maximumEnvelopeBytes,
+          maximumOutputBytes,
+          workerRelease,
+          retrySafety
+        )
+      )
 
 object ResultEnvelope:
   def succeeded(

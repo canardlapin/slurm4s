@@ -4,11 +4,49 @@ import cats.data.NonEmptyChain
 import cats.data.ValidatedNec
 import cats.syntax.all.*
 
-final case class SiteToken private (value: String) derives CanEqual
+/** Shared validation for a site-supplied name.
+  *
+  * Each kind gets its own type. One `SiteToken` covering accounts, partitions, QoS, constraints,
+  * modules, containers and accelerator kinds made every one of them freely interchangeable at the
+  * type level — an account could be passed where a partition was meant and only a configured
+  * allowlist, if present, would notice.
+  */
+abstract private[core] class SiteName(field: String):
+  opaque type Type = String
 
-object SiteToken:
-  def from(field: String, raw: String): Either[ValidationFailure, SiteToken] =
-    IdentifierRules.text(field, raw, 255).map(SiteToken(_))
+  def from(raw: String): Either[ValidationFailure, Type] =
+    IdentifierRules.text(field, raw, 255)
+
+  def unsafeFrom(raw: String): Type =
+    from(raw).fold(problem => throw new IllegalArgumentException(problem.reason), identity)
+
+  extension (name: Type) def value: String = name
+  given CanEqual[Type, Type] = CanEqual.derived
+  given Ordering[Type] = Ordering.String
+
+object AccountName extends SiteName("account")
+type AccountName = AccountName.Type
+
+object PartitionName extends SiteName("partition")
+type PartitionName = PartitionName.Type
+
+object QosName extends SiteName("qos")
+type QosName = QosName.Type
+
+object ConstraintName extends SiteName("constraint")
+type ConstraintName = ConstraintName.Type
+
+object ModuleName extends SiteName("module")
+type ModuleName = ModuleName.Type
+
+object ContainerImage extends SiteName("container")
+type ContainerImage = ContainerImage.Type
+
+object AcceleratorKind extends SiteName("accelerator")
+type AcceleratorKind = AcceleratorKind.Type
+
+object SiteId extends SiteName("site")
+type SiteId = SiteId.Type
 
 enum MemoryMode derives CanEqual:
   case PerNode
@@ -26,7 +64,7 @@ enum EnvironmentExportPolicy derives CanEqual:
   case None
   case All
 
-final case class AcceleratorRequest(kind: SiteToken, count: PositiveInt) derives CanEqual
+final case class AcceleratorRequest(kind: AcceleratorKind, count: PositiveInt) derives CanEqual
 
 final case class NativeOption private (name: String, value: String) derives CanEqual
 
@@ -85,12 +123,12 @@ object NativeOption:
     yield NativeOption(checkedName, checkedValue)
 
 final case class SiteIntent(
-    account: Option[SiteToken] = None,
-    partition: Option[SiteToken] = None,
-    qos: Option[SiteToken] = None,
-    constraints: Vector[SiteToken] = Vector.empty,
-    modules: Vector[SiteToken] = Vector.empty,
-    container: Option[SiteToken] = None,
+    account: Option[AccountName] = None,
+    partition: Option[PartitionName] = None,
+    qos: Option[QosName] = None,
+    constraints: Vector[ConstraintName] = Vector.empty,
+    modules: Vector[ModuleName] = Vector.empty,
+    container: Option[ContainerImage] = None,
     accelerators: Vector[AcceleratorRequest] = Vector.empty,
     nativeOptions: Vector[NativeOption] = Vector.empty,
     environmentExport: Option[EnvironmentExportPolicy] = None
@@ -128,12 +166,12 @@ enum PreflightAuthority derives CanEqual:
 
 final case class EffectiveSiteSpec(
     resources: ResourceRequest,
-    account: Option[SiteToken],
-    partition: Option[SiteToken],
-    qos: Option[SiteToken],
-    constraints: Vector[SiteToken],
-    modules: Vector[SiteToken],
-    container: Option[SiteToken],
+    account: Option[AccountName],
+    partition: Option[PartitionName],
+    qos: Option[QosName],
+    constraints: Vector[ConstraintName],
+    modules: Vector[ModuleName],
+    container: Option[ContainerImage],
     accelerators: Vector[AcceleratorRequest],
     nativeOptions: Vector[NativeOption],
     environmentExport: EnvironmentExportPolicy,
@@ -141,7 +179,7 @@ final case class EffectiveSiteSpec(
 ) derives CanEqual
 
 final case class SiteResolution(
-    site: SiteToken,
+    site: SiteId,
     requestedResources: ResourceRequest,
     requestedIntent: SiteIntent,
     effective: EffectiveSiteSpec,
@@ -150,20 +188,20 @@ final case class SiteResolution(
 ) derives CanEqual
 
 final case class SiteProfile(
-    site: SiteToken,
-    defaultAccount: Option[SiteToken] = None,
-    defaultPartition: Option[SiteToken] = None,
-    defaultQos: Option[SiteToken] = None,
+    site: SiteId,
+    defaultAccount: Option[AccountName] = None,
+    defaultPartition: Option[PartitionName] = None,
+    defaultQos: Option[QosName] = None,
     defaultMemory: Option[MemoryRequest] = None,
-    defaultModules: Vector[SiteToken] = Vector.empty,
+    defaultModules: Vector[ModuleName] = Vector.empty,
     defaultEnvironmentExport: EnvironmentExportPolicy = EnvironmentExportPolicy.Explicit,
     accountRequired: Boolean = false,
-    allowedAccounts: Option[Set[SiteToken]] = None,
-    allowedPartitions: Option[Set[SiteToken]] = None,
-    allowedQos: Option[Set[SiteToken]] = None,
-    availableConstraints: Option[Set[SiteToken]] = None,
-    availableModules: Option[Set[SiteToken]] = None,
-    availableAccelerators: Map[SiteToken, PositiveInt] = Map.empty,
+    allowedAccounts: Option[Set[AccountName]] = None,
+    allowedPartitions: Option[Set[PartitionName]] = None,
+    allowedQos: Option[Set[QosName]] = None,
+    availableConstraints: Option[Set[ConstraintName]] = None,
+    availableModules: Option[Set[ModuleName]] = None,
+    availableAccelerators: Map[AcceleratorKind, PositiveInt] = Map.empty,
     allowedMemoryModes: Set[MemoryMode] = MemoryMode.values.toSet,
     maximumPerNodeMemory: Option[Mebibytes] = None,
     maximumPerCpuMemory: Option[Mebibytes] = None,
@@ -229,14 +267,15 @@ final case class SiteProfile(
 
     (
       validateRequiredAccount(account),
-      validateMember("account-not-allowed", "account", account, allowedAccounts),
-      validateMember("partition-not-allowed", "partition", partition, allowedPartitions),
-      validateMember("qos-not-allowed", "qos", qos, allowedQos),
+      validateMember("account-not-allowed", "account", account, allowedAccounts, _.value),
+      validateMember("partition-not-allowed", "partition", partition, allowedPartitions, _.value),
+      validateMember("qos-not-allowed", "qos", qos, allowedQos, _.value),
       validateAll(
         "constraint-not-available",
         "constraints",
         effective.constraints,
-        availableConstraints
+        availableConstraints,
+        _.value
       ),
       validateModules(effective.modules),
       validateContainer(effective.container),
@@ -259,18 +298,21 @@ final case class SiteProfile(
     ).toEither
 
   private def validateRequiredAccount(
-      value: Option[SiteToken]
+      value: Option[AccountName]
   ): ValidatedNec[SitePolicyViolation, Unit] =
     validWhen(
       !accountRequired || value.nonEmpty,
       SitePolicyViolation("account-required", "account", "this site profile requires an account")
     )
 
-  private def validateMember(
+  // Generic in the name type: the policy check is the same shape for every kind, but the kinds
+  // themselves must stay distinct so one cannot be passed where another is meant.
+  private def validateMember[A](
       code: String,
       field: String,
-      value: Option[SiteToken],
-      allowed: Option[Set[SiteToken]]
+      value: Option[A],
+      allowed: Option[Set[A]],
+      render: A => String
   ): ValidatedNec[SitePolicyViolation, Unit] =
     value match
       case Some(token) if allowed.exists(!_.contains(token)) =>
@@ -278,33 +320,41 @@ final case class SiteProfile(
           code,
           field,
           "the requested value is not allowed",
-          Some(token.value)
+          Some(render(token))
         ).invalidNec
       case _ => ().validNec
 
-  private def validateAll(
+  private def validateAll[A](
       code: String,
       field: String,
-      values: Vector[SiteToken],
-      allowed: Option[Set[SiteToken]]
+      values: Vector[A],
+      allowed: Option[Set[A]],
+      render: A => String
   ): ValidatedNec[SitePolicyViolation, Unit] =
     values.traverse_(token =>
       validWhen(
         allowed.forall(_.contains(token)),
-        SitePolicyViolation(code, field, "the requested value is not available", Some(token.value))
+        SitePolicyViolation(
+          code,
+          field,
+          "the requested value is not available",
+          Some(render(token))
+        )
       )
     )
 
-  private def validateModules(values: Vector[SiteToken]): ValidatedNec[SitePolicyViolation, Unit] =
+  private def validateModules(values: Vector[ModuleName]): ValidatedNec[SitePolicyViolation, Unit] =
     val enabled = validWhen(
       features.modules || values.isEmpty,
       SitePolicyViolation("modules-disabled", "modules", "module loading is disabled at this site")
     )
     enabled.productR(
-      validateAll("module-not-available", "modules", values, availableModules)
+      validateAll("module-not-available", "modules", values, availableModules, _.value)
     )
 
-  private def validateContainer(value: Option[SiteToken]): ValidatedNec[SitePolicyViolation, Unit] =
+  private def validateContainer(
+      value: Option[ContainerImage]
+  ): ValidatedNec[SitePolicyViolation, Unit] =
     validWhen(
       features.containers || value.isEmpty,
       SitePolicyViolation(

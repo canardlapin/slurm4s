@@ -55,23 +55,27 @@ object ManagedResultHandle:
       maximumEnvelopeBytes: ByteLimit,
       workerRelease: WorkerRelease
   ): Either[ValidationFailure, DurableResultHandle] =
-    Either.cond(
-      operation.outputSchema == contract.codec.schemaId,
-      DurableResultHandle(
-        attempt.intent.submissionKey,
-        attempt.intent.attemptId,
-        attempt.intent.epoch,
-        attempt.currentJob,
-        WorkloadOperation.Registered(operation.id, operation.version),
-        contract.codec.schemaId,
-        contract.maxResultBytes,
-        maximumEnvelopeBytes,
-        contract.outputs,
-        workerRelease,
-        attempt.intent.retrySafety
-      ),
-      ValidationFailure("resultSchema", "operation and result contract schemas do not match")
-    )
+    Either
+      .cond(
+        operation.outputSchema == contract.codec.schemaId,
+        (),
+        ValidationFailure("resultSchema", "operation and result contract schemas do not match")
+      )
+      .flatMap(_ =>
+        DurableResultHandle.from(
+          attempt.intent.submissionKey,
+          attempt.intent.attemptId,
+          attempt.intent.epoch,
+          attempt.currentJob,
+          WorkloadOperation.Registered(operation.id, operation.version),
+          contract.codec.schemaId,
+          contract.maxResultBytes,
+          maximumEnvelopeBytes,
+          contract.outputs,
+          workerRelease,
+          attempt.intent.retrySafety
+        )
+      )
 
 object ResultAttachment:
   /** Compatibility API returning the historical value-only result. New storage consumers should use

@@ -487,39 +487,45 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       )
       directory = epochDirectory(attemptId, attemptEpoch)
       _ <- createPrivateDirectory(directory)
-      invocation = TaskInvocation(
-        request.submissionKey,
-        attemptId,
-        attemptEpoch,
-        None,
-        request.operation,
-        request.inputBytes,
-        request.declaredOutputs,
-        settings.maximumInputBytes,
-        request.maximumResultBytes,
-        settings.maximumEnvelopeBytes,
-        settings.maximumOutputBytes,
-        settings.workerRelease,
-        request.retrySafety
-      )
+      invocation <- TaskInvocation
+        .from(
+          request.submissionKey,
+          attemptId,
+          attemptEpoch,
+          None,
+          request.operation,
+          request.inputBytes,
+          request.declaredOutputs,
+          settings.maximumInputBytes,
+          request.maximumResultBytes,
+          settings.maximumEnvelopeBytes,
+          settings.maximumOutputBytes,
+          settings.workerRelease,
+          request.retrySafety
+        )
+        .left
+        .map(problem => Diagnostics.one(Diagnostic("invalid-task-invocation", problem.reason)))
       invocationBytes <- TaskInvocationCodec
         .encode(invocation, settings.maximumInvocationBytes)
         .left
         .map(failure => Diagnostics.one(Diagnostic("task-invocation-codec", failure.toString)))
       resultRef = RemoteResultRef(attemptId, attemptEpoch)
-      handle = DurableResultHandle(
-        request.submissionKey,
-        attemptId,
-        attemptEpoch,
-        None,
-        WorkloadOperation.Registered(request.operation.id, request.operation.version),
-        request.operation.outputSchema,
-        request.maximumResultBytes,
-        settings.maximumEnvelopeBytes,
-        request.declaredOutputs,
-        settings.workerRelease,
-        request.retrySafety
-      )
+      handle <- DurableResultHandle
+        .from(
+          request.submissionKey,
+          attemptId,
+          attemptEpoch,
+          None,
+          WorkloadOperation.Registered(request.operation.id, request.operation.version),
+          request.operation.outputSchema,
+          request.maximumResultBytes,
+          settings.maximumEnvelopeBytes,
+          request.declaredOutputs,
+          settings.workerRelease,
+          request.retrySafety
+        )
+        .left
+        .map(problem => Diagnostics.one(Diagnostic("invalid-result-handle", problem.reason)))
       handleBytes <- DurableResultHandleCodec
         .encode(handle, RemoteTaskWireLimits.MaximumHandleBytes)
         .left

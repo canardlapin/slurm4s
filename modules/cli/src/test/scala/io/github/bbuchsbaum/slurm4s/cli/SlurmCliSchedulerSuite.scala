@@ -164,7 +164,7 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
       )
     )
     val profile = SiteProfile(
-      site = token("disabled-array-site"),
+      site = SiteId.unsafeFrom("disabled-array-site"),
       features = SiteFeatures(arrays = false)
     )
     for
@@ -189,9 +189,9 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
   }
 
   test("accepted site resolution is returned and applied to the sbatch argv") {
-    val account = token("research")
+    val account = AccountName.unsafeFrom("research")
     val profile = SiteProfile(
-      site = token("profiled-site"),
+      site = SiteId.unsafeFrom("profiled-site"),
       defaultAccount = Some(account),
       allowedAccounts = Some(Set(account)),
       accountRequired = true
@@ -247,8 +247,6 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
     new CommandExecutor[IO]:
       def execute(command: SlurmCommand, policy: CommandPolicy): IO[InvocationResult] =
         commands.update(_ :+ command).as(InvocationResult.Exited(1, evidence, evidence))
-
-  private def token(value: String): SiteToken = SiteToken.from("test", value).toOption.get
 
   private def jobRef(id: String): JobRef = JobRef(JobId.from(id).toOption.get, None)
 

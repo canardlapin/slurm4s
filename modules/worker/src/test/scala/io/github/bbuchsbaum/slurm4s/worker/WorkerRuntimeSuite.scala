@@ -171,9 +171,14 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           IO.raiseError(new UnsupportedOperationException("sink detail"))
         case _ => IO.unit
       }
-      val invocation = invocationFor(task, "41", Vector.empty).copy(
-        operation = task.operation.descriptor.copy(
-          inputSchema = SchemaId.from("wrong.input.v1").toOption.get
+      val invocation = invocationFor(
+        task,
+        "41",
+        Vector.empty,
+        operation = Some(
+          task.operation.descriptor.copy(
+            inputSchema = SchemaId.from("wrong.input.v1").toOption.get
+          )
         )
       )
 
@@ -325,9 +330,14 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       val registry = TaskRegistry.from(Vector(TaskRegistration(task))).toOption.get
       for
         runtime <- WorkerRuntime.create(release, registry)
-        wrongSchema = invocationFor(task, "1", Vector.empty).copy(
-          operation = task.operation.descriptor.copy(
-            inputSchema = SchemaId.from("wrong.input.v1").toOption.get
+        wrongSchema = invocationFor(
+          task,
+          "1",
+          Vector.empty,
+          operation = Some(
+            task.operation.descriptor.copy(
+              inputSchema = SchemaId.from("wrong.input.v1").toOption.get
+            )
           )
         )
         mismatch <- FileTaskContext
@@ -339,8 +349,11 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
               FileResultPublisher(root.resolve("wrong-result.json"), envelopeLimit, resultLimit)
             )
           }
-        tiny = invocationFor(task, "100", Vector.empty).copy(
-          maximumResultBytes = ByteLimit.from(1).toOption.get
+        tiny = invocationFor(
+          task,
+          "100",
+          Vector.empty,
+          maximumResultBytes = ByteLimit.from(1).toOption
         )
         oversized <- FileTaskContext
           .managed(FileTaskWorkspace(root.resolve("large")), Map.empty)
@@ -675,7 +688,34 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         }
       yield value + 1
 
+  /** Overrides go through TaskInvocation.from, because the bounds are the type's invariant now. */
   private def invocationFor(
+      task: ExampleTask,
+      input: String,
+      declared: Vector[RelativeOutputPath],
+      operation: Option[RegisteredOperation] = None,
+      maximumResultBytes: Option[ByteLimit] = None
+  ): TaskInvocation =
+    val base = baseInvocation(task, input, declared)
+    TaskInvocation
+      .from(
+        base.submissionKey,
+        base.attemptId,
+        base.attemptEpoch,
+        base.job,
+        operation.getOrElse(base.operation),
+        base.inputBytes,
+        base.declaredOutputs,
+        base.maximumInputBytes,
+        maximumResultBytes.getOrElse(base.maximumResultBytes),
+        base.maximumEnvelopeBytes,
+        base.maximumOutputBytes,
+        base.workerRelease,
+        base.retrySafety
+      )
+      .fold(problem => fail(problem.reason), identity)
+
+  private def baseInvocation(
       task: ExampleTask,
       input: String,
       declared: Vector[RelativeOutputPath]

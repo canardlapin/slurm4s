@@ -72,21 +72,24 @@ class JobArraySuite extends munit.FunSuite:
       LogRef(attempt, AttemptEpoch.initial, LogStream.Stderr, s"/work/$suffix/stderr.log"),
       contract,
       Some(
-        DurableResultHandle(
-          key,
-          attempt,
-          AttemptEpoch.initial,
-          None,
-          WorkloadOperation.Registered(
-            OperationId.from("array.operation").toOption.get,
-            OperationVersion.from("1").toOption.get
-          ),
-          schema,
-          ByteLimit.defaultEvidence,
-          ByteLimit.defaultEvidence,
-          Vector.empty,
-          release
-        )
+        DurableResultHandle
+          .from(
+            key,
+            attempt,
+            AttemptEpoch.initial,
+            None,
+            WorkloadOperation.Registered(
+              OperationId.from("array.operation").toOption.get,
+              OperationVersion.from("1").toOption.get
+            ),
+            schema,
+            ByteLimit.defaultEvidence,
+            ByteLimit.defaultEvidence,
+            Vector.empty,
+            release
+          )
+          .toOption
+          .get
       )
     )
 

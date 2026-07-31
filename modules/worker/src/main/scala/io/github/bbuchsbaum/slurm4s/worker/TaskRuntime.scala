@@ -116,26 +116,27 @@ object TaskInvocations:
         (),
         TaskFailure.InputTooLarge(bytes.size.toLong, maximumInputBytes.value)
       )
-      _ <- Either.cond(
-        declaredOutputs.distinct.size == declaredOutputs.size,
-        (),
-        TaskFailure.InvalidInvocation("declared outputs must be distinct")
-      )
-    yield TaskInvocation(
-      submissionKey,
-      attemptId,
-      attemptEpoch,
-      job,
-      operation.descriptor,
-      bytes,
-      declaredOutputs,
-      maximumInputBytes,
-      maximumResultBytes,
-      maximumEnvelopeBytes,
-      maximumOutputBytes,
-      workerRelease,
-      retrySafety
-    )
+      // Distinctness and the byte bounds are now the type's own invariant, checked once in
+      // TaskInvocation.from rather than restated at each construction site.
+      invocation <- TaskInvocation
+        .from(
+          submissionKey,
+          attemptId,
+          attemptEpoch,
+          job,
+          operation.descriptor,
+          bytes,
+          declaredOutputs,
+          maximumInputBytes,
+          maximumResultBytes,
+          maximumEnvelopeBytes,
+          maximumOutputBytes,
+          workerRelease,
+          retrySafety
+        )
+        .left
+        .map(problem => TaskFailure.InvalidInvocation(problem.reason))
+    yield invocation
 
 enum TaskFailure derives CanEqual:
   case UnknownOperation(operation: RegisteredOperation)

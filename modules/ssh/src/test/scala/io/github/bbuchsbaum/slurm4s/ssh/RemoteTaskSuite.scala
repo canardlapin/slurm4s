@@ -213,9 +213,21 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
           )
         }
         oversized <- handle.await
-        staleHandle = handle.resultHandle.copy(
-          attemptEpoch = AttemptEpoch.from(handle.resultHandle.attemptEpoch.value + 1L).toOption.get
-        )
+        staleHandle = DurableResultHandle
+          .from(
+            handle.resultHandle.submissionKey,
+            handle.resultHandle.attemptId,
+            AttemptEpoch.from(handle.resultHandle.attemptEpoch.value + 1L).toOption.get,
+            handle.resultHandle.job,
+            handle.resultHandle.operation,
+            handle.resultHandle.resultSchema,
+            handle.resultHandle.maximumResultBytes,
+            handle.resultHandle.maximumEnvelopeBytes,
+            handle.resultHandle.declaredOutputs,
+            handle.resultHandle.workerRelease,
+            handle.resultHandle.retrySafety
+          )
+          .fold(problem => fail(problem.reason), identity)
         validEnvelope = successEnvelope(handle, 6)
         validBytes = ResultEnvelopeCodec
           .encode(validEnvelope, envelopeLimit, resultLimit)

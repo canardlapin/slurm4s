@@ -43,13 +43,13 @@ class SlurmCommandsSuite extends munit.FunSuite:
           EnvName.unsafeFrom("LANG") -> "C.UTF-8"
         )
       )
-    val account = SiteToken.from("account", "research").toOption.get
-    val partition = SiteToken.from("partition", "compute").toOption.get
-    val qos = SiteToken.from("qos", "normal").toOption.get
-    val gpu = SiteToken.from("accelerator", "gpu:a100").toOption.get
+    val account = AccountName.unsafeFrom("research")
+    val partition = PartitionName.unsafeFrom("compute")
+    val qos = QosName.unsafeFrom("normal")
+    val gpu = AcceleratorKind.unsafeFrom("gpu:a100")
     val native = NativeOption.from("licenses", "matlab@server:1").toOption.get
     val resolution = SiteProfile(
-      site = SiteToken.from("site", "example").toOption.get,
+      site = SiteId.unsafeFrom("example"),
       defaultAccount = Some(account),
       defaultPartition = Some(partition),
       defaultQos = Some(qos),

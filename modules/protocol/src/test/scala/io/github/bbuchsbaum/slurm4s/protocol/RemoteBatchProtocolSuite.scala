@@ -217,19 +217,22 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
       RemoteRegisteredBatchElementSubmission(
         element.index,
         RemoteResultRef(attempt, epoch),
-        DurableResultHandle(
-          element.submissionKey,
-          attempt,
-          epoch,
-          None,
-          WorkloadOperation.Registered(operation.id, operation.version),
-          operation.outputSchema,
-          request.maximumResultBytes,
-          ByteLimit.defaultEvidence,
-          Vector.empty,
-          release,
-          request.retrySafety
-        ),
+        DurableResultHandle
+          .from(
+            element.submissionKey,
+            attempt,
+            epoch,
+            None,
+            WorkloadOperation.Registered(operation.id, operation.version),
+            operation.outputSchema,
+            request.maximumResultBytes,
+            ByteLimit.defaultEvidence,
+            Vector.empty,
+            release,
+            request.retrySafety
+          )
+          .toOption
+          .get,
         LogRef(attempt, epoch, LogStream.Stdout, s"/work/$attempt/stdout.log"),
         LogRef(attempt, epoch, LogStream.Stderr, s"/work/$attempt/stderr.log")
       )

@@ -267,28 +267,31 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     )
     val attemptId = AttemptId.from("remote-response-attempt").toOption.get
     val epoch = AttemptEpoch.initial
-    val handle = DurableResultHandle(
-      SubmissionKey.from("remote-response").toOption.get,
-      attemptId,
-      epoch,
-      None,
-      WorkloadOperation.Registered(
-        OperationId.from("example.increment").toOption.get,
-        OperationVersion.from("1").toOption.get
-      ),
-      ResultSchemaId.from("example.int-result.v1").toOption.get,
-      ByteLimit.from(2048).toOption.get,
-      ByteLimit.defaultEvidence,
-      Vector.empty,
-      WorkerRelease(
-        WorkerReleaseId.from("worker-1").toOption.get,
-        ContentDigest
-          .from("sha256:13029f9e83d15b3d437c2a7568fc1ca7990ecf3ff79bef6da08f13ff5ae12af8")
-          .toOption
-          .get
-      ),
-      RetrySafety.SafeForAutomaticRetry
-    )
+    val handle = DurableResultHandle
+      .from(
+        SubmissionKey.from("remote-response").toOption.get,
+        attemptId,
+        epoch,
+        None,
+        WorkloadOperation.Registered(
+          OperationId.from("example.increment").toOption.get,
+          OperationVersion.from("1").toOption.get
+        ),
+        ResultSchemaId.from("example.int-result.v1").toOption.get,
+        ByteLimit.from(2048).toOption.get,
+        ByteLimit.defaultEvidence,
+        Vector.empty,
+        WorkerRelease(
+          WorkerReleaseId.from("worker-1").toOption.get,
+          ContentDigest
+            .from("sha256:13029f9e83d15b3d437c2a7568fc1ca7990ecf3ff79bef6da08f13ff5ae12af8")
+            .toOption
+            .get
+        ),
+        RetrySafety.SafeForAutomaticRetry
+      )
+      .toOption
+      .get
     val submission = RemoteRegisteredSubmission(
       RemoteResultRef(attemptId, epoch),
       handle,

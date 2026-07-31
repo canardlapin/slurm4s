@@ -243,19 +243,24 @@ object DurableResultHandleCodec:
       releaseJson <- requiredJson(cursor, "workerRelease")
       release <- decodeWorkerRelease(releaseJson)
       retrySafety <- decodeRetrySafetyField(cursor)
-    yield DurableResultHandle(
-      submissionKey,
-      attemptId,
-      epoch,
-      job,
-      operation,
-      resultSchema,
-      maximumResultBytes,
-      maximumEnvelopeBytes,
-      outputs,
-      release,
-      retrySafety
-    )
+      // Decode is where the bounds are checked, not where they are assumed.
+      handle <- DurableResultHandle
+        .from(
+          submissionKey,
+          attemptId,
+          epoch,
+          job,
+          operation,
+          resultSchema,
+          maximumResultBytes,
+          maximumEnvelopeBytes,
+          outputs,
+          release,
+          retrySafety
+        )
+        .left
+        .map(problem => invalid(problem.reason))
+    yield handle
 
 object TaskInvocationCodec:
   private val schema = SchemaId.unsafeFrom("slurm4s.task-invocation")
@@ -379,21 +384,25 @@ object TaskInvocationCodec:
       releaseJson <- requiredJson(cursor, "workerRelease")
       release <- decodeWorkerRelease(releaseJson)
       retrySafety <- decodeRetrySafetyField(cursor)
-    yield TaskInvocation(
-      submissionKey,
-      attemptId,
-      epoch,
-      job,
-      operation,
-      input,
-      outputs,
-      maximumInputBytes,
-      maximumResultBytes,
-      maximumEnvelopeBytes,
-      maximumOutputBytes,
-      release,
-      retrySafety
-    )
+      invocation <- TaskInvocation
+        .from(
+          submissionKey,
+          attemptId,
+          epoch,
+          job,
+          operation,
+          input,
+          outputs,
+          maximumInputBytes,
+          maximumResultBytes,
+          maximumEnvelopeBytes,
+          maximumOutputBytes,
+          release,
+          retrySafety
+        )
+        .left
+        .map(problem => invalid(problem.reason))
+    yield invocation
 
   private def decodeBase64(
       value: String,

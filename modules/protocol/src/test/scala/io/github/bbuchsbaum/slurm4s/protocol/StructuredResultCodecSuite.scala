@@ -68,23 +68,40 @@ class StructuredResultCodecSuite extends munit.FunSuite:
       .decode(fixture("/fixtures/python-result-envelope-v1.json"), envelopeLimit, valueLimit)
       .toOption
       .get
-    val handle = DurableResultHandle(
-      envelope.submissionKey,
-      envelope.attemptId,
-      envelope.attemptEpoch,
-      envelope.job,
-      envelope.operation,
-      envelope.resultSchema,
-      valueLimit,
-      envelopeLimit,
-      envelope.outputs.entries.map(_.path),
-      envelope.workerRelease,
-      RetrySafety.SafeForAutomaticRetry
-    )
+    val handle = DurableResultHandle
+      .from(
+        envelope.submissionKey,
+        envelope.attemptId,
+        envelope.attemptEpoch,
+        envelope.job,
+        envelope.operation,
+        envelope.resultSchema,
+        valueLimit,
+        envelopeLimit,
+        envelope.outputs.entries.map(_.path),
+        envelope.workerRelease,
+        RetrySafety.SafeForAutomaticRetry
+      )
+      .toOption
+      .get
 
     val bytes = DurableResultHandleCodec.encode(handle, envelopeLimit).toOption.get
     assertEquals(DurableResultHandleCodec.decode(bytes, envelopeLimit), Right(handle))
-    val conservative = handle.copy(retrySafety = RetrySafety.Unknown)
+    val conservative = DurableResultHandle
+      .from(
+        handle.submissionKey,
+        handle.attemptId,
+        handle.attemptEpoch,
+        handle.job,
+        handle.operation,
+        handle.resultSchema,
+        handle.maximumResultBytes,
+        handle.maximumEnvelopeBytes,
+        handle.declaredOutputs,
+        handle.workerRelease,
+        RetrySafety.Unknown
+      )
+      .fold(problem => fail(problem.reason), identity)
     val conservativeBytes =
       DurableResultHandleCodec.encode(conservative, envelopeLimit).toOption.get
     assertEquals(
@@ -94,32 +111,35 @@ class StructuredResultCodecSuite extends munit.FunSuite:
   }
 
   test("typed task invocation contains only bounded encoded input and durable identities") {
-    val invocation = TaskInvocation(
-      SubmissionKey.from("typed-wire").toOption.get,
-      AttemptId.from("typed-wire-attempt").toOption.get,
-      AttemptEpoch.initial,
-      None,
-      RegisteredOperation(
-        OperationId.from("example.wire").toOption.get,
-        OperationVersion.from("1").toOption.get,
-        SchemaId.from("example.input.v1").toOption.get,
-        ResultSchemaId.from("example.output.v1").toOption.get
-      ),
-      "input".getBytes("UTF-8").toVector,
-      Vector(RelativeOutputPath.from("results/value.txt").toOption.get),
-      valueLimit,
-      valueLimit,
-      envelopeLimit,
-      valueLimit,
-      WorkerRelease(
-        WorkerReleaseId.from("wire-worker").toOption.get,
-        ContentDigest
-          .from("sha256:3564222fe977cf468c6d61ae1cb5793096f8ffc4a7c8b02401b9a2402b7f5bf1")
-          .toOption
-          .get
-      ),
-      RetrySafety.NoAutomaticRetry
-    )
+    val invocation = TaskInvocation
+      .from(
+        SubmissionKey.from("typed-wire").toOption.get,
+        AttemptId.from("typed-wire-attempt").toOption.get,
+        AttemptEpoch.initial,
+        None,
+        RegisteredOperation(
+          OperationId.from("example.wire").toOption.get,
+          OperationVersion.from("1").toOption.get,
+          SchemaId.from("example.input.v1").toOption.get,
+          ResultSchemaId.from("example.output.v1").toOption.get
+        ),
+        "input".getBytes("UTF-8").toVector,
+        Vector(RelativeOutputPath.from("results/value.txt").toOption.get),
+        valueLimit,
+        valueLimit,
+        envelopeLimit,
+        valueLimit,
+        WorkerRelease(
+          WorkerReleaseId.from("wire-worker").toOption.get,
+          ContentDigest
+            .from("sha256:3564222fe977cf468c6d61ae1cb5793096f8ffc4a7c8b02401b9a2402b7f5bf1")
+            .toOption
+            .get
+        ),
+        RetrySafety.NoAutomaticRetry
+      )
+      .toOption
+      .get
     val encoded = TaskInvocationCodec.encode(invocation, envelopeLimit).toOption.get
 
     assertEquals(

@@ -54,7 +54,7 @@ final case class ArrayElementIdentity(
 final case class ArrayElementBinding(identity: ArrayElementIdentity, job: JobRef) derives CanEqual:
   def stdout: LogRef = resolve(identity.stdout)
   def stderr: LogRef = resolve(identity.stderr)
-  def resultHandle: Option[DurableResultHandle] = identity.resultHandle.map(_.copy(job = Some(job)))
+  def resultHandle: Option[DurableResultHandle] = identity.resultHandle.map(_.boundTo(job))
 
   private def resolve(ref: LogRef): LogRef =
     ref.copy(
