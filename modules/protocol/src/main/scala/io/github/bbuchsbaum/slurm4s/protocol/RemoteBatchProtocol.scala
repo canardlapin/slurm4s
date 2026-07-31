@@ -1,6 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
 import cats.data.NonEmptyVector
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
 final case class RemoteRegisteredBatchElement(

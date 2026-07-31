@@ -41,6 +41,7 @@ lazy val root = project
   .aggregate(
     kernel,
     core,
+    batch,
     cli,
     protocol,
     testkit,
@@ -86,9 +87,18 @@ lazy val cli = project
   .settings(commonSettings)
   .settings(name := "slurm4s-cli")
 
+lazy val batch = project
+  .in(file("modules/batch"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(
+    name := "slurm4s-batch",
+    libraryDependencies += Libraries.catsCore
+  )
+
 lazy val protocol = project
   .in(file("modules/protocol"))
-  .dependsOn(core)
+  .dependsOn(core, batch)
   .settings(commonSettings)
   .settings(
     name := "slurm4s-protocol",
@@ -138,7 +148,7 @@ lazy val agent = project
 
 lazy val ssh = project
   .in(file("modules/ssh"))
-  .dependsOn(core, protocol, agent, worker, testkit % "test->compile")
+  .dependsOn(core, batch, protocol, agent, worker, testkit % "test->compile")
   .settings(commonSettings)
   .settings(
     name := "slurm4s-ssh",
@@ -166,7 +176,7 @@ lazy val managed = project
 
 lazy val worker = project
   .in(file("modules/worker"))
-  .dependsOn(kernel, core, protocol)
+  .dependsOn(kernel, core, batch, protocol)
   .settings(commonSettings)
   .settings(
     name := "slurm4s-worker",
@@ -189,7 +199,7 @@ lazy val observability = project
 lazy val examples = project
   .in(file("modules/examples"))
   .enablePlugins(NoPublishPlugin)
-  .dependsOn(core, cli, protocol, local, agent, ssh, managed, worker, observability)
+  .dependsOn(core, batch, cli, protocol, local, agent, ssh, managed, worker, observability)
   .settings(commonSettings)
   .settings(
     name := "slurm4s-examples"
@@ -197,5 +207,5 @@ lazy val examples = project
 
 addCommandAlias(
   "checkFormatting",
-  ";kernel/scalafmtCheckAll;core/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
+  ";kernel/scalafmtCheckAll;core/scalafmtCheckAll;batch/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
 )

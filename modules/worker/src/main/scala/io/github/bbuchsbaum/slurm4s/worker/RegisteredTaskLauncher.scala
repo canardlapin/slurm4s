@@ -5,6 +5,7 @@ import cats.data.NonEmptyVector
 import cats.effect.Clock
 import cats.effect.IO
 import cats.syntax.all.*
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 

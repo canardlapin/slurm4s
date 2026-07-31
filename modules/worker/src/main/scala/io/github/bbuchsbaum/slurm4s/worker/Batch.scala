@@ -1,5 +1,6 @@
 package io.github.bbuchsbaum.slurm4s.worker
 
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
 /** A typed collection of logical tasks awaiting an explicit execution plan. */

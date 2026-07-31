@@ -6,6 +6,7 @@ import cats.effect.Ref
 import cats.syntax.all.*
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.agent.*
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 import io.github.bbuchsbaum.slurm4s.worker.*
@@ -160,11 +161,13 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
       localScript,
       "#!/bin/sh\nprintf '%s\\n' \"$@\"\n"
     )
-    val grid = Grid.cross(
-      Axis.of(0.1, 0.5, 1.0),
-      Axis.of(Method.Ridge, Method.Lasso, Method.ElasticNet),
-      Axis.of(1, 2, 3)
-    )(FitParams.apply)
+    val grid = Grid
+      .cross(
+        Axis.of(0.1, 0.5, 1.0),
+        Axis.of(Method.Ridge, Method.Lasso, Method.ElasticNet),
+        Axis.of(1, 2, 3)
+      )(FitParams.apply)
+      .fold(failure => fail(failure.toString), identity)
 
     for
       submittedRequest <- Ref.of[IO, Option[LaunchSpec]](None)
@@ -203,7 +206,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
         ByteLimit.from(1024).toOption.get
       )
     yield
-      assertEquals(grid.size, 27)
+      assertEquals(grid.size, 27L)
       assert(exitCodes.forall(_ == 0))
       assert(
         results.forall(_.result == RemoteScriptExecutionResult.Exited(0))

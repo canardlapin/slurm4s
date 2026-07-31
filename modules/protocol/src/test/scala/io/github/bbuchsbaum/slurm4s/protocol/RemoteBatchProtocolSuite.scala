@@ -1,5 +1,6 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
 import java.time.Instant

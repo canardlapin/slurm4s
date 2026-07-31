@@ -3,6 +3,7 @@ package io.github.bbuchsbaum.slurm4s.worker
 import cats.data.NonEmptyVector
 import cats.effect.IO
 import cats.syntax.all.*
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 

@@ -9,6 +9,7 @@ import io.circe.HCursor
 import io.circe.Json
 import io.circe.generic.semiauto.deriveDecoder
 import io.circe.generic.semiauto.deriveEncoder
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
 import java.time.Instant
