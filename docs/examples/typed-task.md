@@ -11,11 +11,13 @@ import io.github.bbuchsbaum.slurm4s.ssh.*
 import io.github.bbuchsbaum.slurm4s.worker.*
 
 object Increment extends SlurmTask[Int, Int]:
+  // Identifier literals are checked where you write them: an invalid one fails the build. A value
+  // computed at runtime still goes through `OperationId.from`, which returns an `Either`.
   val operation = OperationRef[Int, Int](
-    OperationId.from("example.increment").toOption.get,
-    OperationVersion.from("1").toOption.get,
-    SchemaId.from("example.int-input.v1").toOption.get,
-    ResultSchemaId.from("example.int-result.v1").toOption.get
+    OperationId("example.increment"),
+    OperationVersion("1"),
+    SchemaId("example.int-input.v1"),
+    ResultSchemaId("example.int-result.v1")
   )
 
   val inputCodec = new InputCodec[Int]:

@@ -9,7 +9,7 @@ import cats.Show
   */
 final case class ValidationFailure(field: String, reason: String) derives CanEqual
 
-private object IdentifierRules:
+private[kernel] object IdentifierRules:
   def text(field: String, raw: String, maxLength: Int): Either[ValidationFailure, String] =
     if raw == null then Left(ValidationFailure(field, "must not be null"))
     else if raw.isEmpty then Left(ValidationFailure(field, "must not be empty"))
@@ -34,6 +34,9 @@ abstract class TextIdentifier(field: String, maximumLength: Int):
   def unsafeFrom(raw: String): Type =
     from(raw).fold(problem => throw new IllegalArgumentException(problem.reason), identity)
 
+  /** Accept a literal the macro has already validated. Subclasses call this from `apply`. */
+  protected inline def validated(inline value: String): Type = unsafeFrom(value)
+
   extension (id: Type) def value: String = id
 
   given CanEqual[Type, Type] = CanEqual.derived
@@ -49,25 +52,46 @@ object TextIdentifier:
   ): Either[ValidationFailure, String] =
     IdentifierRules.text(field, raw, maximumLength)
 
-object SubmissionKey extends TextIdentifier("submissionKey", 200)
+object SubmissionKey extends TextIdentifier("submissionKey", 200):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("submissionKey", 200, raw))
 type SubmissionKey = SubmissionKey.Type
 
-object AttemptId extends TextIdentifier("attemptId", 200)
+object AttemptId extends TextIdentifier("attemptId", 200):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("attemptId", 200, raw))
 type AttemptId = AttemptId.Type
 
-object OperationId extends TextIdentifier("operationId", 255)
+object OperationId extends TextIdentifier("operationId", 255):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("operationId", 255, raw))
 type OperationId = OperationId.Type
 
-object OperationVersion extends TextIdentifier("operationVersion", 100)
+object OperationVersion extends TextIdentifier("operationVersion", 100):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("operationVersion", 100, raw))
 type OperationVersion = OperationVersion.Type
 
-object SchemaId extends TextIdentifier("schemaId", 255)
+object SchemaId extends TextIdentifier("schemaId", 255):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("schemaId", 255, raw))
 type SchemaId = SchemaId.Type
 
-object ResultSchemaId extends TextIdentifier("resultSchemaId", 255)
+object ResultSchemaId extends TextIdentifier("resultSchemaId", 255):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("resultSchemaId", 255, raw))
 type ResultSchemaId = ResultSchemaId.Type
 
-object WorkerReleaseId extends TextIdentifier("workerReleaseId", 255)
+object WorkerReleaseId extends TextIdentifier("workerReleaseId", 255):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("workerReleaseId", 255, raw))
 type WorkerReleaseId = WorkerReleaseId.Type
 
 /** A content digest, structurally validated as `sha256:<64 lowercase hex>`.
