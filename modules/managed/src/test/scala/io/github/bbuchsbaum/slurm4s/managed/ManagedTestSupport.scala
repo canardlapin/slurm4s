@@ -12,18 +12,16 @@ private[managed] object ManagedTestSupport:
   )
   val job: JobRef = JobRef(JobId.from("7001").toOption.get, None, None)
 
-  def request(key: String, body: String = "true"): JobRequest[NoResult] =
-    JobRequest(
+  def request(key: String, body: String = "true"): LaunchSpec =
+    LaunchSpec(
       SubmissionKey.from(key).toOption.get,
       JobName.from("managed-test").toOption.get,
-      Payload.Script(
-        ScriptSource.Inline(
-          "job.sh",
-          s"#!/bin/sh\n$body\n".getBytes("UTF-8").toVector
-        ),
-        Vector.empty,
-        ResultContract.ExitOnly
+      ScriptSource.Inline(
+        "job.sh",
+        s"#!/bin/sh\n$body\n".getBytes("UTF-8").toVector
       ),
+      Vector.empty,
+      ResultContract.ExitOnly.descriptor,
       ResourceRequest.validate(1, 1, None, None, None).toEither.toOption.get
     )
 

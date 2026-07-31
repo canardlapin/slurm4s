@@ -5,7 +5,7 @@ import cats.Show
 import cats.data.NonEmptyChain
 import io.github.bbuchsbaum.slurm4s.core.Diagnostics
 import io.github.bbuchsbaum.slurm4s.core.JobRef
-import io.github.bbuchsbaum.slurm4s.core.JobRequest
+import io.github.bbuchsbaum.slurm4s.core.LaunchSpec
 import io.github.bbuchsbaum.slurm4s.core.JobTiming
 import io.github.bbuchsbaum.slurm4s.core.SitePolicyViolation
 import io.github.bbuchsbaum.slurm4s.core.SiteResolution
@@ -35,8 +35,8 @@ final case class SlurmCliSettings(
     commandPolicy: CommandPolicy
 ) derives CanEqual
 
-final case class PreparedSubmission[A](
-    request: JobRequest[A],
+final case class PreparedSubmission(
+    spec: LaunchSpec,
     scriptPath: String,
     stdoutPath: String,
     stderrPath: String,
@@ -44,7 +44,7 @@ final case class PreparedSubmission[A](
 )
 
 trait SubmissionPlanner[F[_]]:
-  def prepare[A](request: JobRequest[A]): F[Either[Diagnostics, PreparedSubmission[A]]]
+  def prepare(spec: LaunchSpec): F[Either[Diagnostics, PreparedSubmission]]
 
 enum SiteSubmissionResult derives CanEqual:
   case PreflightRejected(failures: NonEmptyChain[SitePolicyViolation])

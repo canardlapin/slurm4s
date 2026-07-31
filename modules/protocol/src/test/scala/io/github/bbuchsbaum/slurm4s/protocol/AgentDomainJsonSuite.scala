@@ -17,14 +17,12 @@ class AgentDomainJsonSuite extends munit.FunSuite:
       )
       .toOption
       .get
-    val request = JobRequest(
+    val request = LaunchSpec(
       SubmissionKey.from("wire-array").toOption.get,
       JobName.from("wire-array").toOption.get,
-      Payload.Script(
-        ScriptSource.ExistingRemote("/work/array.sh"),
-        Vector.empty,
-        ResultContract.ExitOnly
-      ),
+      ScriptSource.ExistingRemote("/work/array.sh"),
+      Vector.empty,
+      ResultContract.ExitOnly.descriptor,
       ResourceRequest.validate(1, 1, None, None, None).toOption.get,
       Map.empty,
       Some(array)
@@ -61,14 +59,12 @@ class AgentDomainJsonSuite extends munit.FunSuite:
   }
 
   test("agent submit wire round-trips validated environment names and rejects export injection") {
-    val request = JobRequest(
+    val request = LaunchSpec(
       SubmissionKey.from("wire-environment").toOption.get,
       JobName.from("wire-environment").toOption.get,
-      Payload.Script(
-        ScriptSource.ExistingRemote("/work/environment.sh"),
-        Vector.empty,
-        ResultContract.ExitOnly
-      ),
+      ScriptSource.ExistingRemote("/work/environment.sh"),
+      Vector.empty,
+      ResultContract.ExitOnly.descriptor,
       ResourceRequest.validate(1, 1, None, None, None).toOption.get,
       Map(EnvName.unsafeFrom("LANG") -> "C.UTF-8")
     )

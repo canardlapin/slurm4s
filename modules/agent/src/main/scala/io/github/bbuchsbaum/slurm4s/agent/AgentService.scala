@@ -9,11 +9,10 @@ import io.github.bbuchsbaum.slurm4s.core.AccountingBatch
 import io.github.bbuchsbaum.slurm4s.core.ByteLimit
 import io.github.bbuchsbaum.slurm4s.core.CancellationAttempt
 import io.github.bbuchsbaum.slurm4s.core.JobRef
-import io.github.bbuchsbaum.slurm4s.core.JobRequest
+import io.github.bbuchsbaum.slurm4s.core.LaunchSpec
 import io.github.bbuchsbaum.slurm4s.core.LogCursor
 import io.github.bbuchsbaum.slurm4s.core.LogReadResult
 import io.github.bbuchsbaum.slurm4s.core.LogRef
-import io.github.bbuchsbaum.slurm4s.core.NoResult
 import io.github.bbuchsbaum.slurm4s.core.ObservationBatch
 import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
 import io.github.bbuchsbaum.slurm4s.core.Scheduler
@@ -66,7 +65,7 @@ trait AgentRegisteredTaskService[F[_]]:
 
 trait AgentApi[F[_]]:
   def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]]
-  def submitOpaque(request: JobRequest[NoResult]): F[AgentCall[SubmissionAttempt]]
+  def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]]
   def submitRegistered(
       request: RemoteRegisteredTaskRequest
   ): F[AgentCall[RemoteRegisteredSubmission]]
@@ -182,8 +181,8 @@ final class AgentService[F[_]: Applicative](
     def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
       scheduler.capabilities.map(AgentCall.Succeeded.apply)
 
-    def submitOpaque(request: JobRequest[NoResult]): F[AgentCall[SubmissionAttempt]] =
-      scheduler.submit(request).map(AgentCall.Succeeded.apply)
+    def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
+      scheduler.submit(spec).map(AgentCall.Succeeded.apply)
 
     def submitRegistered(
         request: RemoteRegisteredTaskRequest
@@ -341,8 +340,8 @@ final class InProcessAgentClient[F[_]: Async] private (
   def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
     whileConnected(delegate.capabilities)
 
-  def submitOpaque(request: JobRequest[NoResult]): F[AgentCall[SubmissionAttempt]] =
-    whileConnected(delegate.submitOpaque(request))
+  def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
+    whileConnected(delegate.submitOpaque(spec))
 
   def submitRegistered(
       request: RemoteRegisteredTaskRequest

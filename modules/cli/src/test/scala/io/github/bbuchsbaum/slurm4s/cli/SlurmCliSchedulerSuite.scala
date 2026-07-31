@@ -175,7 +175,11 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
         recordingPlanner(preparations),
         settings
       )
-      result <- scheduler.submitAt(request, profile, SiteIntent())
+      result <- scheduler.submitAt(
+        LaunchSpec.fromRequest(request).toOption.get,
+        profile,
+        SiteIntent()
+      )
       invoked <- commands.get
       prepared <- preparations.get
       _ = assert(result.isInstanceOf[SiteSubmissionResult.PreflightRejected])
@@ -200,7 +204,11 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
         recordingPlanner(preparations),
         settings
       )
-      result <- scheduler.submitAt(jobRequest, profile, SiteIntent())
+      result <- scheduler.submitAt(
+        LaunchSpec.fromRequest(jobRequest).toOption.get,
+        profile,
+        SiteIntent()
+      )
       invoked <- commands.get
       prepared <- preparations.get
       _ = result match
@@ -228,11 +236,11 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
 
   private def recordingPlanner(counter: Ref[IO, Int]): SubmissionPlanner[IO] =
     new SubmissionPlanner[IO]:
-      def prepare[A](request: JobRequest[A]): IO[Either[Diagnostics, PreparedSubmission[A]]] =
+      def prepare(spec: LaunchSpec): IO[Either[Diagnostics, PreparedSubmission]] =
         counter
           .update(_ + 1)
           .as(
-            Right(PreparedSubmission(request, "/work/job.sh", "/work/stdout", "/work/stderr"))
+            Right(PreparedSubmission(spec, "/work/job.sh", "/work/stdout", "/work/stderr"))
           )
 
   private def recordingExecutor(commands: Ref[IO, Vector[SlurmCommand]]): CommandExecutor[IO] =
@@ -253,8 +261,8 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
 
   private def recordingPlanner(): SubmissionPlanner[IO] =
     new SubmissionPlanner[IO]:
-      def prepare[A](request: JobRequest[A]): IO[Either[Diagnostics, PreparedSubmission[A]]] =
-        IO.pure(Right(PreparedSubmission(request, "/work/job.sh", "/work/stdout", "/work/stderr")))
+      def prepare(spec: LaunchSpec): IO[Either[Diagnostics, PreparedSubmission]] =
+        IO.pure(Right(PreparedSubmission(spec, "/work/job.sh", "/work/stdout", "/work/stderr")))
 
   private def fixedExecutor(result: InvocationResult): CommandExecutor[IO] =
     new CommandExecutor[IO]:

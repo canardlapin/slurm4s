@@ -18,8 +18,8 @@ import scala.util.control.NonFatal
 
 final case class LocalWorkspaceSettings(root: Path, maxScriptBytes: ByteLimit)
 
-final case class PreparedLocalSubmission[A](
-    submission: PreparedSubmission[A],
+final case class PreparedLocalSubmission(
+    submission: PreparedSubmission,
     attemptId: AttemptId,
     epoch: AttemptEpoch,
     stdout: LogRef,
@@ -29,8 +29,8 @@ final case class PreparedLocalSubmission[A](
 final class LocalSubmissionPlanner[F[_]: Async](settings: LocalWorkspaceSettings)
     extends SubmissionPlanner[F]:
 
-  def prepare[A](request: JobRequest[A]): F[Either[Diagnostics, PreparedSubmission[A]]] =
-    prepareLocal(request).map(_.map(_.submission))
+  def prepare(spec: LaunchSpec): F[Either[Diagnostics, PreparedSubmission]] =
+    prepareLocal(spec).map(_.map(_.submission))
 
   /** Stage one attempt of `request` at `epoch`.
     *
@@ -40,61 +40,50 @@ final class LocalSubmissionPlanner[F[_]: Async](settings: LocalWorkspaceSettings
     * overwrites the previous attempt's stdout and stderr, destroying the evidence needed to explain
     * why that attempt failed.
     */
-  def prepareLocal[A](
-      request: JobRequest[A],
+  def prepareLocal(
+      spec: LaunchSpec,
       epoch: AttemptEpoch = AttemptEpoch.initial
-  ): F[Either[Diagnostics, PreparedLocalSubmission[A]]] =
-    Async[F].blocking(prepareBlocking(request, epoch)).attempt.map {
+  ): F[Either[Diagnostics, PreparedLocalSubmission]] =
+    Async[F].blocking(prepareBlocking(spec, epoch)).attempt.map {
       case Right(value) => value
       case Left(error)  => Left(preparationFailure(error))
     }
 
-  private def prepareBlocking[A](
-      request: JobRequest[A],
+  private def prepareBlocking(
+      spec: LaunchSpec,
       epoch: AttemptEpoch
-  ): Either[Diagnostics, PreparedLocalSubmission[A]] =
-    request.payload match
-      case script: Payload.Script[A] =>
-        for
-          attemptId <- AttemptId
-            .from(
-              s"local-${digest(request.submissionKey.value.getBytes(StandardCharsets.UTF_8)).take(24)}"
-            )
-            .left
-            .map(validationFailure)
-          // Mirrors the worker's `${attemptId}-e${epoch}` result layout.
-          directory = settings.root.resolve(s"${attemptId.value}-e${epoch.value}").normalize()
-          _ <- ensureContained(directory)
-          _ <- createPrivateDirectory(directory)
-          scriptPath <- materialize(script.source, directory)
-          stdoutPath = directory.resolve(
-            if request.array.nonEmpty then "stdout-%A_%a.log" else "stdout.log"
-          )
-          stderrPath = directory.resolve(
-            if request.array.nonEmpty then "stderr-%A_%a.log" else "stderr.log"
-          )
-          prepared = PreparedSubmission(
-            request = request,
-            scriptPath = scriptPath.toString,
-            stdoutPath = stdoutPath.toString,
-            stderrPath = stderrPath.toString
-          )
-        yield PreparedLocalSubmission(
-          submission = prepared,
-          attemptId = attemptId,
-          epoch = epoch,
-          stdout = LogRef(attemptId, epoch, LogStream.Stdout, stdoutPath.toString),
-          stderr = LogRef(attemptId, epoch, LogStream.Stderr, stderrPath.toString)
+  ): Either[Diagnostics, PreparedLocalSubmission] =
+    for
+      attemptId <- AttemptId
+        .from(
+          s"local-${digest(spec.submissionKey.value.getBytes(StandardCharsets.UTF_8)).take(24)}"
         )
-      case _: Payload.RegisteredTask[?, ?] =>
-        Left(
-          Diagnostics.one(
-            Diagnostic(
-              "registered-task-requires-lowering",
-              "lower the task with a target-side RegisteredTaskLauncher before local submission"
-            )
-          )
-        )
+        .left
+        .map(validationFailure)
+      // Mirrors the worker's `${attemptId}-e${epoch}` result layout.
+      directory = settings.root.resolve(s"${attemptId.value}-e${epoch.value}").normalize()
+      _ <- ensureContained(directory)
+      _ <- createPrivateDirectory(directory)
+      scriptPath <- materialize(spec.source, directory)
+      stdoutPath = directory.resolve(
+        if spec.array.nonEmpty then "stdout-%A_%a.log" else "stdout.log"
+      )
+      stderrPath = directory.resolve(
+        if spec.array.nonEmpty then "stderr-%A_%a.log" else "stderr.log"
+      )
+      prepared = PreparedSubmission(
+        spec = spec,
+        scriptPath = scriptPath.toString,
+        stdoutPath = stdoutPath.toString,
+        stderrPath = stderrPath.toString
+      )
+    yield PreparedLocalSubmission(
+      submission = prepared,
+      attemptId = attemptId,
+      epoch = epoch,
+      stdout = LogRef(attemptId, epoch, LogStream.Stdout, stdoutPath.toString),
+      stderr = LogRef(attemptId, epoch, LogStream.Stderr, stderrPath.toString)
+    )
 
   private def materialize(source: ScriptSource, directory: Path): Either[Diagnostics, Path] =
     source match

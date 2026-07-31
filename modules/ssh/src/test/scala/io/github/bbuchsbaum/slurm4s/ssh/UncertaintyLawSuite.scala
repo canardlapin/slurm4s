@@ -40,7 +40,7 @@ class UncertaintyLawSuite extends munit.ScalaCheckSuite:
   property("a disconnect after the request write is never a definite non-submission") {
     forAll(disconnect(true)) { failure =>
       RemoteSlurm[IO](AgentCall.Failed(failure)).scheduler
-        .submit(request)
+        .submitLowered(request)
         .map {
           case SubmissionAttempt.Completed(Submission.AcceptanceUnknown(_, _)) => true
           case _                                                               => false
@@ -64,7 +64,7 @@ class UncertaintyLawSuite extends munit.ScalaCheckSuite:
   property("a disconnect before the request write stays repeatable") {
     forAll(disconnect(false)) { failure =>
       val remote = RemoteSlurm[IO](AgentCall.Failed(failure))
-      val submitted = remote.scheduler.submit(request).unsafeRunSync()
+      val submitted = remote.scheduler.submitLowered(request).unsafeRunSync()
       val cancelled = remote.scheduler.cancel(job).unsafeRunSync()
       submitted.isInstanceOf[SubmissionAttempt.InvocationFailed] &&
       cancelled.isInstanceOf[CancellationAttempt.InvocationFailed]
@@ -77,7 +77,7 @@ class UncertaintyLawSuite extends munit.ScalaCheckSuite:
   property("failures that prove non-delivery are not reported as uncertain") {
     forAll(otherFailure) { failure =>
       RemoteSlurm[IO](AgentCall.Failed(failure)).scheduler
-        .submit(request)
+        .submitLowered(request)
         .map(_.isInstanceOf[SubmissionAttempt.InvocationFailed])
         .unsafeRunSync()
     }

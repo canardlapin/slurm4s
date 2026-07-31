@@ -45,7 +45,7 @@ final case class CanonicalRequest private (
     bytes: Vector[Byte],
     digest: ContentDigest
 ) derives CanEqual:
-  def decode: Either[String, JobRequest[NoResult]] =
+  def decode: Either[String, LaunchSpec] =
     io.circe.parser
       .parse(new String(bytes.toArray, StandardCharsets.UTF_8))
       .left
@@ -56,7 +56,7 @@ object CanonicalRequest:
   private val printer = Printer.noSpaces.copy(dropNullValues = false, sortKeys = true)
 
   def from(
-      request: JobRequest[NoResult],
+      request: LaunchSpec,
       policy: ManagedRequestPolicy = ManagedRequestPolicy.rejectEnvironmentValues
   ): Either[ManagedIntentFailure, CanonicalRequest] =
     policy
@@ -65,7 +65,7 @@ object CanonicalRequest:
       .map(ManagedIntentFailure.RequestRejected.apply)
       .flatMap(_ => encode(request).left.map(ManagedIntentFailure.CanonicalizationFailed.apply))
 
-  private def encode(request: JobRequest[NoResult]): Either[String, CanonicalRequest] =
+  private def encode(request: LaunchSpec): Either[String, CanonicalRequest] =
     AgentDomainJson.encodeSubmitRequest(request).flatMap { json =>
       val bytes = printer.print(json).getBytes(StandardCharsets.UTF_8).toVector
       Either.cond(
@@ -159,7 +159,7 @@ final case class ManagedIntent(
 
 object ManagedIntent:
   def from(
-      request: JobRequest[NoResult],
+      request: LaunchSpec,
       recordedAt: Instant,
       policy: ManagedRequestPolicy = ManagedRequestPolicy.rejectEnvironmentValues
   ): Either[ManagedIntentFailure, ManagedIntent] =

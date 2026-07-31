@@ -177,14 +177,12 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     CapabilitySupport.Supported,
     Vector(evidence.primary)
   )
-  private val request = JobRequest(
+  private val request = LaunchSpec(
     SubmissionKey.from("submission-ssh-1").toOption.get,
     JobName.from("opaque-remote").toOption.get,
-    Payload.Script(
-      ScriptSource.Inline("job.sh", "#!/bin/sh\ntrue\n".getBytes("UTF-8").toVector),
-      Vector("one", "two"),
-      ResultContract.ExitOnly
-    ),
+    ScriptSource.Inline("job.sh", "#!/bin/sh\ntrue\n".getBytes("UTF-8").toVector),
+    Vector("one", "two"),
+    ResultContract.ExitOnly.descriptor,
     ResourceRequest.validate(2, 1, None, None, None).toEither.toOption.get,
     Map(EnvName.unsafeFrom("LANG") -> "C")
   )
@@ -193,7 +191,7 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
       IO.pure(SchedulerQueryResult.Succeeded(schedulerCapabilities))
 
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
       IO.pure(SubmissionAttempt.Completed(Submission.Accepted(job, evidence)))
 
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] =

@@ -62,7 +62,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
     "a 27-row typed grid runs through remote sharding and returns ordered values and logs"
   ) { root =>
     for
-      submittedRequest <- Ref.of[IO, Option[JobRequest[?]]](None)
+      submittedRequest <- Ref.of[IO, Option[LaunchSpec]](None)
       scheduler = BatchScheduler(submittedRequest)
       runtime = createRuntime(root, scheduler)
       remote <- connect(runtime.runner)
@@ -117,7 +117,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
 
   temporaryRoot.test("independent and gang plans preserve their distinct Slurm shapes") { root =>
     for
-      submittedRequest <- Ref.of[IO, Option[JobRequest[?]]](None)
+      submittedRequest <- Ref.of[IO, Option[LaunchSpec]](None)
       runtime = createRuntime(root, BatchScheduler(submittedRequest))
       remote <- connect(runtime.runner)
       independent <- remote.submitBatch(
@@ -167,7 +167,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
     )(FitParams.apply)
 
     for
-      submittedRequest <- Ref.of[IO, Option[JobRequest[?]]](None)
+      submittedRequest <- Ref.of[IO, Option[LaunchSpec]](None)
       runtime = createRuntime(root.resolve("remote"), BatchScheduler(submittedRequest))
       remote <- connect(runtime.runner)
       batch = SlurmBatch.script(
@@ -343,7 +343,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
   )
 
   final private case class BatchScheduler(
-      submitted: Ref[IO, Option[JobRequest[?]]]
+      submitted: Ref[IO, Option[LaunchSpec]]
   ) extends Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
       IO.pure(
@@ -360,8 +360,8 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
         )
       )
 
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
-      submitted.set(Some(request)) *>
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+      submitted.set(Some(spec)) *>
         IO.pure(
           SubmissionAttempt.Completed(Submission.Accepted(parentJob, evidence))
         )

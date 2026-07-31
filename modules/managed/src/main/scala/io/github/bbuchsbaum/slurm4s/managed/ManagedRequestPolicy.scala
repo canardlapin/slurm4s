@@ -3,19 +3,19 @@ package io.github.bbuchsbaum.slurm4s.managed
 import io.github.bbuchsbaum.slurm4s.core.*
 
 trait ManagedRequestPolicy:
-  def validate[A](request: JobRequest[A]): Either[Diagnostics, Unit]
+  def validate(spec: LaunchSpec): Either[Diagnostics, Unit]
 
 object ManagedRequestPolicy:
   val rejectEnvironmentValues: ManagedRequestPolicy = new ManagedRequestPolicy:
-    def validate[A](request: JobRequest[A]): Either[Diagnostics, Unit] =
+    def validate(spec: LaunchSpec): Either[Diagnostics, Unit] =
       Either.cond(
-        request.environment.isEmpty,
+        spec.environment.isEmpty,
         (),
         Diagnostics.one(
           Diagnostic(
             "durable-environment-values-forbidden",
             "managed requests do not persist environment values unless a public-name policy is explicit",
-            Map("names" -> displayNames(request.environment.keySet))
+            Map("names" -> displayNames(spec.environment.keySet))
           )
         )
       )
@@ -43,16 +43,16 @@ object ManagedRequestPolicy:
 
   final private case class PublicEnvironment(allowedNames: Set[EnvName])
       extends ManagedRequestPolicy:
-    def validate[A](request: JobRequest[A]): Either[Diagnostics, Unit] =
-      val names = request.environment.keySet
+    def validate(spec: LaunchSpec): Either[Diagnostics, Unit] =
+      val names = spec.environment.keySet
       val undeclaredNames = names.diff(allowedNames)
-      val nullValues = request.environment.iterator.collect { case (name, null) =>
+      val nullValues = spec.environment.iterator.collect { case (name, null) =>
         name
       }.toVector
-      val oversizedValues = request.environment.iterator.collect {
+      val oversizedValues = spec.environment.iterator.collect {
         case (name, value) if value != null && value.length > MaximumValueCharacters => name
       }.toVector
-      val nulValues = request.environment.iterator.collect {
+      val nulValues = spec.environment.iterator.collect {
         case (name, value) if value != null && value.indexOf('\u0000') >= 0 => name
       }.toVector
       val problems = Vector(

@@ -51,14 +51,12 @@ class ObservationScaleSuite extends munit.CatsEffectSuite:
 
   private def attempt(index: Int): ManagedAttempt =
     val key = SubmissionKey.from(f"scale-$index%05d").toOption.get
-    val request = JobRequest(
+    val request = LaunchSpec(
       key,
       JobName.from("scale-observer").toOption.get,
-      Payload.Script(
-        ScriptSource.Inline("scale.sh", "true\n".getBytes("UTF-8").toVector),
-        Vector.empty,
-        ResultContract.ExitOnly
-      ),
+      ScriptSource.Inline("scale.sh", "true\n".getBytes("UTF-8").toVector),
+      Vector.empty,
+      ResultContract.ExitOnly.descriptor,
       ResourceRequest.validate(1, 1, None, None, None).toOption.get
     )
     val intent = ManagedIntent.from(request, observedAt.minusSeconds(1)).toOption.get
@@ -78,7 +76,7 @@ class ObservationScaleSuite extends munit.CatsEffectSuite:
       accountingCalls: Ref[IO, Int]
   ): Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unexpected
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = unexpected
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] = unexpected
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] =
       observedCalls.update(_ :+ jobs.toVector) *> IO.pure(
         SchedulerQueryResult.Succeeded(

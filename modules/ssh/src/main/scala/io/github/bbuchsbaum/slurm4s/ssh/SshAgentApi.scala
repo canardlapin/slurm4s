@@ -30,8 +30,8 @@ final class SshAgentApi[F[_]: Concurrent] private (
   def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
     call(AgentMethod.Capabilities, Json.obj(), AgentDomainJson.decodeCapabilities)
 
-  def submitOpaque(request: JobRequest[NoResult]): F[AgentCall[SubmissionAttempt]] =
-    AgentDomainJson.encodeSubmitRequest(request) match
+  def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
+    AgentDomainJson.encodeSubmitRequest(spec) match
       case Left(problem)  => protocolFailure(problem).pure[F]
       case Right(payload) =>
         call(AgentMethod.SubmitOpaque, payload, AgentDomainJson.decodeSubmission)

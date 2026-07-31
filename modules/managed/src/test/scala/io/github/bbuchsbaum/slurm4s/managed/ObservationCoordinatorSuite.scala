@@ -99,7 +99,7 @@ class ObservationCoordinatorSuite extends munit.CatsEffectSuite:
       accountingBatches <- Ref.of[IO, Vector[Vector[JobRef]]](Vector.empty)
       scheduler = new Scheduler[IO]:
         def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-        def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = unused
+        def submit(spec: LaunchSpec): IO[SubmissionAttempt] = unused
         def observe(values: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] =
           observed.update(_ :+ values.toVector) *> IO.pure(
             SchedulerQueryResult.Succeeded(
@@ -332,7 +332,7 @@ class ObservationCoordinatorSuite extends munit.CatsEffectSuite:
       accountingResult: SchedulerQueryResult[AccountingBatch]
   ): Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = unused
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] = unused
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] =
       observationCalls.update(_ :+ jobs.toVector) *> IO.pure(observationResult)
     def accounting(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[AccountingBatch]] =

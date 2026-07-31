@@ -94,13 +94,10 @@ class LocalSubmissionPlannerSuite extends munit.CatsEffectSuite:
     LocalTestSupport.temporaryDirectory.use { root =>
       val base = LocalTestSupport.request("missing-script")
       val request = base.copy(
-        payload = io.github.bbuchsbaum.slurm4s.core.Payload.Script(
-          io.github.bbuchsbaum.slurm4s.core.ScriptSource.StagedLocal(
-            root.resolve("absent.R").toString
-          ),
-          Vector.empty,
-          io.github.bbuchsbaum.slurm4s.core.ResultContract.ExitOnly
-        )
+        source = io.github.bbuchsbaum.slurm4s.core.ScriptSource.StagedLocal(
+          root.resolve("absent.R").toString
+        ),
+        arguments = Vector.empty
       )
       val planner = LocalSubmissionPlanner[IO](
         LocalWorkspaceSettings(root, ByteLimit.from(1024 * 1024).toOption.get)
@@ -116,11 +113,8 @@ class LocalSubmissionPlannerSuite extends munit.CatsEffectSuite:
       val workspace = root.resolve("workspace")
       val base = LocalTestSupport.request("staged-script")
       val request = base.copy(
-        payload = io.github.bbuchsbaum.slurm4s.core.Payload.Script(
-          io.github.bbuchsbaum.slurm4s.core.ScriptSource.StagedLocal(source.toString),
-          Vector("--quiet"),
-          io.github.bbuchsbaum.slurm4s.core.ResultContract.ExitOnly
-        )
+        source = io.github.bbuchsbaum.slurm4s.core.ScriptSource.StagedLocal(source.toString),
+        arguments = Vector("--quiet")
       )
       val planner = LocalSubmissionPlanner[IO](
         LocalWorkspaceSettings(workspace, ByteLimit.from(1024 * 1024).toOption.get)

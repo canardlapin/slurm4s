@@ -173,7 +173,7 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
 
   private val unusedScheduler: Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = unused
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] = unused
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] = unused
     def accounting(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[AccountingBatch]] = unused
     def cancel(job: JobRef): IO[CancellationAttempt] = unused

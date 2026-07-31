@@ -1353,7 +1353,7 @@ final class RegisteredTaskSubmitter(
         IO.pure(RegisteredSubmissionResult.PreparationFailed(diagnostics))
       case Right(prepared) =>
         scheduler
-          .submit(prepared.schedulerRequest)
+          .submitLowered(prepared.schedulerRequest)
           .map(result => RegisteredSubmissionResult.Submitted(prepared, result))
     }
 
@@ -1369,6 +1369,6 @@ final class RegisteredTaskArraySubmitter(
         IO.pure(RegisteredArraySubmissionResult.PreparationFailed(diagnostics))
       case Right(prepared) =>
         scheduler
-          .submit(prepared.schedulerRequest)
+          .submitLowered(prepared.schedulerRequest)
           .map(result => RegisteredArraySubmissionResult.Submitted(prepared, result))
     }

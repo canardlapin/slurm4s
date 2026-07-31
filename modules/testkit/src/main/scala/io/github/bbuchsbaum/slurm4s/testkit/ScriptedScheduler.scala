@@ -17,8 +17,8 @@ final class ScriptedScheduler[F[_]: Sync] private (
       case step                                     => impossible(step)
     }
 
-  def submit[A](request: JobRequest[A]): F[SubmissionAttempt] =
-    next(SchedulerOperation.Submit(request.submissionKey)).flatMap {
+  def submit(spec: LaunchSpec): F[SubmissionAttempt] =
+    next(SchedulerOperation.Submit(spec.submissionKey)).flatMap {
       case SchedulerScriptStep.Submit(_, result) => result.pure[F]
       case step                                  => impossible(step)
     }

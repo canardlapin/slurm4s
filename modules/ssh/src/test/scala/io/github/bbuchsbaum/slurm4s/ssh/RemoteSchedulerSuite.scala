@@ -15,7 +15,7 @@ class RemoteSchedulerSuite extends munit.CatsEffectSuite:
       )
     val remote = RemoteSlurm[IO](AgentCall.Failed(failure))
 
-    remote.scheduler.submit(request).map {
+    remote.scheduler.submitLowered(request).map {
       case SubmissionAttempt.Completed(
             Submission.AcceptanceUnknown(AcceptanceUncertainty.TransportInterrupted, _)
           ) =>

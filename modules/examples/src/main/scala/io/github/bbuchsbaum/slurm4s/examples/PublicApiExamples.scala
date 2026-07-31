@@ -103,7 +103,7 @@ object LocalOpaque:
       runtime: SlurmLocal[IO],
       request: JobRequest[NoResult]
   ): IO[SubmissionAttempt] =
-    runtime.submit(request)
+    runtime.submitLowered(request)
 
 object RemoteOpaque:
   def wire(
@@ -134,7 +134,18 @@ object RemoteOpaque:
       api: AgentApi[IO],
       request: JobRequest[NoResult]
   ): IO[AgentCall[SubmissionAttempt]] =
-    api.submitOpaque(request)
+    LaunchSpec
+      .fromRequest(request)
+      .fold(
+        diagnostics =>
+          IO.pure(
+            AgentCall.Failed(
+              io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
+                .ProtocolViolation(diagnostics.values.head.message, None)
+            )
+          ),
+        api.submitOpaque
+      )
 
 object LogMonitoring:
   def readLocal(

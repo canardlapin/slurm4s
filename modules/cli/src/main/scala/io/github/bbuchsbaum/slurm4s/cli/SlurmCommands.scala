@@ -6,31 +6,28 @@ import io.github.bbuchsbaum.slurm4s.core.JobRef
 import io.github.bbuchsbaum.slurm4s.core.EnvironmentExportPolicy
 import io.github.bbuchsbaum.slurm4s.core.MemoryRequest
 import io.github.bbuchsbaum.slurm4s.core.NativeOption
-import io.github.bbuchsbaum.slurm4s.core.Payload
 import io.github.bbuchsbaum.slurm4s.core.ResourceRequest
 
 object SlurmCommands:
-  def submit[A](prepared: PreparedSubmission[A]): SlurmCommand =
-    val request = prepared.request
+  def submit(prepared: PreparedSubmission): SlurmCommand =
+    val spec = prepared.spec
     val effective = prepared.siteResolution.map(_.effective)
-    val resourceArguments = resources(effective.map(_.resources).getOrElse(request.resources))
-    val siteArguments = effective.toVector.flatMap(siteOptions(_, request.environment.keySet))
-    val arrayArguments = request.array.toVector.map(arrayOption)
-    val scriptArguments = request.payload match
-      case script: Payload.Script[A]       => script.arguments
-      case _: Payload.RegisteredTask[?, ?] => Vector.empty
+    val resourceArguments = resources(effective.map(_.resources).getOrElse(spec.resources))
+    val siteArguments = effective.toVector.flatMap(siteOptions(_, spec.environment.keySet))
+    val arrayArguments = spec.array.toVector.map(arrayOption)
+    val scriptArguments = spec.arguments
 
     SlurmCommand(
       executable = SlurmExecutable.Sbatch,
       arguments = Vector(
         "--parsable",
-        s"--job-name=${request.name.value}",
+        s"--job-name=${spec.name.value}",
         s"--output=${prepared.stdoutPath}",
         s"--error=${prepared.stderrPath}"
       ) ++ resourceArguments ++ siteArguments ++ arrayArguments ++ Vector(
         prepared.scriptPath
       ) ++ scriptArguments,
-      environment = request.environment.iterator.map { case (name, value) =>
+      environment = spec.environment.iterator.map { case (name, value) =>
         name.value -> value
       }.toMap
     )

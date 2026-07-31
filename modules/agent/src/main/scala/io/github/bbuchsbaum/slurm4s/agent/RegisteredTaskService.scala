@@ -23,7 +23,7 @@ final class WorkerRegisteredTaskService(
           )
         )
       case Right(prepared) =>
-        scheduler.submit(prepared.schedulerRequest).map { submission =>
+        scheduler.submitLowered(prepared.schedulerRequest).map { submission =>
           AgentCall.Succeeded(
             RemoteRegisteredSubmission(
               prepared.resultRef,
@@ -48,7 +48,7 @@ final class WorkerRegisteredTaskService(
           )
         )
       case Right(prepared) =>
-        scheduler.submit(prepared.schedulerRequest).map { submission =>
+        scheduler.submitLowered(prepared.schedulerRequest).map { submission =>
           AgentCall.Succeeded(
             RemoteRegisteredBatchSubmission(
               prepared.topology,
@@ -91,7 +91,7 @@ final class WorkerRegisteredTaskService(
           )
         )
       case Right(prepared) =>
-        scheduler.submit(prepared.schedulerRequest).map { submission =>
+        scheduler.submitLowered(prepared.schedulerRequest).map { submission =>
           AgentCall.Succeeded(
             RemoteScriptBatchSubmission(
               prepared.topology,

@@ -735,23 +735,23 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
         IO.raiseError(new AssertionError("capabilities must not be queried"))
 
-      def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = request.payload match
-        case Payload.Script(source, _, _) =>
-          observed.set(Some(source)) *> IO.pure(
-            SubmissionAttempt.Completed(
-              Submission.Accepted(
-                JobRef(JobId.from("8100").toOption.get, None, None),
-                EvidenceBundle(
-                  BoundedEvidence.capture(
-                    EvidenceSource.WorkerEvent,
-                    java.time.Instant.parse("2026-07-22T12:00:00Z"),
-                    Vector.empty
-                  )
+      // A LaunchSpec is script-shaped by construction, so "was the task lowered to a script?"
+      // is now answered by the type. What remains worth asserting is WHICH script it lowered to.
+      def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+        observed.set(Some(spec.source)) *> IO.pure(
+          SubmissionAttempt.Completed(
+            Submission.Accepted(
+              JobRef(JobId.from("8100").toOption.get, None, None),
+              EvidenceBundle(
+                BoundedEvidence.capture(
+                  EvidenceSource.WorkerEvent,
+                  java.time.Instant.parse("2026-07-22T12:00:00Z"),
+                  Vector.empty
                 )
               )
             )
           )
-        case _ => IO.raiseError(new AssertionError("registered task was not lowered to a script"))
+        )
 
       def observe(
           _jobs: NonEmptyVector[JobRef]

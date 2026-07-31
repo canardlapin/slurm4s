@@ -24,7 +24,7 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
       cancellations <- Ref.of[IO, Int](0)
       service = AgentService[IO](scheduler(cancellations), logReader)
       client <- connected(service)
-      submitted <- client.submitOpaque(request)
+      submitted <- client.submitOpaque(LaunchSpec.fromRequest(request).toOption.get)
       _ = assert(submitted.isInstanceOf[AgentCall.Succeeded[?]])
       _ <- client.disconnect
       count <- cancellations.get
@@ -205,7 +205,7 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
       IO.raiseError(new AssertionError("capabilities should not be called while disconnected"))
 
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
       IO.pure(SubmissionAttempt.Completed(Submission.Accepted(acceptedJob, evidence)))
 
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] =
@@ -222,7 +222,7 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
       IO.raiseError(new AssertionError("capabilities not used"))
 
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
       IO.pure(SubmissionAttempt.Completed(Submission.Accepted(acceptedJob, evidence)))
 
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] =

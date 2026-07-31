@@ -172,13 +172,13 @@ final case class SiteProfile(
     features: SiteFeatures = SiteFeatures()
 ) derives CanEqual:
 
-  def resolve[A](
-      request: JobRequest[A],
+  def resolve(
+      spec: LaunchSpec,
       intent: SiteIntent
   ): Either[NonEmptyChain[SitePolicyViolation], SiteResolution] =
     (
-      resolve(request.resources, intent).toValidated,
-      request.array.traverse(validateArray).toValidated
+      resolve(spec.resources, intent).toValidated,
+      spec.array.traverse(validateArray).toValidated
     ).mapN((resolution, _) => resolution).toEither
 
   def validateArray(

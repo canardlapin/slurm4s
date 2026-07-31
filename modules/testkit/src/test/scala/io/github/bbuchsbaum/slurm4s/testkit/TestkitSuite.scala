@@ -42,7 +42,7 @@ class TestkitSuite extends munit.CatsEffectSuite:
           SchedulerScriptStep.Cancel(job, cancellation)
         )
       )
-      submitted <- scheduler.submit(request)
+      submitted <- scheduler.submitLowered(request)
       cancelled <- scheduler.cancel(job)
       _ <- scheduler.assertDrained
       observed <- scheduler.observed

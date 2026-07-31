@@ -55,7 +55,7 @@ class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
         collecting(events),
         shortPolicy
       )
-      result <- wrapper.submit(request)
+      result <- wrapper.submitLowered(request)
       recorded <- events.get
     yield
       assertEquals(result, rejected)
@@ -97,7 +97,7 @@ class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
       fixedScheduler(submission = IO.pure(accepted)),
       sink,
       shortPolicy
-    ).submit(request).map(result => assertEquals(result, accepted))
+    ).submitLowered(request).map(result => assertEquals(result, accepted))
   }
 
   test("a nonresponsive telemetry sink is bounded by policy") {
@@ -109,7 +109,7 @@ class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
       fixedScheduler(submission = IO.pure(accepted)),
       sink,
       shortPolicy
-    ).submit(request).timeout(1.second).map(result => assertEquals(result, accepted))
+    ).submitLowered(request).timeout(1.second).map(result => assertEquals(result, accepted))
   }
 
   test("scheduler effect failure is recorded by class and then re-raised") {
@@ -122,7 +122,7 @@ class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
         collecting(events),
         shortPolicy
       )
-      result <- wrapper.submit(request).attempt
+      result <- wrapper.submitLowered(request).attempt
       recorded <- events.get
     yield
       assertEquals(result, Left(failure))

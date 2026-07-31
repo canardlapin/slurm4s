@@ -47,26 +47,23 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
     def capabilities: F[SchedulerQueryResult[SchedulerCapabilities]] =
       RemoteSlurm.this.capabilities.flatMap(queryResult)
 
-    def submit[A](request: JobRequest[A]): F[SubmissionAttempt] =
-      erase(request) match
-        case Left(diagnostics) => SubmissionAttempt.PreparationFailed(diagnostics).pure[F]
-        case Right(opaque)     =>
-          RemoteSlurm.this.submitOpaque(opaque).flatMap {
-            case AgentCall.Succeeded(value) => value.pure[F]
-            case AgentCall.Failed(
-                  failure @ AgentFailure.TransportDisconnected(true, _, _)
-                ) =>
-              failureEvidence(failure).map(evidence =>
-                SubmissionAttempt.Completed(
-                  Submission.AcceptanceUnknown(
-                    AcceptanceUncertainty.TransportInterrupted,
-                    evidence
-                  )
-                )
+    def submit(spec: LaunchSpec): F[SubmissionAttempt] =
+      RemoteSlurm.this.submitOpaque(spec).flatMap {
+        case AgentCall.Succeeded(value) => value.pure[F]
+        case AgentCall.Failed(
+              failure @ AgentFailure.TransportDisconnected(true, _, _)
+            ) =>
+          failureEvidence(failure).map(evidence =>
+            SubmissionAttempt.Completed(
+              Submission.AcceptanceUnknown(
+                AcceptanceUncertainty.TransportInterrupted,
+                evidence
               )
-            case AgentCall.Failed(failure) =>
-              invocationFailure(failure).map(SubmissionAttempt.InvocationFailed(_))
-          }
+            )
+          )
+        case AgentCall.Failed(failure) =>
+          invocationFailure(failure).map(SubmissionAttempt.InvocationFailed(_))
+      }
 
     def observe(
         jobs: NonEmptyVector[JobRef]
@@ -105,8 +102,8 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
   def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
     connected(_.capabilities)
 
-  def submitOpaque(request: JobRequest[NoResult]): F[AgentCall[SubmissionAttempt]] =
-    connected(_.submitOpaque(request))
+  def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
+    connected(_.submitOpaque(spec))
 
   def submit[I, A](
       call: SlurmTaskCall[I, A],
@@ -278,30 +275,6 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
       case _: AgentFailure.RemoteCliFailure      => "ssh-remote-cli-failure"
       case _: AgentFailure.RemoteAgentFailure    => "ssh-remote-agent-failure"
       case _: AgentFailure.ProtocolViolation     => "ssh-protocol-violation"
-
-  private def erase[A](request: JobRequest[A]): Either[Diagnostics, JobRequest[NoResult]] =
-    request.payload match
-      case Payload.Script(source, arguments, _) =>
-        Right(
-          JobRequest[NoResult](
-            request.submissionKey,
-            request.name,
-            Payload.Script(source, arguments, ResultContract.ExitOnly),
-            request.resources,
-            request.environment,
-            request.array,
-            request.retrySafety
-          )
-        )
-      case _ =>
-        Left(
-          Diagnostics.one(
-            Diagnostic(
-              "ssh-scheduler-request",
-              "the managed SSH scheduler accepts only lowered script requests"
-            )
-          )
-        )
 
 object Slurm:
   def overSsh[F[_]: Async](

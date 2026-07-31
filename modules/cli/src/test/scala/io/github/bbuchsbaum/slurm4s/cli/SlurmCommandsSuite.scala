@@ -104,15 +104,13 @@ class SlurmCommandsSuite extends munit.FunSuite:
     assertEquals(SlurmCommands.focused(element).arguments.last, "9000_2")
   }
 
-  private def jobRequest(memory: MemoryRequest): JobRequest[NoResult] =
-    JobRequest(
+  private def jobRequest(memory: MemoryRequest): LaunchSpec =
+    LaunchSpec(
       submissionKey = SubmissionKey.from("submit-command-test").toOption.get,
       name = JobName.from("analysis").toOption.get,
-      payload = Payload.Script(
-        ScriptSource.ExistingRemote("/private/work/script.R"),
-        Vector("--vanilla"),
-        ResultContract.ExitOnly
-      ),
+      source = ScriptSource.ExistingRemote("/private/work/script.R"),
+      arguments = Vector("--vanilla"),
+      resultContract = ResultContract.ExitOnly.descriptor,
       resources = ResourceRequest
         .validate(2, 1, Some(1), Some(memory), WallTimeMinutes.from(10).toOption)
         .toOption

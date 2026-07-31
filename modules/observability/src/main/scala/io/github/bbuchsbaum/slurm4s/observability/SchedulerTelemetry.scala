@@ -76,11 +76,11 @@ final class TelemetryScheduler[F[_]: Temporal] private (
       delegate.capabilities
     )(querySummary)
 
-  def submit[A](request: JobRequest[A]): F[SubmissionAttempt] =
+  def submit(spec: LaunchSpec): F[SubmissionAttempt] =
     measure(
       SchedulerOperation.Submit,
-      OperationalSubject.Submission(request.submissionKey)
-    )(delegate.submit(request))(submissionSummary)
+      OperationalSubject.Submission(spec.submissionKey)
+    )(delegate.submit(spec))(submissionSummary)
 
   def observe(
       jobs: NonEmptyVector[JobRef]

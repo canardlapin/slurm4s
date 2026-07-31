@@ -160,8 +160,8 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
   private val inertScheduler: Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
       IO.raiseError(new AssertionError("unexpected capabilities call"))
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
-      IO.raiseError(new AssertionError(s"unexpected submit: $request"))
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+      IO.raiseError(new AssertionError(s"unexpected submit: $spec"))
     def observe(
         jobs: NonEmptyVector[JobRef]
     ): IO[SchedulerQueryResult[ObservationBatch]] =
@@ -179,7 +179,7 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
     new io.github.bbuchsbaum.slurm4s.agent.AgentApi[IO]:
       def capabilities: IO[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
         IO.pure(AgentCall.Failed(failure))
-      def submitOpaque(request: JobRequest[NoResult]): IO[AgentCall[SubmissionAttempt]] =
+      def submitOpaque(spec: LaunchSpec): IO[AgentCall[SubmissionAttempt]] =
         IO.pure(AgentCall.Failed(failure))
       def submitRegistered(
           request: io.github.bbuchsbaum.slurm4s.protocol.RemoteRegisteredTaskRequest

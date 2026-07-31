@@ -554,7 +554,7 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
 
   private def countingScheduler(calls: Ref[IO, Int]): Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
       calls.update(_ + 1) *> IO.pure(accepted)
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] = unused
     def accounting(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[AccountingBatch]] = unused

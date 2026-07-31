@@ -20,30 +20,41 @@ object AgentDomainJson:
   private val RemoteTaskWireVersion = 1
   private val RemoteBatchWireVersion = 1
 
-  def encodeSubmitRequest(value: JobRequest[NoResult]): Either[String, Json] = value.payload match
-    case Payload.Script(source, arguments, ResultContract.ExitOnly) =>
-      encodeEnvironment(value.environment).map { environment =>
-        val fields = Vector(
-          "submissionKey" -> Json.fromString(value.submissionKey.value),
-          "name" -> Json.fromString(value.name.value),
-          "source" -> source.asJson,
-          "arguments" -> arguments.asJson,
-          "resources" -> value.resources.asJson,
-          "environment" -> environment,
-          "resultContract" -> Json.fromString("exit-only")
-        ) ++ value.array.toVector.map(array => "array" -> encodeArray(array)) ++
-          Option
-            .when(value.retrySafety != RetrySafety.Unknown)(
-              "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
-            )
-            .toVector
-        Json.obj(fields*)
-      }
-    case Payload.Script(_, _, _)         => Left("P2 remote submission supports ExitOnly scripts")
-    case _: Payload.RegisteredTask[?, ?] =>
-      Left("registered typed tasks require the typed-workload protocol")
+  /** Encode a launch specification for the opaque submission protocol.
+    *
+    * The field set is deliberately unchanged from when this encoded a `JobRequest`: it was already
+    * launch-shaped, with the payload destructured into `source`/`arguments`. Keeping it
+    * byte-identical means existing journals and the attempt identities derived from their digests
+    * remain valid.
+    *
+    * A contract this protocol cannot carry is REFUSED rather than rewritten. The previous SSH
+    * lowering silently replaced any contract with `ExitOnly`, so a caller asking for a structured
+    * result got a successful submission that had quietly discarded what they asked for.
+    */
+  def encodeSubmitRequest(value: LaunchSpec): Either[String, Json] =
+    value.resultContract.mode match
+      case ResultMode.ExitOnly =>
+        encodeEnvironment(value.environment).map { environment =>
+          val fields = Vector(
+            "submissionKey" -> Json.fromString(value.submissionKey.value),
+            "name" -> Json.fromString(value.name.value),
+            "source" -> value.source.asJson,
+            "arguments" -> value.arguments.asJson,
+            "resources" -> value.resources.asJson,
+            "environment" -> environment,
+            "resultContract" -> Json.fromString("exit-only")
+          ) ++ value.array.toVector.map(array => "array" -> encodeArray(array)) ++
+            Option
+              .when(value.retrySafety != RetrySafety.Unknown)(
+                "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
+              )
+              .toVector
+          Json.obj(fields*)
+        }
+      case ResultMode.DeclaredOutputs | ResultMode.Structured =>
+        Left("the opaque submission protocol carries only exit-only result contracts")
 
-  def decodeSubmitRequest(json: Json): Either[String, JobRequest[NoResult]] =
+  def decodeSubmitRequest(json: Json): Either[String, LaunchSpec] =
     for
       cursor <- objectCursor(json, "submit request")
       submissionKeyText <- field[String](cursor, "submissionKey")
@@ -58,10 +69,12 @@ object AgentDomainJson:
       retrySafety <- optionalRetrySafety(cursor)
       contract <- field[String](cursor, "resultContract")
       _ <- Either.cond(contract == "exit-only", (), "unsupported result contract")
-    yield JobRequest(
+    yield LaunchSpec(
       submissionKey,
       name,
-      Payload.Script(source, arguments, ResultContract.ExitOnly),
+      source,
+      arguments,
+      ResultContract.ExitOnly.descriptor,
       resources,
       environment,
       array,

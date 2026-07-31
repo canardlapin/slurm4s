@@ -42,7 +42,7 @@ final class ManagedController[F[_]: Async](
   def inspect(submissionKey: SubmissionKey): F[Option[ManagedAttempt]] =
     store.attempt(submissionKey)
 
-  def submit(request: JobRequest[NoResult]): F[ManagedSubmitResult] =
+  def submit(request: LaunchSpec): F[ManagedSubmitResult] =
     Clock[F].realTimeInstant.flatMap { now =>
       ManagedIntent.from(request, now, requestPolicy) match
         case Left(problem) =>

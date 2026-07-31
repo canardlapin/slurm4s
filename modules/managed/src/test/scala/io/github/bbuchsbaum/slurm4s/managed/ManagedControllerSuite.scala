@@ -51,7 +51,7 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
       submitCalls <- Ref.of[IO, Int](0)
       scheduler = new Scheduler[IO]:
         def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-        def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
+        def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
           submitCalls.update(_ + 1) *> IO.pure(accepted)
         def observe(
             jobs: NonEmptyVector[JobRef]
@@ -471,7 +471,7 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
       result: IO[SubmissionAttempt]
   ): Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = calls.update(_ + 1) *> result
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] = calls.update(_ + 1) *> result
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] = unused
     def accounting(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[AccountingBatch]] = unused
     def cancel(job: JobRef): IO[CancellationAttempt] = unused
@@ -482,7 +482,7 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
       result: IO[CancellationAttempt] = acknowledgedCancellation
   ): Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
       submitCalls.update(_ + 1) *> IO.pure(accepted)
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] = unused
     def accounting(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[AccountingBatch]] = unused
