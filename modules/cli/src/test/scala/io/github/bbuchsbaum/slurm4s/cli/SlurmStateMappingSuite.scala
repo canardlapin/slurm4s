@@ -1,5 +1,3 @@
-// NOTE: this file should be renamed to SlurmStateMappingSuite.scala. It began as a temporary RED
-// probe for P8.A2 and the session that wrote it could not delete or rename files.
 package io.github.bbuchsbaum.slurm4s.cli
 
 import io.github.bbuchsbaum.slurm4s.core.*
