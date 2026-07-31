@@ -33,12 +33,8 @@ class ObservationSuite extends munit.FunSuite:
     val cases = Vector(
       SlurmState.Pending -> InterruptionClass.NotInterrupted,
       SlurmState.Running -> InterruptionClass.NotInterrupted,
-      SlurmState.Completing -> InterruptionClass.NotInterrupted,
       SlurmState.Completed -> InterruptionClass.NotInterrupted,
-      SlurmState.Requeued -> InterruptionClass.Requeueing,
-      SlurmState.RequeueHeld -> InterruptionClass.Requeueing,
-      SlurmState.RequeueFederation -> InterruptionClass.Requeueing,
-      SlurmState.SpecialExit -> InterruptionClass.Requeueing,
+      SlurmState.Suspended -> InterruptionClass.NotInterrupted,
       SlurmState.NodeFailure -> InterruptionClass.InfrastructureFailure,
       SlurmState.Preempted -> InterruptionClass.SchedulerPolicy,
       SlurmState.TimedOut -> InterruptionClass.SchedulerPolicy,
@@ -51,4 +47,25 @@ class ObservationSuite extends munit.FunSuite:
     cases.foreach { case (state, expected) =>
       assertEquals(InterruptionClass.classify(state), expected, clues(state))
     }
+  }
+
+  test("requeueing is read from flags, because no base state can express it") {
+    val requeueFlags = Vector(
+      SlurmStateFlag.Requeued,
+      SlurmStateFlag.RequeueHold,
+      SlurmStateFlag.RequeueFederation,
+      SlurmStateFlag.SpecialExit
+    )
+    requeueFlags.foreach { flag =>
+      val report = ReportedState(SlurmState.Unknown("REQUEUED"), Vector(flag), truncated = false)
+      assertEquals(InterruptionClass.classify(report), InterruptionClass.Requeueing, clues(flag))
+    }
+  }
+
+  test("a requeue flag over a running base state still reads as requeueing") {
+    val report =
+      ReportedState(SlurmState.Running, Vector(SlurmStateFlag.Requeued), truncated = false)
+
+    assertEquals(InterruptionClass.classify(report), InterruptionClass.Requeueing)
+    assertEquals(InterruptionClass.classify(report.state), InterruptionClass.NotInterrupted)
   }

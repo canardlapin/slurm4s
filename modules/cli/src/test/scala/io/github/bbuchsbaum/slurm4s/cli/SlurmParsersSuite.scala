@@ -200,22 +200,26 @@ class SlurmParsersSuite extends munit.FunSuite:
 
   test("requeue states are typed consistently and remain nonterminal in accounting") {
     val expected = NonEmptyVector.one(JobRef(JobId.from("1001").toOption.get, None, None))
+    // SchedMD documents these as state FLAGS, so each yields a flag with no known base state
+    // rather than a fabricated one. They must still be nonterminal.
     val states = Vector(
-      "REQUEUED" -> SlurmState.Requeued,
-      "RQ" -> SlurmState.Requeued,
-      "REQUEUE_HOLD" -> SlurmState.RequeueHeld,
-      "RH" -> SlurmState.RequeueHeld,
-      "REQUEUE_FED" -> SlurmState.RequeueFederation,
-      "RF" -> SlurmState.RequeueFederation,
-      "SPECIAL_EXIT" -> SlurmState.SpecialExit,
-      "SE" -> SlurmState.SpecialExit
+      "REQUEUED" -> SlurmStateFlag.Requeued,
+      "RQ" -> SlurmStateFlag.Requeued,
+      "REQUEUE_HOLD" -> SlurmStateFlag.RequeueHold,
+      "RH" -> SlurmStateFlag.RequeueHold,
+      "REQUEUE_FED" -> SlurmStateFlag.RequeueFederation,
+      "RF" -> SlurmStateFlag.RequeueFederation,
+      "SPECIAL_EXIT" -> SlurmStateFlag.SpecialExit,
+      "SE" -> SlurmStateFlag.SpecialExit
     )
 
-    states.foreach { case (raw, state) =>
-      assertEquals(SlurmStateParser.parse(raw), state, clues(raw))
+    states.foreach { case (raw, flag) =>
+      val report = SlurmStateParser.report(raw)
+      assertEquals(report.flags, Vector(flag), clues(raw))
+      assertNotEquals(Terminality.of(report.state), Terminality.Terminal, clues(raw))
       val accounting =
         SacctParsable2.parse(evidence(s"1001|$raw|0:0|None\n"), expected).toOption.get.head
-      assertEquals(accounting.state, state, clues(raw))
+      assertNotEquals(Terminality.of(accounting.state), Terminality.Terminal, clues(raw))
       assertEquals(accounting.outcome, None, clues(raw))
     }
   }
@@ -227,8 +231,14 @@ class SlurmParsersSuite extends munit.FunSuite:
     val observation =
       SqueueJsonV0043.parse(evidence(raw), NonEmptyVector.one(job)).toOption.get.head
 
-    assertEquals(observation.state, SlurmState.Requeued)
-    assertEquals(InterruptionClass.classify(observation.state), InterruptionClass.Requeueing)
+    // The flag is what carries requeueing; the base state is honestly unknown.
+    assertEquals(observation.flags, Vector(SlurmStateFlag.Requeued))
+    assertEquals(
+      InterruptionClass.classify(
+        ReportedState(observation.state, observation.flags, truncated = false)
+      ),
+      InterruptionClass.Requeueing
+    )
     assertEquals(
       observation.timing.start,
       Some(

@@ -337,7 +337,6 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     val states = Vector(
       SlurmState.Pending,
       SlurmState.Running,
-      SlurmState.Completing,
       SlurmState.Completed,
       SlurmState.Failed,
       SlurmState.Cancelled,
@@ -345,10 +344,6 @@ class AgentDomainJsonSuite extends munit.FunSuite:
       SlurmState.TimedOut,
       SlurmState.NodeFailure,
       SlurmState.Preempted,
-      SlurmState.Requeued,
-      SlurmState.RequeueHeld,
-      SlurmState.RequeueFederation,
-      SlurmState.SpecialExit,
       SlurmState.BootFail,
       SlurmState.Deadline,
       SlurmState.Suspended,

@@ -455,9 +455,8 @@ object FailureDiagnosis:
     case SlurmState.BootFail => Some(FailureCause.NodeFailure)
     // A deadline the scheduler enforced; the nearest neutral cause is a time constraint.
     case SlurmState.Deadline => Some(FailureCause.TimeLimitExceeded)
-    case SlurmState.Pending | SlurmState.Running | SlurmState.Completing | SlurmState.Completed |
-        SlurmState.Suspended | SlurmState.Requeued | SlurmState.RequeueHeld |
-        SlurmState.RequeueFederation | SlurmState.SpecialExit | SlurmState.Unknown(_) =>
+    case SlurmState.Pending | SlurmState.Running | SlurmState.Completed | SlurmState.Suspended |
+        SlurmState.Unknown(_) =>
       None
 
   private def outcomeCause(value: WorkloadOutcome): Option[FailureCause] = value match

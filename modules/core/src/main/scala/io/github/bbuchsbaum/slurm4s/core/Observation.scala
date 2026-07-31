@@ -3,10 +3,17 @@ package io.github.bbuchsbaum.slurm4s.core
 import java.time.Instant
 import java.time.LocalDateTime
 
+/** A SchedMD base job state.
+  *
+  * Base states only. `COMPLETING`, `REQUEUED`, `REQUEUE_HOLD`, `REQUEUE_FED` and `SPECIAL_EXIT`
+  * used to live here too, but SchedMD documents them as state FLAGS, and conflating the two
+  * vocabularies is what made `CANCELLED+` indistinguishable from `CANCELLED`. They are now
+  * [[SlurmStateFlag]] values, and a surface reporting only such a flag yields `Unknown` here rather
+  * than a fabricated base state.
+  */
 enum SlurmState derives CanEqual:
   case Pending
   case Running
-  case Completing
   case Completed
   case Failed
   case Cancelled
@@ -14,10 +21,6 @@ enum SlurmState derives CanEqual:
   case TimedOut
   case NodeFailure
   case Preempted
-  case Requeued
-  case RequeueHeld
-  case RequeueFederation
-  case SpecialExit
   case BootFail
   case Deadline
   case Suspended
@@ -68,9 +71,7 @@ object Terminality:
         SlurmState.TimedOut | SlurmState.NodeFailure | SlurmState.Preempted | SlurmState.BootFail |
         SlurmState.Deadline =>
       Terminality.Terminal
-    case SlurmState.Pending | SlurmState.Running | SlurmState.Completing | SlurmState.Suspended |
-        SlurmState.Requeued | SlurmState.RequeueHeld | SlurmState.RequeueFederation |
-        SlurmState.SpecialExit =>
+    case SlurmState.Pending | SlurmState.Running | SlurmState.Suspended =>
       Terminality.Active
     case SlurmState.Unknown(_) =>
       Terminality.Indeterminate
@@ -81,14 +82,15 @@ object Terminality:
   * flag in place of the hidden base state. Manufacturing a base state to make the model total would
   * be a lie, and an `Indeterminate` terminality is the honest consequence.
   */
-final case class StateReport(
+final case class ReportedState(
     state: SlurmState,
     flags: Vector[SlurmStateFlag],
     truncated: Boolean
 ) derives CanEqual
 
-object StateReport:
-  def of(state: SlurmState): StateReport = StateReport(state, Vector.empty, truncated = false)
+object ReportedState:
+  def of(state: SlurmState): ReportedState =
+    ReportedState(state, Vector.empty, truncated = false)
 
 enum InterruptionClass derives CanEqual:
   case NotInterrupted
@@ -100,13 +102,23 @@ enum InterruptionClass derives CanEqual:
   case Unknown
 
 object InterruptionClass:
+
+  /** Classify a full report. Requeueing is a FLAG in SchedMD's vocabulary, so it can only be seen
+    * here — a base state alone cannot tell you a job was requeued.
+    */
+  def classify(report: ReportedState): InterruptionClass =
+    if report.flags.exists(requeueing) then InterruptionClass.Requeueing
+    else classify(report.state)
+
+  private def requeueing(flag: SlurmStateFlag): Boolean = flag match
+    case SlurmStateFlag.Requeued | SlurmStateFlag.RequeueHold | SlurmStateFlag.RequeueFederation |
+        SlurmStateFlag.SpecialExit =>
+      true
+    case _ => false
+
   def classify(state: SlurmState): InterruptionClass = state match
-    case SlurmState.Pending | SlurmState.Running | SlurmState.Completing | SlurmState.Completed |
-        SlurmState.Suspended =>
+    case SlurmState.Pending | SlurmState.Running | SlurmState.Completed | SlurmState.Suspended =>
       InterruptionClass.NotInterrupted
-    case SlurmState.Requeued | SlurmState.RequeueHeld | SlurmState.RequeueFederation |
-        SlurmState.SpecialExit =>
-      InterruptionClass.Requeueing
     case SlurmState.NodeFailure | SlurmState.BootFail =>
       InterruptionClass.InfrastructureFailure
     case SlurmState.Preempted | SlurmState.TimedOut | SlurmState.Deadline =>

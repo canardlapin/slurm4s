@@ -34,7 +34,6 @@ object Generators:
     Gen.oneOf(
       Gen.const(SlurmState.Pending),
       Gen.const(SlurmState.Running),
-      Gen.const(SlurmState.Completing),
       Gen.const(SlurmState.Completed),
       Gen.const(SlurmState.Failed),
       Gen.const(SlurmState.Cancelled),
@@ -42,10 +41,6 @@ object Generators:
       Gen.const(SlurmState.TimedOut),
       Gen.const(SlurmState.NodeFailure),
       Gen.const(SlurmState.Preempted),
-      Gen.const(SlurmState.Requeued),
-      Gen.const(SlurmState.RequeueHeld),
-      Gen.const(SlurmState.RequeueFederation),
-      Gen.const(SlurmState.SpecialExit),
       Gen.const(SlurmState.BootFail),
       Gen.const(SlurmState.Deadline),
       Gen.const(SlurmState.Suspended),

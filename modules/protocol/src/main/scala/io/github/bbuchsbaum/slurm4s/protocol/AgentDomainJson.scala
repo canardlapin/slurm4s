@@ -2045,24 +2045,19 @@ object AgentDomainJson:
     }
 
   private def slurmStateCode(state: SlurmState): String = state match
-    case SlurmState.Pending           => "pending"
-    case SlurmState.Running           => "running"
-    case SlurmState.Completing        => "completing"
-    case SlurmState.Completed         => "completed"
-    case SlurmState.Failed            => "failed"
-    case SlurmState.Cancelled         => "cancelled"
-    case SlurmState.OutOfMemory       => "out-of-memory"
-    case SlurmState.TimedOut          => "timed-out"
-    case SlurmState.NodeFailure       => "node-failure"
-    case SlurmState.Preempted         => "preempted"
-    case SlurmState.Requeued          => "requeued"
-    case SlurmState.RequeueHeld       => "requeue-held"
-    case SlurmState.RequeueFederation => "requeue-federation"
-    case SlurmState.SpecialExit       => "special-exit"
-    case SlurmState.BootFail          => "boot-fail"
-    case SlurmState.Deadline          => "deadline"
-    case SlurmState.Suspended         => "suspended"
-    case SlurmState.Unknown(_)        => "unknown"
+    case SlurmState.Pending     => "pending"
+    case SlurmState.Running     => "running"
+    case SlurmState.Completed   => "completed"
+    case SlurmState.Failed      => "failed"
+    case SlurmState.Cancelled   => "cancelled"
+    case SlurmState.OutOfMemory => "out-of-memory"
+    case SlurmState.TimedOut    => "timed-out"
+    case SlurmState.NodeFailure => "node-failure"
+    case SlurmState.Preempted   => "preempted"
+    case SlurmState.BootFail    => "boot-fail"
+    case SlurmState.Deadline    => "deadline"
+    case SlurmState.Suspended   => "suspended"
+    case SlurmState.Unknown(_)  => "unknown"
 
   private def decodeSlurmState(
       code: String,
@@ -2070,24 +2065,19 @@ object AgentDomainJson:
       cursor: HCursor
   ): Decoder.Result[SlurmState] =
     code match
-      case "pending"            => Right(SlurmState.Pending)
-      case "running"            => Right(SlurmState.Running)
-      case "completing"         => Right(SlurmState.Completing)
-      case "completed"          => Right(SlurmState.Completed)
-      case "failed"             => Right(SlurmState.Failed)
-      case "cancelled"          => Right(SlurmState.Cancelled)
-      case "out-of-memory"      => Right(SlurmState.OutOfMemory)
-      case "timed-out"          => Right(SlurmState.TimedOut)
-      case "node-failure"       => Right(SlurmState.NodeFailure)
-      case "preempted"          => Right(SlurmState.Preempted)
-      case "requeued"           => Right(SlurmState.Requeued)
-      case "requeue-held"       => Right(SlurmState.RequeueHeld)
-      case "requeue-federation" => Right(SlurmState.RequeueFederation)
-      case "special-exit"       => Right(SlurmState.SpecialExit)
-      case "boot-fail"          => Right(SlurmState.BootFail)
-      case "deadline"           => Right(SlurmState.Deadline)
-      case "suspended"          => Right(SlurmState.Suspended)
-      case "unknown"            =>
+      case "pending"       => Right(SlurmState.Pending)
+      case "running"       => Right(SlurmState.Running)
+      case "completed"     => Right(SlurmState.Completed)
+      case "failed"        => Right(SlurmState.Failed)
+      case "cancelled"     => Right(SlurmState.Cancelled)
+      case "out-of-memory" => Right(SlurmState.OutOfMemory)
+      case "timed-out"     => Right(SlurmState.TimedOut)
+      case "node-failure"  => Right(SlurmState.NodeFailure)
+      case "preempted"     => Right(SlurmState.Preempted)
+      case "boot-fail"     => Right(SlurmState.BootFail)
+      case "deadline"      => Right(SlurmState.Deadline)
+      case "suspended"     => Right(SlurmState.Suspended)
+      case "unknown"       =>
         raw
           .filter(_.nonEmpty)
           .map(value => Right(SlurmState.Unknown(value)))
@@ -2101,9 +2091,11 @@ object AgentDomainJson:
     cursor.value.asObject.flatMap(_.toVector match
       case Vector((name, payload)) => Some(name -> payload)
       case _                       => None) match
-      case Some(("Pending", _))       => Right(SlurmState.Pending)
-      case Some(("Running", _))       => Right(SlurmState.Running)
-      case Some(("Completing", _))    => Right(SlurmState.Completing)
+      case Some(("Pending", _)) => Right(SlurmState.Pending)
+      case Some(("Running", _)) => Right(SlurmState.Running)
+      // Legacy wire carried COMPLETING as a base state. It is a flag in SchedMD's vocabulary, so
+      // it decodes to an unknown base state with the token preserved rather than a fabricated one.
+      case Some(("Completing", _))    => Right(SlurmState.Unknown("COMPLETING"))
       case Some(("Completed", _))     => Right(SlurmState.Completed)
       case Some(("Failed", _))        => Right(SlurmState.Failed)
       case Some(("Cancelled", _))     => Right(SlurmState.Cancelled)
