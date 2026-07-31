@@ -29,12 +29,20 @@ class UncertaintyLawSuite extends munit.ScalaCheckSuite:
       )
     )
 
-  private val otherFailure: Gen[AgentFailure] =
+  /** Failures that prove the remote agent never ran. */
+  private val nonDelivery: Gen[AgentFailure] =
     Gen.oneOf(
       diagnostic.map(text => AgentFailure.AgentUnavailable(text, None)),
       diagnostic.map(text => AgentFailure.AuthenticationFailed(text, None)),
-      diagnostic.map(text => AgentFailure.ProtocolViolation(text, None)),
       Gen.choose(2, 9).map(major => AgentFailure.ProtocolMismatch(1, major))
+    )
+
+  /** Failures that arise only AFTER a successful exchange, so the far side did act. */
+  private val afterExchange: Gen[AgentFailure] =
+    Gen.oneOf(
+      diagnostic.map(text => AgentFailure.ProtocolViolation(text, None)),
+      diagnostic.map(text => AgentFailure.RemoteCliFailure(text, None)),
+      diagnostic.map(text => AgentFailure.RemoteAgentFailure(text, None))
     )
 
   property("a disconnect after the request write is never a definite non-submission") {
@@ -75,7 +83,7 @@ class UncertaintyLawSuite extends munit.ScalaCheckSuite:
     * the scheduler is safely repeatable, and reporting it as unknown would block retry forever.
     */
   property("failures that prove non-delivery are not reported as uncertain") {
-    forAll(otherFailure) { failure =>
+    forAll(nonDelivery) { failure =>
       RemoteSlurm[IO](AgentCall.Failed(failure)).scheduler
         .submitLowered(request)
         .map(_.isInstanceOf[SubmissionAttempt.InvocationFailed])
@@ -96,3 +104,54 @@ class UncertaintyLawSuite extends munit.ScalaCheckSuite:
       ),
       ResourceRequest.validate(1, 1, None, None, None).toEither.toOption.get
     )
+
+  /** P8.D5: a failure that arose after a successful exchange cannot be a definite non-submission.
+    *
+    * These all reach the client only once the agent has answered, so the request was delivered and
+    * whatever the scheduler did, it did. Reporting them as `InvocationFailed` asserted the
+    * opposite.
+    */
+  property("a failure after a completed exchange is never a definite non-submission") {
+    forAll(afterExchange) { failure =>
+      RemoteSlurm[IO](AgentCall.Failed(failure)).scheduler
+        .submitLowered(request)
+        .map {
+          case SubmissionAttempt.Completed(Submission.AcceptanceUnknown(_, _)) => true
+          case _                                                               => false
+        }
+        .unsafeRunSync()
+    }
+  }
+
+  property("an unparseable response is distinguished from a lost connection") {
+    forAll(diagnostic) { text =>
+      RemoteSlurm[IO](AgentCall.Failed(AgentFailure.ProtocolViolation(text, None))).scheduler
+        .submitLowered(request)
+        .map {
+          case SubmissionAttempt.Completed(
+                Submission.AcceptanceUnknown(AcceptanceUncertainty.ResponseUnparseable, _)
+              ) =>
+            true
+          case _ => false
+        }
+        .unsafeRunSync()
+    }
+  }
+
+  property("agent absence and authentication failure keep distinct launch kinds") {
+    forAll(diagnostic) { text =>
+      val absent = RemoteSlurm[IO](AgentCall.Failed(AgentFailure.AgentUnavailable(text, None)))
+      val denied = RemoteSlurm[IO](AgentCall.Failed(AgentFailure.AuthenticationFailed(text, None)))
+
+      def kind(remote: RemoteSlurm[IO]): Option[SpawnFailureKind] =
+        remote.scheduler.capabilities.unsafeRunSync() match
+          case SchedulerQueryResult.InvocationFailed(
+                InvocationResult.SpawnFailed(value, _, _)
+              ) =>
+            Some(value)
+          case _ => None
+
+      kind(absent).contains(SpawnFailureKind.ExecutableMissing) &&
+      kind(denied).contains(SpawnFailureKind.PermissionDenied)
+    }
+  }

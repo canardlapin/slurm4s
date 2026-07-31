@@ -49,16 +49,11 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
 
     def submit(spec: LaunchSpec): F[SubmissionAttempt] =
       RemoteSlurm.this.submitOpaque(spec).flatMap {
-        case AgentCall.Succeeded(value) => value.pure[F]
-        case AgentCall.Failed(
-              failure @ AgentFailure.TransportDisconnected(true, _, _)
-            ) =>
+        case AgentCall.Succeeded(value)                         => value.pure[F]
+        case AgentCall.Failed(failure) if mayHaveActed(failure) =>
           failureEvidence(failure).map(evidence =>
             SubmissionAttempt.Completed(
-              Submission.AcceptanceUnknown(
-                AcceptanceUncertainty.TransportInterrupted,
-                evidence
-              )
+              Submission.AcceptanceUnknown(uncertaintyOf(failure), evidence)
             )
           )
         case AgentCall.Failed(failure) =>
@@ -77,10 +72,8 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
 
     def cancel(job: JobRef): F[CancellationAttempt] =
       RemoteSlurm.this.cancel(job).flatMap {
-        case AgentCall.Succeeded(value) => value.pure[F]
-        case AgentCall.Failed(
-              failure @ AgentFailure.TransportDisconnected(true, _, _)
-            ) =>
+        case AgentCall.Succeeded(value)                         => value.pure[F]
+        case AgentCall.Failed(failure) if mayHaveActed(failure) =>
           failureEvidence(failure).map(evidence =>
             CancellationAttempt.Completed(
               CancellationResult.Unknown(
@@ -232,11 +225,84 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
       case AgentCall.Failed(failure)  =>
         invocationFailure(failure).map(SchedulerQueryResult.InvocationFailed(_))
 
+  /** What a failed agent call actually establishes.
+    *
+    * Every variant used to collapse into `SpawnFailed(Unknown)`, which asserted three things at
+    * once: that the remote program never ran, that nothing is known about why, and — for the
+    * variants that arise only AFTER a successful exchange — a plain falsehood. The low-level SSH
+    * client had the distinctions and the scheduler adapter destroyed them.
+    */
+  private enum CallFailure derives CanEqual:
+    /** The remote agent was never executed. Safely repeatable.
+      */
+    case NotStarted(kind: SpawnFailureKind, code: String)
+
+    /** The connection was lost. `afterWrite` decides whether the request may have been acted on.
+      */
+    case TransportLost(afterWrite: Boolean, code: String)
+
+    /** The exchange completed and the far side reported a failure, so the program DID run.
+      */
+    case RemoteReported(code: String)
+
+    /** The exchange completed but the response could not be trusted, so what the far side did is
+      * unknown rather than known not to have happened.
+      */
+    case ResponseUntrusted(code: String)
+
+  private def classify(failure: AgentFailure): CallFailure = failure match
+    case AgentFailure.AgentUnavailable(_, _) =>
+      CallFailure.NotStarted(SpawnFailureKind.ExecutableMissing, "ssh-agent-unavailable")
+    case AgentFailure.AuthenticationFailed(_, _) =>
+      CallFailure.NotStarted(SpawnFailureKind.PermissionDenied, "ssh-authentication-failed")
+    case AgentFailure.TransportDisconnected(afterWrite, _, _) =>
+      CallFailure.TransportLost(afterWrite, "ssh-transport-disconnected")
+    case AgentFailure.RemoteCliFailure(_, _) =>
+      CallFailure.RemoteReported("ssh-remote-cli-failure")
+    case AgentFailure.RemoteAgentFailure(_, _) =>
+      CallFailure.RemoteReported("ssh-remote-agent-failure")
+    case AgentFailure.ProtocolViolation(_, _) =>
+      CallFailure.ResponseUntrusted("ssh-protocol-violation")
+    case AgentFailure.ProtocolMismatch(_, _) =>
+      CallFailure.NotStarted(SpawnFailureKind.EnvironmentInvalid, "ssh-protocol-mismatch")
+
+  /** True when the call may already have taken effect at the scheduler. */
+  /** Why acceptance is unknown, preserving the distinction the flattening destroyed.
+    *
+    * An unparseable response is not a lost connection: `AcceptanceUncertainty.ResponseUnparseable`
+    * exists for exactly this, the CLI backend already uses it, and reporting it as a transport
+    * interruption hid the difference between "the wire broke" and "the agent answered something we
+    * could not read".
+    */
+  private def uncertaintyOf(failure: AgentFailure): AcceptanceUncertainty =
+    classify(failure) match
+      case CallFailure.ResponseUntrusted(_) => AcceptanceUncertainty.ResponseUnparseable
+      case CallFailure.RemoteReported(_)    => AcceptanceUncertainty.Unclassified
+      case _                                => AcceptanceUncertainty.TransportInterrupted
+
+  /** True when the call may already have taken effect at the scheduler. */
+  private def mayHaveActed(failure: AgentFailure): Boolean = classify(failure) match
+    case CallFailure.NotStarted(_, _)             => false
+    case CallFailure.TransportLost(afterWrite, _) => afterWrite
+    // The far side ran and answered; whatever it did, it did.
+    case CallFailure.RemoteReported(_)    => true
+    case CallFailure.ResponseUntrusted(_) => true
+
   private def invocationFailure(failure: AgentFailure): F[InvocationResult] =
+    val classified = classify(failure)
+    val code = classified match
+      case CallFailure.NotStarted(_, value)     => value
+      case CallFailure.TransportLost(_, value)  => value
+      case CallFailure.RemoteReported(value)    => value
+      case CallFailure.ResponseUntrusted(value) => value
+    val kind = classified match
+      case CallFailure.NotStarted(value, _) => value
+      // A transport loss or an untrusted response says nothing about how the program was launched.
+      case _ => SpawnFailureKind.Unknown
     failureEvidence(failure).map(evidence =>
       InvocationResult.SpawnFailed(
-        SpawnFailureKind.Unknown,
-        Diagnostics.one(Diagnostic(agentFailureCode(failure), failure.toString)),
+        kind,
+        Diagnostics.one(Diagnostic(code, failure.toString)),
         evidence
       )
     )
@@ -265,16 +331,6 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
               )
             )
           )
-
-  private def agentFailureCode(failure: AgentFailure): String =
-    failure match
-      case _: AgentFailure.ProtocolMismatch      => "ssh-protocol-mismatch"
-      case _: AgentFailure.AgentUnavailable      => "ssh-agent-unavailable"
-      case _: AgentFailure.AuthenticationFailed  => "ssh-authentication-failed"
-      case _: AgentFailure.TransportDisconnected => "ssh-transport-disconnected"
-      case _: AgentFailure.RemoteCliFailure      => "ssh-remote-cli-failure"
-      case _: AgentFailure.RemoteAgentFailure    => "ssh-remote-agent-failure"
-      case _: AgentFailure.ProtocolViolation     => "ssh-protocol-violation"
 
 object Slurm:
   def overSsh[F[_]: Async](
