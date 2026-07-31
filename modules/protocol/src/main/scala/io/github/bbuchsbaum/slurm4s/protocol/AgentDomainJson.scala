@@ -569,6 +569,66 @@ object AgentDomainJson:
       "maximumBytes" -> Json.fromInt(maximumBytes.value)
     )
 
+  /** Read several results in one exchange.
+    *
+    * ADR 0003 gives every request its own SSH process, so N pending elements cost N processes per
+    * tick. The agent-side work is unchanged — it reads each ref exactly as before — and the saving
+    * is purely transport: one process instead of N.
+    *
+    * `maximumBytes` bounds EACH result, so a caller must size the group against the negotiated
+    * frame rather than sending an unbounded list.
+    */
+  def encodeRemoteResultReadsRequest(
+      refs: NonEmptyVector[RemoteResultRef],
+      maximumBytes: ByteLimit
+  ): Json =
+    Json.obj(
+      "wireVersion" -> Json.fromInt(RemoteTaskWireVersion),
+      "resultRefs" -> Json.fromValues(refs.toVector.map(encodeRemoteResultRef)),
+      "maximumBytes" -> Json.fromInt(maximumBytes.value)
+    )
+
+  def decodeRemoteResultReadsRequest(
+      json: Json
+  ): Either[String, (NonEmptyVector[RemoteResultRef], ByteLimit)] =
+    for
+      cursor <- objectCursor(json, "remote result-reads request")
+      _ <- requireRemoteTaskWireVersion(cursor)
+      refsJson <- cursor
+        .downField("resultRefs")
+        .focus
+        .flatMap(_.asArray)
+        .toRight("missing resultRefs")
+      refs <- refsJson.toVector.traverse(decodeRemoteResultRef)
+      nonEmpty <- NonEmptyVector.fromVector(refs).toRight("resultRefs must not be empty")
+      maximumRaw <- field[Int](cursor, "maximumBytes")
+      maximum <- ByteLimit.from(maximumRaw).left.map(_.reason)
+    yield nonEmpty -> maximum
+
+  def encodeRemoteResultReads(
+      values: NonEmptyVector[RemoteResultRead]
+  ): Either[String, Json] =
+    values.toVector
+      .traverse(encodeRemoteResultRead)
+      .map(entries =>
+        Json.obj(
+          "wireVersion" -> Json.fromInt(RemoteTaskWireVersion),
+          "results" -> Json.fromValues(entries)
+        )
+      )
+
+  def decodeRemoteResultReads(
+      json: Json,
+      maximumEnvelopeBytes: ByteLimit
+  ): Either[String, NonEmptyVector[RemoteResultRead]] =
+    for
+      cursor <- objectCursor(json, "remote result-reads response")
+      _ <- requireRemoteTaskWireVersion(cursor)
+      entries <- cursor.downField("results").focus.flatMap(_.asArray).toRight("missing results")
+      reads <- entries.toVector.traverse(decodeRemoteResultRead(_, maximumEnvelopeBytes))
+      nonEmpty <- NonEmptyVector.fromVector(reads).toRight("results must not be empty")
+    yield nonEmpty
+
   def decodeRemoteResultReadRequest(
       json: Json
   ): Either[String, (RemoteResultRef, ByteLimit)] =

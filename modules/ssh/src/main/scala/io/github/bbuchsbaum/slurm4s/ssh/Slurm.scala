@@ -210,6 +210,12 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
   ): F[AgentCall[io.github.bbuchsbaum.slurm4s.protocol.RemoteResultRead]] =
     connected(_.readResult(ref, maximumBytes))
 
+  def readResults(
+      refs: NonEmptyVector[io.github.bbuchsbaum.slurm4s.protocol.RemoteResultRef],
+      maximumBytes: ByteLimit
+  ): F[AgentCall[NonEmptyVector[io.github.bbuchsbaum.slurm4s.protocol.RemoteResultRead]]] =
+    connected(_.readResults(refs, maximumBytes))
+
   def readScriptExit(
       ref: io.github.bbuchsbaum.slurm4s.protocol.RemoteScriptExitRef
   ): F[AgentCall[io.github.bbuchsbaum.slurm4s.protocol.RemoteScriptExitRead]] =

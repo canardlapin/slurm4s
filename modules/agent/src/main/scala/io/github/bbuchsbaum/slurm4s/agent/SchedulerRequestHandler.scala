@@ -1,10 +1,13 @@
 package io.github.bbuchsbaum.slurm4s.agent
 
 import cats.Monad
+import cats.data.NonEmptyVector
 import cats.syntax.all.*
 import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.protocol.AgentBody
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
+import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
+import io.github.bbuchsbaum.slurm4s.protocol.RemoteResultRead
 import io.github.bbuchsbaum.slurm4s.protocol.AgentDomainJson
 import io.github.bbuchsbaum.slurm4s.protocol.AgentEnvelope
 import io.github.bbuchsbaum.slurm4s.protocol.AgentMethod
@@ -84,6 +87,36 @@ final class SchedulerRequestHandler[F[_]: Monad](service: AgentService[F])
                 AgentDomainJson.encodeRemoteResultRead
               )
             )
+    case AgentBody.Request(AgentMethod.ReadResults, payload) =>
+      AgentDomainJson.decodeRemoteResultReadsRequest(payload) match
+        case Left(problem)               => protocolFailure(request, problem).pure[F]
+        case Right((refs, maximumBytes)) =>
+          // Deliberately the same per-ref read the single method performs. The server does no new
+          // work; the saving is transport — one SSH process instead of one per pending element.
+          refs
+            .traverse(service.api.readResult(_, maximumBytes))
+            .map { reads =>
+              // One failed read fails the group: a partial answer would leave the caller unable to
+              // tell which refs were even attempted.
+              val collapsed = reads.toVector.foldLeft(
+                AgentCall.Succeeded(Vector.empty[RemoteResultRead]): AgentCall[Vector[
+                  RemoteResultRead
+                ]]
+              ) {
+                case (AgentCall.Failed(failure), _) => AgentCall.Failed(failure)
+                case (_, AgentCall.Failed(failure)) => AgentCall.Failed(failure)
+                case (AgentCall.Succeeded(acc), AgentCall.Succeeded(value)) =>
+                  AgentCall.Succeeded(acc :+ value)
+              }
+              val grouped = collapsed match
+                case AgentCall.Failed(failure)   => AgentCall.Failed(failure)
+                case AgentCall.Succeeded(values) =>
+                  NonEmptyVector.fromVector(values) match
+                    case Some(nonEmpty) => AgentCall.Succeeded(nonEmpty)
+                    case None           =>
+                      AgentCall.Failed(AgentFailure.ProtocolViolation("empty result group", None))
+              responseEither(request, grouped, AgentDomainJson.encodeRemoteResultReads)
+            }
     case AgentBody.Request(AgentMethod.ReadScriptExit, payload) =>
       AgentDomainJson.decodeRemoteScriptExitReadRequest(payload) match
         case Left(problem) => protocolFailure(request, problem).pure[F]

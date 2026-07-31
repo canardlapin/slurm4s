@@ -22,6 +22,7 @@ enum AgentMethod(val wireName: String) derives CanEqual:
   case Cancel extends AgentMethod("cancel")
   case ReadLog extends AgentMethod("read-log")
   case ReadResult extends AgentMethod("read-result")
+  case ReadResults extends AgentMethod("read-results")
   case ReadScriptExit extends AgentMethod("read-script-exit")
 
 object AgentMethod:

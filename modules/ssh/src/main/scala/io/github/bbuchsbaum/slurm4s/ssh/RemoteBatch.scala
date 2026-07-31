@@ -3,6 +3,7 @@ package io.github.bbuchsbaum.slurm4s.ssh
 import cats.data.NonEmptyChain
 import cats.data.NonEmptyVector
 import cats.effect.Async
+import cats.effect.Ref
 import cats.effect.implicits.*
 import cats.syntax.all.*
 import io.github.bbuchsbaum.slurm4s.batch.*
@@ -52,21 +53,21 @@ final case class RemoteBatchElementException(
 ) extends RuntimeException(s"remote Slurm batch element ${index.value} did not produce a value")
 
 final class RemoteBatchElementHandle[F[_]: Async, I, A] private[ssh] (
-    remote: RemoteSlurm[F],
+    private[ssh] val remote: RemoteSlurm[F],
     val index: ArrayIndex,
     val shardIndex: ArrayIndex,
     val input: I,
     val stdout: LogRef,
     val stderr: LogRef,
-    task: RemoteTaskHandle[F, A]
+    private[ssh] val taskHandle: RemoteTaskHandle[F, A]
 ):
-  def descriptor: RemoteTaskDescriptor = task.descriptor
+  def descriptor: RemoteTaskDescriptor = taskHandle.descriptor
 
   def await: F[RemoteBatchElementResult[I, A]] =
-    task.await.map(RemoteBatchElementResult(index, input, _))
+    taskHandle.await.map(RemoteBatchElementResult(index, input, _))
 
   def awaitValue: F[A] =
-    task.await.flatMap {
+    taskHandle.await.flatMap {
       case RemoteExecutionResult.Completed(ExecutionResult.Succeeded(value, _, _)) =>
         value.pure[F]
       case result =>
@@ -90,8 +91,67 @@ final class RemoteBatchHandle[F[_]: Async, I, A] private[ssh] (
     val submission: SubmissionAttempt,
     val elements: NonEmptyVector[RemoteBatchElementHandle[F, I, A]]
 ):
+  /** Await every element, reading all still-pending results in ONE exchange per tick.
+    *
+    * The per-element path opens one SSH process per element per tick, because ADR 0003 gives every
+    * request its own process. Here the whole batch costs one, and the awaiting policy — backoff,
+    * accounting cadence, tolerance, deadline — comes from the same [[RemoteAwaitDriver]] the single
+    * handle uses, so the two cannot drift.
+    *
+    * Falls back to the per-element path when the group does not fit the negotiated frame, since a
+    * refusal to batch must never become a refusal to await.
+    */
   def await: F[NonEmptyVector[RemoteBatchElementResult[I, A]]] =
-    elements.parTraverse(_.await)
+    val first = elements.head
+    val bound = first.taskHandle.envelopeBytes
+    val policy = first.taskHandle.awaitPolicy
+    Ref.of[F, Map[ArrayIndex, RemoteExecutionResult[A]]](Map.empty).flatMap { completed =>
+      RemoteAwaitDriver
+        .run(policy, timedOutBatch)(_ => tick(completed, bound))
+        .flatMap {
+          case Some(results) => results.pure[F]
+          // The batch could not be read as a group; awaiting each element still works.
+          case None => elements.parTraverse(_.await)
+        }
+    }
+
+  private def timedOutBatch: Option[NonEmptyVector[RemoteBatchElementResult[I, A]]] = None
+
+  private def tick(
+      completed: Ref[F, Map[ArrayIndex, RemoteExecutionResult[A]]],
+      bound: ByteLimit
+  ): F[AwaitTick[Option[NonEmptyVector[RemoteBatchElementResult[I, A]]]]] =
+    completed.get.flatMap { done =>
+      val pending = elements.toVector.filterNot(element => done.contains(element.index))
+      NonEmptyVector.fromVector(pending.map(_.taskHandle.batchResultRef)) match
+        case None =>
+          AwaitTick
+            .Done(
+              Some(
+                elements.map(element =>
+                  RemoteBatchElementResult(element.index, element.input, done(element.index))
+                )
+              )
+            )
+            .pure[F]
+        case Some(refs) =>
+          elements.head.remote.readResults(refs, bound).flatMap {
+            case AgentCall.Failed(_) =>
+              // One lost round trip says nothing about the work; the driver rides it out and
+              // surrenders to the per-element path only if blindness persists.
+              AwaitTick
+                .Blind(None: Option[NonEmptyVector[RemoteBatchElementResult[I, A]]])
+                .pure[F]
+            case AgentCall.Succeeded(reads) =>
+              val settled = pending.zip(reads.toVector).flatMap { case (element, read) =>
+                element.taskHandle.interpret(read).map(element.index -> _)
+              }
+              completed.update(_ ++ settled.toMap) *>
+                AwaitTick.Waiting
+                  .pure[F]
+                  .widen[AwaitTick[Option[NonEmptyVector[RemoteBatchElementResult[I, A]]]]]
+          }
+    }
 
   def awaitValues: F[NonEmptyVector[A]] =
     elements.parTraverse(_.awaitValue)

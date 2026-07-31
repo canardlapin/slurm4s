@@ -160,3 +160,37 @@ class StructuredResultCodecSuite extends munit.FunSuite:
     )
     try stream.readAllBytes().toVector
     finally stream.close()
+
+  test("a batched result read round-trips every entry in order") {
+    val refs = cats.data.NonEmptyVector.of(
+      RemoteResultRef(AttemptId.unsafeFrom("batch-a"), AttemptEpoch.initial),
+      RemoteResultRef(AttemptId.unsafeFrom("batch-b"), AttemptEpoch.initial)
+    )
+    val bound = ByteLimit.from(4096).toOption.get
+    val request = AgentDomainJson.encodeRemoteResultReadsRequest(refs, bound)
+
+    assertEquals(
+      AgentDomainJson.decodeRemoteResultReadsRequest(request),
+      Right(refs -> bound)
+    )
+
+    val at = java.time.Instant.parse("2026-07-31T00:00:00Z")
+    val reads = cats.data.NonEmptyVector.of(
+      RemoteResultRead.Pending(at),
+      RemoteResultRead.Pending(at.plusSeconds(1))
+    )
+    val encoded = AgentDomainJson.encodeRemoteResultReads(reads).toOption.get
+
+    // Order is the correlation: the caller pairs results with the refs it sent.
+    assertEquals(AgentDomainJson.decodeRemoteResultReads(encoded, bound), Right(reads))
+  }
+
+  test("an empty batched read is rejected rather than silently succeeding") {
+    val empty = io.circe.Json.obj(
+      "wireVersion" -> io.circe.Json.fromInt(1),
+      "resultRefs" -> io.circe.Json.arr(),
+      "maximumBytes" -> io.circe.Json.fromInt(4096)
+    )
+
+    assert(AgentDomainJson.decodeRemoteResultReadsRequest(empty).isLeft)
+  }

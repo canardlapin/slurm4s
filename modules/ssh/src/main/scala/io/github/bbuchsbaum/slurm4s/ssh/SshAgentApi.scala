@@ -141,6 +141,35 @@ final class SshAgentApi[F[_]: Concurrent] private (
         case None =>
           protocolFailure("the negotiated frame cannot carry typed results").pure[F]
 
+  /** Read several results in one exchange.
+    *
+    * `maximumBytes` bounds EACH result, so a group is admitted only when the whole group fits the
+    * negotiated typed-result budget. An oversized group is a protocol failure, never a truncated
+    * answer.
+    */
+  def readResults(
+      refs: NonEmptyVector[RemoteResultRef],
+      maximumBytes: ByteLimit
+  ): F[AgentCall[NonEmptyVector[RemoteResultRead]]] =
+    if !handshake.availableFeatures.contains(AgentFeature.TypedResults) then
+      protocolFailure("typed results were not negotiated").pure[F]
+    else
+      AgentFrameBudget.maximumTypedResultBytes(handshake.maximumFrameBytes) match
+        case Some(maximum)
+            if maximumBytes.value.toLong * refs.length.toLong <= maximum.value.toLong =>
+          call(
+            AgentMethod.ReadResults,
+            AgentDomainJson.encodeRemoteResultReadsRequest(refs, maximumBytes),
+            AgentDomainJson.decodeRemoteResultReads(_, maximumBytes)
+          )
+        case Some(maximum) =>
+          protocolFailure(
+            s"a group of ${refs.length} results bounded at ${maximumBytes.value} bytes each " +
+              s"exceeds the negotiated maximum ${maximum.value}"
+          ).pure[F]
+        case None =>
+          protocolFailure("the negotiated frame cannot carry typed results").pure[F]
+
   def readScriptExit(
       ref: RemoteScriptExitRef
   ): F[AgentCall[RemoteScriptExitRead]] =

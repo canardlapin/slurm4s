@@ -184,6 +184,23 @@ final class RemoteTaskHandle[F[_]: Async, A] private[ssh] (
     budget: RemoteExchangeBudget[F]
 ):
   def submission: SubmissionAttempt = descriptor.submission.submission
+
+  /** Decode one batched read for this element. Shares the validation the single path uses. */
+  private[ssh] def interpret(read: RemoteResultRead): Option[RemoteExecutionResult[A]] =
+    read match
+      case RemoteResultRead.Available(stored, bytes, observedAt) =>
+        Some(
+          RemoteExecutionResult.Completed(
+            RemoteResultValidation.attach(resultHandle, stored, contract, bytes, observedAt)
+          )
+        )
+      case RemoteResultRead.Failed(diagnostics, evidence, _) =>
+        Some(RemoteExecutionResult.Completed(ExecutionResult.Indeterminate(diagnostics, evidence)))
+      case RemoteResultRead.Pending(_) => None
+
+  private[ssh] def awaitPolicy: RemoteAwaitPolicy = policy
+  private[ssh] def envelopeBytes: ByteLimit = resultHandle.maximumEnvelopeBytes
+  private[ssh] def batchResultRef: RemoteResultRef = resultRef
   def resultHandle: DurableResultHandle = descriptor.submission.resultHandle
   def resultRef: RemoteResultRef = descriptor.submission.resultRef
 
