@@ -6,6 +6,7 @@ import cats.effect.Ref
 import cats.effect.kernel.Async
 import cats.syntax.all.*
 import io.github.bbuchsbaum.slurm4s.core.AccountingBatch
+import io.github.bbuchsbaum.slurm4s.protocol.AgentApi
 import io.github.bbuchsbaum.slurm4s.core.ByteLimit
 import io.github.bbuchsbaum.slurm4s.core.CancellationAttempt
 import io.github.bbuchsbaum.slurm4s.core.JobRef
@@ -55,34 +56,6 @@ trait AgentRegisteredTaskService[F[_]]:
   def submitScriptBatch(
       request: RemoteScriptBatchRequest
   ): F[AgentCall[RemoteScriptBatchSubmission]]
-  def readResult(
-      ref: RemoteResultRef,
-      maximumBytes: ByteLimit
-  ): F[AgentCall[RemoteResultRead]]
-  def readScriptExit(
-      ref: RemoteScriptExitRef
-  ): F[AgentCall[RemoteScriptExitRead]]
-
-trait AgentApi[F[_]]:
-  def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]]
-  def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]]
-  def submitRegistered(
-      request: RemoteRegisteredTaskRequest
-  ): F[AgentCall[RemoteRegisteredSubmission]]
-  def submitBatch(
-      request: RemoteRegisteredBatchRequest
-  ): F[AgentCall[RemoteRegisteredBatchSubmission]]
-  def submitScriptBatch(
-      request: RemoteScriptBatchRequest
-  ): F[AgentCall[RemoteScriptBatchSubmission]]
-  def observe(jobs: NonEmptyVector[JobRef]): F[AgentCall[SchedulerQueryResult[ObservationBatch]]]
-  def accounting(jobs: NonEmptyVector[JobRef]): F[AgentCall[SchedulerQueryResult[AccountingBatch]]]
-  def cancel(job: JobRef): F[AgentCall[CancellationAttempt]]
-  def readLog(
-      ref: LogRef,
-      cursor: LogCursor,
-      maxBytes: ByteLimit
-  ): F[AgentCall[LogReadResult]]
   def readResult(
       ref: RemoteResultRef,
       maximumBytes: ByteLimit

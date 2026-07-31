@@ -5,6 +5,7 @@ import cats.effect.IO
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.local.LocalLogReader
 import io.github.bbuchsbaum.slurm4s.managed.*
+import io.github.bbuchsbaum.slurm4s.protocol.AgentApi
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
 import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
@@ -175,8 +176,8 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
 
   private def failingAgent(
       failure: AgentFailure
-  ): io.github.bbuchsbaum.slurm4s.agent.AgentApi[IO] =
-    new io.github.bbuchsbaum.slurm4s.agent.AgentApi[IO]:
+  ): AgentApi[IO] =
+    new AgentApi[IO]:
       def capabilities: IO[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
         IO.pure(AgentCall.Failed(failure))
       def submitOpaque(spec: LaunchSpec): IO[AgentCall[SubmissionAttempt]] =

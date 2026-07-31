@@ -5,7 +5,6 @@ import cats.effect.Ref
 import cats.effect.kernel.Concurrent
 import cats.syntax.all.*
 import io.circe.Json
-import io.github.bbuchsbaum.slurm4s.agent.AgentApi
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 

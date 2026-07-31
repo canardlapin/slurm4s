@@ -5,9 +5,9 @@ import cats.effect.Async
 import cats.effect.Resource
 import cats.syntax.all.*
 import fs2.io.process.Processes
-import io.github.bbuchsbaum.slurm4s.agent.AgentApi
 import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
+import io.github.bbuchsbaum.slurm4s.protocol.AgentApi
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
 import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits

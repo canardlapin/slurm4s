@@ -148,7 +148,19 @@ lazy val agent = project
 
 lazy val ssh = project
   .in(file("modules/ssh"))
-  .dependsOn(core, batch, protocol, agent, worker, testkit % "test->compile")
+  // The SSH client no longer depends on the agent (server) module: AgentApi moved to
+  // protocol, where the wire contract belongs. The remaining worker edge is the typed task/batch
+  // vocabulary and is tracked separately.
+  .dependsOn(
+    core,
+    batch,
+    protocol,
+    worker,
+    // Test-only: the conformance suites drive a real in-process agent. A client may TEST against a
+    // server; it may not COMPILE against one.
+    agent % "test->compile",
+    testkit % "test->compile"
+  )
   .settings(commonSettings)
   .settings(
     name := "slurm4s-ssh",
