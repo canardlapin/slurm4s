@@ -88,7 +88,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
       "queue-evidence".getBytes(StandardCharsets.UTF_8).toVector
     )
     val observation = JobObservation(
-      job = JobRef(JobId.from("2001").toOption.get, None, None),
+      job = JobRef(JobId.from("2001").toOption.get, None),
       state = SlurmState.Running,
       freshness = Freshness.Current(observedAt),
       reason = None,
@@ -128,7 +128,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
       Vector.empty
     )
     val observation = JobObservation(
-      JobRef(JobId.from("2002").toOption.get, None, None),
+      JobRef(JobId.from("2002").toOption.get, None),
       SlurmState.Pending,
       Freshness.Current(observedAt),
       Some("Priority"),
@@ -397,7 +397,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
           NonEmptyVector.one(
             ObservationResult.Observed(
               JobObservation(
-                JobRef(JobId.from("state-fixture").toOption.get, None, None),
+                JobRef(JobId.from("state-fixture").toOption.get, None),
                 state,
                 Freshness.Current(observedAt),
                 None,

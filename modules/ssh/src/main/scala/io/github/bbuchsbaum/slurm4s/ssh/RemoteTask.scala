@@ -241,7 +241,7 @@ final class RemoteTaskHandle[F[_]: Async, A] private[ssh] (
             AccountingProbe.Unavailable(RemoteExecutionResult.SchedulerUnavailable(result))
           case AgentCall.Succeeded(SchedulerQueryResult.Succeeded(batch)) =>
             batch.records.toVector
-              .find(record => record.job.key == value.key)
+              .find(record => record.job == value)
               .flatMap(record =>
                 record.outcome.map {
                   case WorkloadOutcome.Completed(0) =>

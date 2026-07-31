@@ -1570,7 +1570,6 @@ object AgentDomainJson:
   private def encodeRemoteJobRef(value: JobRef): Json =
     Json.obj(
       "jobId" -> Json.fromString(value.jobId.value),
-      "cluster" -> value.cluster.fold(Json.Null)(cluster => Json.fromString(cluster.value)),
       "arrayIndex" -> value.arrayIndex.fold(Json.Null)(index => Json.fromInt(index.value))
     )
 
@@ -1583,7 +1582,7 @@ object AgentDomainJson:
       cluster <- clusterText.traverse(raw => ClusterName.from(raw).left.map(_.reason))
       arrayRaw <- field[Option[Int]](cursor, "arrayIndex")
       arrayIndex <- arrayRaw.traverse(raw => ArrayIndex.from(raw).left.map(_.reason))
-    yield JobRef(jobId, cluster, arrayIndex)
+    yield JobRef(jobId, arrayIndex)
 
   private def encodeRemoteDiagnostics(value: Diagnostics): Json =
     Json.obj(

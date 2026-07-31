@@ -400,8 +400,7 @@ object ControlTransition:
             Vector(ManagedEvent.BindingReconciled(key, epoch, job)),
             at
           )
-        case ManagedPhase.Bound(existing)
-            if existing.key == job.key && !existing.clusterConflictsWith(job) =>
+        case ManagedPhase.Bound(existing) if existing == job =>
           Right(noChange(state, ControlResult.NoChange(Some(current))))
         case phase => Left(ControlFailure.InvalidPhase(key, phase, "reconcile-binding"))
     }
@@ -415,25 +414,15 @@ object ControlTransition:
     val candidates = activeBound(state, requested.toVector.toSet)
     val updated = result match
       case SchedulerQueryResult.Succeeded(batch) =>
-        val byJob = batch.results.toVector.map(value => observationJob(value).key -> value).toMap
+        // JobRef is the operational identity, so a report either names a bound attempt or it does
+        // not. There is no longer a cluster to disagree about.
+        val byJob = batch.results.toVector.map(value => observationJob(value) -> value).toMap
         candidates.flatMap { case (key, current) =>
-          current.currentJob.flatMap(job => byJob.get(job.key).map(job -> _)).map {
-            case (job, value) =>
-              val observed = observationJob(value)
-              if job.clusterConflictsWith(observed) then
-                key -> current.copy(
-                  observation = ManagedObservation.Unavailable(
-                    at,
-                    clusterConflict("observation-cluster-conflict", job, observed),
-                    observationEvidence(value)
-                  ),
-                  updatedAt = at
-                )
-              else
-                key -> current.copy(
-                  observation = ManagedObservation.Current(value),
-                  updatedAt = at
-                )
+          current.currentJob.flatMap(byJob.get).map { value =>
+            key -> current.copy(
+              observation = ManagedObservation.Current(value),
+              updatedAt = at
+            )
           }
         }
       case failure =>
@@ -470,27 +459,16 @@ object ControlTransition:
     val candidates = activeBound(state, requested.toVector.toSet)
     val updated = result match
       case SchedulerQueryResult.Succeeded(batch) =>
-        val byJob = batch.records.toVector.map(record => record.job.key -> record).toMap
+        val byJob = batch.records.toVector.map(record => record.job -> record).toMap
         candidates.flatMap { case (key, current) =>
-          current.currentJob.flatMap(job => byJob.get(job.key).map(job -> _)).map {
-            case (job, record) =>
-              if job.clusterConflictsWith(record.job) then
-                key -> current.copy(
-                  accounting = ManagedAccounting.Unavailable(
-                    at,
-                    clusterConflict("accounting-cluster-conflict", job, record.job),
-                    record.evidence
-                  ),
-                  updatedAt = at
-                )
-              else
-                val withAccounting = current.copy(
-                  accounting = ManagedAccounting.Current(record),
-                  updatedAt = at
-                )
-                key -> record.outcome.fold(withAccounting)(outcome =>
-                  terminal(withAccounting, outcome, at)
-                )
+          current.currentJob.flatMap(byJob.get).map { record =>
+            val withAccounting = current.copy(
+              accounting = ManagedAccounting.Current(record),
+              updatedAt = at
+            )
+            key -> record.outcome.fold(withAccounting)(outcome =>
+              terminal(withAccounting, outcome, at)
+            )
           }
         }
       case failure =>
@@ -734,11 +712,10 @@ object ControlTransition:
       state: ControlState,
       requested: Set[JobRef]
   ): Vector[(SubmissionKey, ManagedAttempt)] =
-    val keys = requested.map(_.key)
     state.attempts.iterator.collect {
       case entry @ (_, value)
           if value.phase.isInstanceOf[ManagedPhase.Bound] &&
-            value.currentJob.exists(job => keys.contains(job.key)) =>
+            value.currentJob.exists(requested.contains) =>
         entry
     }.toVector
 
@@ -746,27 +723,6 @@ object ControlTransition:
     case ObservationResult.Observed(value)      => value.job
     case ObservationResult.NotFound(job, _, _)  => job
     case ObservationResult.Failed(job, _, _, _) => job
-
-  private def observationEvidence(result: ObservationResult): EvidenceBundle = result match
-    case ObservationResult.Observed(value)           => value.evidence
-    case ObservationResult.NotFound(_, _, evidence)  => evidence
-    case ObservationResult.Failed(_, _, _, evidence) => evidence
-
-  /** A same-numbered job on a different named cluster is a different job. Refusing the match is
-    * only half the answer; the refusal must be visible, or it reads exactly like a lost row.
-    */
-  private def clusterConflict(code: String, bound: JobRef, reported: JobRef): Diagnostics =
-    Diagnostics.one(
-      Diagnostic(
-        code,
-        "reported cluster differs from the bound cluster; refusing to attribute the report",
-        Map(
-          "jobId" -> bound.jobId.value,
-          "boundCluster" -> bound.cluster.fold("<none>")(_.value),
-          "reportedCluster" -> reported.cluster.fold("<none>")(_.value)
-        )
-      )
-    )
 
   private def queryFailure[A](
       code: String,

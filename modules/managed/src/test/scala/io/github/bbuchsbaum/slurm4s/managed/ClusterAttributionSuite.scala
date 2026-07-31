@@ -3,20 +3,18 @@ package io.github.bbuchsbaum.slurm4s.managed
 import cats.data.NonEmptyVector
 import io.github.bbuchsbaum.slurm4s.core.*
 
-/** P8.A1: a reported cluster is evidence, not operational identity.
+/** P8.D4: a reported cluster is evidence, and cannot affect attribution at all.
   *
-  * `sbatch --parsable` yields a bare job id on a non-federated site, so a bound attempt carries no
-  * cluster, while `squeue` JSON reports one and the parser copies it onto the observation. Matching
-  * on whole-`JobRef` equality therefore misses every row, and the attempt never advances.
+  * P8.A1 fixed the symptom by matching on a key that excluded cluster while `JobRef` still carried
+  * one. D4 removes the field, so these tests now assert something stronger: there is no cluster in
+  * operational identity for a report to disagree with.
   */
 class ClusterAttributionSuite extends munit.FunSuite:
   import ManagedTestSupport.*
 
   private val alpha: ClusterName = ClusterName.unsafeFrom("alpha")
-  private val beta: ClusterName = ClusterName.unsafeFrom("beta")
-  private val reported: JobRef = job.copy(cluster = Some(alpha))
 
-  test("observation reported with a cluster is applied to an attempt bound without one") {
+  test("an observation reporting a cluster is applied and keeps the cluster as evidence") {
     val bound = boundState("cluster-observe")
     val current = applyCommand(
       bound,
@@ -27,12 +25,13 @@ class ClusterAttributionSuite extends munit.FunSuite:
             NonEmptyVector.one(
               ObservationResult.Observed(
                 JobObservation(
-                  reported,
+                  job,
                   SlurmState.Running,
                   Freshness.Current(later),
                   None,
                   Map.empty,
-                  evidence
+                  evidence,
+                  reportedCluster = Some(alpha)
                 )
               )
             )
@@ -43,17 +42,16 @@ class ClusterAttributionSuite extends munit.FunSuite:
     )
     val attempt = current.state.attempts.values.head
 
-    assert(
-      attempt.observation.isInstanceOf[ManagedObservation.Current],
-      s"observation was dropped: ${attempt.observation}"
-    )
-
+    attempt.observation match
+      case ManagedObservation.Current(ObservationResult.Observed(value)) =>
+        assertEquals(value.reportedCluster, Some(alpha))
+      case other => fail(s"observation was dropped: $other")
   }
 
-  test("accounting reported with a cluster still reaches terminal") {
+  test("accounting reaches terminal regardless of what the site reports") {
     val bound = boundState("cluster-accounting")
     val record = AccountingRecord(
-      reported,
+      job,
       SlurmState.Completed,
       Some(ExitStatus(0, None)),
       Some(WorkloadOutcome.Completed(0)),
@@ -69,57 +67,11 @@ class ClusterAttributionSuite extends munit.FunSuite:
         later.plusSeconds(4L)
       )
     )
-    val attempt = terminal.state.attempts.values.head
 
-    assert(
-      attempt.phase.isInstanceOf[ManagedPhase.Terminal],
-      s"attempt never terminated: ${attempt.phase}"
-    )
+    assert(terminal.state.attempts.values.head.phase.isInstanceOf[ManagedPhase.Terminal])
   }
 
-  test("two known and different clusters are different jobs and never alias") {
-    val bound = boundStateOn("cluster-conflict", job.copy(cluster = Some(beta)))
-    val current = applyCommand(
-      bound,
-      ControlCommand.RecordObservations(
-        NonEmptyVector.one(job.copy(cluster = Some(beta))),
-        SchedulerQueryResult.Succeeded(
-          ObservationBatch(
-            NonEmptyVector.one(
-              ObservationResult.Observed(
-                JobObservation(
-                  reported,
-                  SlurmState.Running,
-                  Freshness.Current(later),
-                  None,
-                  Map.empty,
-                  evidence
-                )
-              )
-            )
-          )
-        ),
-        later.plusSeconds(2L)
-      )
-    )
-    val attempt = current.state.attempts.values.head
-
-    assert(
-      !attempt.observation.isInstanceOf[ManagedObservation.Current],
-      "a beta-cluster attempt must not adopt an alpha-cluster observation"
-    )
-    attempt.observation match
-      case unavailable: ManagedObservation.Unavailable =>
-        assert(
-          unavailable.diagnostics.values.exists(_.code == "observation-cluster-conflict"),
-          s"conflict must be diagnosed, not silent: ${unavailable.diagnostics}"
-        )
-      case other => fail(s"expected a diagnosed conflict, got $other")
-  }
-
-  private def boundState(key: String): ControlState = boundStateOn(key, job)
-
-  private def boundStateOn(key: String, bound: JobRef): ControlState =
+  private def boundState(key: String): ControlState =
     val value = intent(key)
     val recorded = applyCommand(ControlState.empty, ControlCommand.RecordIntent(value))
     val claimed = applyCommand(
@@ -131,7 +83,7 @@ class ClusterAttributionSuite extends munit.FunSuite:
       ControlCommand.RecordSubmission(
         value.submissionKey,
         value.epoch,
-        SubmissionAttempt.Completed(Submission.Accepted(bound, evidence)),
+        SubmissionAttempt.Completed(Submission.Accepted(job, evidence)),
         later.plusSeconds(1L)
       )
     ).state

@@ -27,7 +27,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
   given ScriptArguments[FitParams] = ScriptArguments.derived
 
   private val observedAt = Instant.parse("2026-07-24T12:00:00Z")
-  private val parentJob = JobRef(JobId.from("9100").toOption.get, None, None)
+  private val parentJob = JobRef(JobId.from("9100").toOption.get, None)
   private val evidence = EvidenceBundle(
     BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
   )

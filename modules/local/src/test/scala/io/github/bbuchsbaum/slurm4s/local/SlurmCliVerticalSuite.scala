@@ -26,7 +26,6 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
         prepared <- planner.prepareLocal(request).map(_.toOption.get)
         job = JobRef(
           JobId.from("1001").toOption.get,
-          Some(ClusterName.from("alpha").toOption.get),
           None
         )
         jobs = NonEmptyVector.one(job)
@@ -35,7 +34,7 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
             ExpectedCommand.exact(
               SlurmCommands.submit(prepared.submission),
               settings.commandPolicy,
-              exited(SlurmExecutable.Sbatch, "1001;alpha\n")
+              exited(SlurmExecutable.Sbatch, "1001\n")
             ),
             ExpectedCommand.exact(
               SlurmCommands.observe(jobs, parser),
@@ -160,9 +159,9 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
       val request = LocalTestSupport.request("failure-planes")
       for
         prepared <- planner.prepareLocal(request).map(_.toOption.get)
-        job = JobRef(JobId.from("1001").toOption.get, None, None)
+        job = JobRef(JobId.from("1001").toOption.get, None)
         jobs = NonEmptyVector.one(job)
-        job2 = JobRef(JobId.from("1002").toOption.get, None, None)
+        job2 = JobRef(JobId.from("1002").toOption.get, None)
         multiJobs = NonEmptyVector.of(job, job2)
         spawn = InvocationResult.SpawnFailed(
           SpawnFailureKind.ExecutableMissing,

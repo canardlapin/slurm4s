@@ -27,7 +27,7 @@ class LocalCaptureBoundSuite extends munit.CatsEffectSuite:
     LocalTestSupport.temporaryDirectory.use { root =>
       val jobs = NonEmptyVector.fromVectorUnsafe(
         (1 to jobCount).toVector.map(index =>
-          JobRef(JobId.from((5000 + index).toString).toOption.get, None, None)
+          JobRef(JobId.from((5000 + index).toString).toOption.get, None)
         )
       )
       val payload = squeueJson(jobs.toVector)
@@ -72,7 +72,7 @@ class LocalCaptureBoundSuite extends munit.CatsEffectSuite:
     LocalTestSupport.temporaryDirectory.use { root =>
       val jobs = NonEmptyVector.fromVectorUnsafe(
         (1 to jobCount).toVector.map(index =>
-          JobRef(JobId.from((6000 + index).toString).toOption.get, None, None)
+          JobRef(JobId.from((6000 + index).toString).toOption.get, None)
         )
       )
       val payload = squeueJson(jobs.toVector)

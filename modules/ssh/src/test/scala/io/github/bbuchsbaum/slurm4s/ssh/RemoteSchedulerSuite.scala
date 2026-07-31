@@ -79,7 +79,7 @@ class RemoteSchedulerSuite extends munit.CatsEffectSuite:
   }
 
   private val job: JobRef =
-    JobRef(JobId.from("9001").toOption.get, None, None)
+    JobRef(JobId.from("9001").toOption.get, None)
 
   private val request: JobRequest[NoResult] =
     JobRequest(

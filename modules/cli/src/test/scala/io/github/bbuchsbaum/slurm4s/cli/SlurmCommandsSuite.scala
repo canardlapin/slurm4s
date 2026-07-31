@@ -95,7 +95,6 @@ class SlurmCommandsSuite extends munit.FunSuite:
     )
     val element = JobRef(
       JobId.from("9000").toOption.get,
-      None,
       Some(ArrayIndex.from(2).toOption.get)
     )
 

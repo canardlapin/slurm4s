@@ -25,9 +25,8 @@ object Generators:
   val jobRef: Gen[JobRef] =
     for
       id <- jobId
-      cluster <- Gen.option(clusterName)
       index <- Gen.option(arrayIndex)
-    yield JobRef(id, cluster, index)
+    yield JobRef(id, index)
 
   /** Every base state plus an unknown one, so exhaustive-match assumptions are exercised. */
   val slurmState: Gen[SlurmState] =

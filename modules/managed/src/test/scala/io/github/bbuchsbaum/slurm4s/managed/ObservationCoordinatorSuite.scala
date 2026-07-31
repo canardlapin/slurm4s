@@ -12,8 +12,8 @@ class ObservationCoordinatorSuite extends munit.CatsEffectSuite:
   import ManagedTestSupport.*
 
   test("one site tick coalesces active jobs and accounts only terminal candidates") {
-    val firstJob = JobRef(JobId.from("8101").toOption.get, None, None)
-    val secondJob = JobRef(JobId.from("8102").toOption.get, None, None)
+    val firstJob = JobRef(JobId.from("8101").toOption.get, None)
+    val secondJob = JobRef(JobId.from("8102").toOption.get, None)
     for
       store <- InMemoryControlStore.create[IO]()
       _ <- bind(store, "coalesce-1", firstJob)
@@ -53,7 +53,7 @@ class ObservationCoordinatorSuite extends munit.CatsEffectSuite:
 
   test("batch limit prevents a per-job loop and leaves excess work for later ticks") {
     val jobs =
-      (1 to 5).toVector.map(index => JobRef(JobId.from(s"82$index").toOption.get, None, None))
+      (1 to 5).toVector.map(index => JobRef(JobId.from(s"82$index").toOption.get, None))
     for
       store <- InMemoryControlStore.create[IO]()
       _ <- jobs.zipWithIndex.traverse_ { case (job, index) =>
@@ -91,7 +91,7 @@ class ObservationCoordinatorSuite extends munit.CatsEffectSuite:
 
   test("bounded batches rotate fairly instead of starving later jobs") {
     val jobs =
-      (1 to 5).toVector.map(index => JobRef(JobId.from(s"824$index").toOption.get, None, None))
+      (1 to 5).toVector.map(index => JobRef(JobId.from(s"824$index").toOption.get, None))
     for
       store <- InMemoryControlStore.create[IO]()
       _ <- jobs.zipWithIndex.traverse_ { case (job, index) => bind(store, s"fair-$index", job) }
@@ -126,7 +126,7 @@ class ObservationCoordinatorSuite extends munit.CatsEffectSuite:
 
   test("a failed bounded query marks only the jobs that were actually requested") {
     val jobs =
-      (1 to 3).toVector.map(index => JobRef(JobId.from(s"825$index").toOption.get, None, None))
+      (1 to 3).toVector.map(index => JobRef(JobId.from(s"825$index").toOption.get, None))
     val timeout = InvocationResult.TimedOut(
       DurationMillis.from(1000L).toOption.get,
       evidence.primary,
@@ -159,7 +159,7 @@ class ObservationCoordinatorSuite extends munit.CatsEffectSuite:
   }
 
   test("squeue failure marks last evidence stale and never calls accounting") {
-    val boundJob = JobRef(JobId.from("8301").toOption.get, None, None)
+    val boundJob = JobRef(JobId.from("8301").toOption.get, None)
     val timeout = InvocationResult.TimedOut(
       DurationMillis.from(1000L).toOption.get,
       evidence.primary,
@@ -195,7 +195,7 @@ class ObservationCoordinatorSuite extends munit.CatsEffectSuite:
   }
 
   test("delayed accounting triggers one bounded focused batch and stays unresolved") {
-    val boundJob = JobRef(JobId.from("8401").toOption.get, None, None)
+    val boundJob = JobRef(JobId.from("8401").toOption.get, None)
     for
       store <- InMemoryControlStore.create[IO]()
       _ <- bind(store, "focused", boundJob)

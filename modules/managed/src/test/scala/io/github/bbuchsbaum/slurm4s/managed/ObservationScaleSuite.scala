@@ -60,7 +60,7 @@ class ObservationScaleSuite extends munit.CatsEffectSuite:
       ResourceRequest.validate(1, 1, None, None, None).toOption.get
     )
     val intent = ManagedIntent.from(request, observedAt.minusSeconds(1)).toOption.get
-    val job = JobRef(JobId.from((100000 + index).toString).toOption.get, None, None)
+    val job = JobRef(JobId.from((100000 + index).toString).toOption.get, None)
     ManagedAttempt(
       intent,
       ManagedPhase.Bound(job),

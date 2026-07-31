@@ -31,7 +31,7 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
       .toOption
       .get
   )
-  private val job = JobRef(JobId.from("9001").toOption.get, None, None)
+  private val job = JobRef(JobId.from("9001").toOption.get, None)
   private val evidence = EvidenceBundle(
     BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
   )

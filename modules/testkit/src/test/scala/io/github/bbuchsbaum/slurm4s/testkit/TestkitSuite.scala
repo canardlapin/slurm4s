@@ -15,7 +15,7 @@ class TestkitSuite extends munit.CatsEffectSuite:
       Vector.empty
     )
   )
-  private val job = JobRef(JobId.unsafeFrom("42"), None, None)
+  private val job = JobRef(JobId.unsafeFrom("42"), None)
   private val submissionKey = SubmissionKey.unsafeFrom("scripted-submit")
   private val request = JobRequest(
     submissionKey,

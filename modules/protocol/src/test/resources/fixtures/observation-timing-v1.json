@@ -6,7 +6,6 @@
           "value": {
             "job": {
               "jobId": "2001",
-              "cluster": null,
               "arrayIndex": null
             },
             "state": {

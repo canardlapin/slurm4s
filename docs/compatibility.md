@@ -130,3 +130,27 @@ response naming several jobs yields `squeue-absence-ambiguous`: some of those jo
 running, and reporting them absent would be a fabricated answer rather than a cautious one. Whether
 `squeue` emits partial queue state alongside the diagnostic is not yet established by capture, and
 this rule is correct under either behaviour.
+
+## Federation and cross-cluster routing (unsupported)
+
+Not supported in v0.1, and refused rather than mishandled.
+
+`JobRef` is single-cluster: base job id plus optional array element. A cluster name previously sat
+in that identity, participating in equality and persistence, while observation, accounting,
+cancellation and parser attribution all ignored it — so a bound attempt carrying no cluster never
+matched a report carrying one, and every managed observation was discarded silently.
+
+Consequences a caller can rely on:
+
+- `sbatch --parsable` appends `;cluster` only on a federated submission. That response is refused
+  with the diagnostic code `federation-unsupported`, because accepting the id while discarding the
+  cluster would produce a reference that addresses the wrong cluster on every later query and
+  cancellation.
+- A cluster reported by `squeue` is retained as evidence on the observation
+  (`JobObservation.reportedCluster`) and never as identity. Reporting a cluster is normal on an
+  unfederated site and must not affect attribution.
+- `-M`/`--clusters` is not emitted by any rendered command.
+
+Genuine scoped identity requires grouping, CLI routing, parser attribution, persistence and
+cancellation to land together. Until they do, a decorative field bought nothing and cost
+correctness.

@@ -196,7 +196,7 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
     ResourceRequest.validate(1, 1, None, None, None).toEither.toOption.get
   )
 
-  private val acceptedJob = JobRef(JobId.from("42").toOption.get, None, None)
+  private val acceptedJob = JobRef(JobId.from("42").toOption.get, None)
   private val evidence = EvidenceBundle(
     BoundedEvidence.capture(EvidenceSource.AgentProtocol, Instant.EPOCH, Vector.empty)
   )

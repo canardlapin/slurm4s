@@ -615,7 +615,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           assertEquals(prepared.elements.toVector.map(_.resultPath).distinct.size, 2)
           assertEquals(prepared.plan.elements.toVector.map(_.stdout.locator).distinct.size, 2)
           assertEquals(prepared.plan.elements.toVector.map(_.stderr.locator).distinct.size, 2)
-          val parent = JobRef(JobId.from("8100").toOption.get, None, None)
+          val parent = JobRef(JobId.from("8100").toOption.get, None)
           val bindings = prepared.plan.bind(parent).toOption.get.toVector
           assertEquals(
             bindings.map(_.job.arrayIndex),
@@ -741,7 +741,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         observed.set(Some(spec.source)) *> IO.pure(
           SubmissionAttempt.Completed(
             Submission.Accepted(
-              JobRef(JobId.from("8100").toOption.get, None, None),
+              JobRef(JobId.from("8100").toOption.get, None),
               EvidenceBundle(
                 BoundedEvidence.capture(
                   EvidenceSource.WorkerEvent,

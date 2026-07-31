@@ -5,29 +5,19 @@ enum InvocationResult derives CanEqual:
   case SpawnFailed(kind: SpawnFailureKind, diagnostics: Diagnostics, evidence: EvidenceBundle)
   case TimedOut(after: DurationMillis, stdout: BoundedEvidence, stderr: BoundedEvidence)
 
-/** Operational identity for matching a scheduler report to a submitted job.
+/** A job as this library identifies it: base id plus optional array element.
   *
-  * Cluster is deliberately excluded. `sbatch --parsable` yields a bare job id on a non-federated
-  * site while `squeue` JSON reports a cluster name, so folding cluster into the match key aliases
-  * every observation away from the attempt that submitted it.
+  * Deliberately single-cluster. A cluster name used to sit here, in equality and in persistence,
+  * while observation, accounting, cancellation and parser attribution all ignored it — so a bound
+  * attempt carrying no cluster never matched a report carrying one, and every managed observation
+  * was silently discarded (P8.A1).
+  *
+  * Federation and cross-cluster routing are UNSUPPORTED for v0.1. Genuine scoped identity requires
+  * grouping, CLI routing (`-M`/`--clusters`), parser attribution, persistence and cancellation to
+  * land together; carrying a decorative field until then bought nothing and cost correctness. A
+  * cluster the scheduler reports is preserved as evidence on the observation, not as identity.
   */
-final case class JobKey(jobId: JobId, arrayIndex: Option[ArrayIndex]) derives CanEqual
-
-final case class JobRef(jobId: JobId, cluster: Option[ClusterName], arrayIndex: Option[ArrayIndex])
-    derives CanEqual:
-
-  /** Match on this, never on whole-`JobRef` equality. A reported cluster is evidence, not identity.
-    */
-  def key: JobKey = JobKey(jobId, arrayIndex)
-
-  /** True only when both clusters are known and disagree, which makes these genuinely different
-    * jobs. An unknown cluster on either side is not a conflict, because absence is the normal
-    * result of submitting without federation. Callers must diagnose a conflict, never drop it.
-    */
-  def clusterConflictsWith(other: JobRef): Boolean =
-    (cluster, other.cluster) match
-      case (Some(left), Some(right)) => left != right
-      case _                         => false
+final case class JobRef(jobId: JobId, arrayIndex: Option[ArrayIndex]) derives CanEqual
 
 enum AcceptanceUncertainty derives CanEqual:
   case ResponseLost

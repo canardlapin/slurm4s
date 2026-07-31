@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets
 class AttemptReducerSuite extends munit.FunSuite:
   private val epoch = AttemptEpoch.initial
   private val attempt = AttemptId.from("attempt-1").toOption.get
-  private val job = JobRef(JobId.from("9876").toOption.get, None, None)
+  private val job = JobRef(JobId.from("9876").toOption.get, None)
   private val evidence = EvidenceBundle(
     BoundedEvidence.capture(
       EvidenceSource.CommandStdout("sbatch"),

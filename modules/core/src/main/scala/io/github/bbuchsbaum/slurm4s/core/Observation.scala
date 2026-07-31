@@ -163,7 +163,10 @@ final case class JobObservation(
     rawFields: Map[String, String],
     evidence: EvidenceBundle,
     timing: JobTiming = JobTiming.unknown,
-    flags: Vector[SlurmStateFlag] = Vector.empty
+    flags: Vector[SlurmStateFlag] = Vector.empty,
+    // Evidence, deliberately not identity: `squeue` names the local cluster on every row, so
+    // folding it into JobRef made a bound attempt fail to match its own observation.
+    reportedCluster: Option[ClusterName] = None
 ) derives CanEqual:
   def terminality: Terminality = Terminality.of(state)
 

@@ -83,7 +83,7 @@ class UncertaintyLawSuite extends munit.ScalaCheckSuite:
     }
   }
 
-  private val job: JobRef = JobRef(JobId.unsafeFrom("9001"), None, None)
+  private val job: JobRef = JobRef(JobId.unsafeFrom("9001"), None)
 
   private val request: JobRequest[NoResult] =
     JobRequest(

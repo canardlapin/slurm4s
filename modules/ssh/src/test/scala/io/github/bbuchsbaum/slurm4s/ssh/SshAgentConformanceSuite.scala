@@ -149,7 +149,7 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
   private val evidence = EvidenceBundle(
     BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector(1, 2, 3))
   )
-  private val job = JobRef(JobId.from("8182").toOption.get, None, None)
+  private val job = JobRef(JobId.from("8182").toOption.get, None)
   private val freshness = Freshness.Current(observedAt)
   private val observation = JobObservation(
     job,

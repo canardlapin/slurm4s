@@ -503,7 +503,6 @@ private[protocol] object StructuredJson:
   def encodeJob(value: JobRef): Json =
     Json.obj(
       "jobId" -> Json.fromString(value.jobId.value),
-      "cluster" -> value.cluster.fold(Json.Null)(item => Json.fromString(item.value)),
       "arrayIndex" -> value.arrayIndex.fold(Json.Null)(item => Json.fromInt(item.value))
     )
 
@@ -519,7 +518,7 @@ private[protocol] object StructuredJson:
       index <- indexValue.traverse(raw =>
         ArrayIndex.from(raw).left.map(problem => invalid(problem.reason))
       )
-    yield JobRef(id, cluster, index)
+    yield JobRef(id, index)
 
   def encodeOutput(value: OutputEntry): Json =
     Json.obj(

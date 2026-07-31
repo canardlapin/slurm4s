@@ -242,7 +242,7 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
       elements,
       SubmissionAttempt.Completed(
         Submission.Accepted(
-          JobRef(JobId.from("9001").toOption.get, None, None),
+          JobRef(JobId.from("9001").toOption.get, None),
           evidence
         )
       )

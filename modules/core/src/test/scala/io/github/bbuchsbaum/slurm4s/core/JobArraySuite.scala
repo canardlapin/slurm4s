@@ -5,7 +5,7 @@ class JobArraySuite extends munit.FunSuite:
     val request = JobArrayRequest.contiguous(positive(3), Some(positive(2))).toOption.get
     val elements = request.indices.toVector.map(element)
     val plan = JobArrayPlan.from(request, elements).toOption.get
-    val parent = JobRef(JobId.from("9000").toOption.get, None, None)
+    val parent = JobRef(JobId.from("9000").toOption.get, None)
 
     val bindings = plan.bind(parent).toOption.get.toVector
 

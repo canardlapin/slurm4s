@@ -12,7 +12,6 @@ class FailureDiagnosisSuite extends munit.FunSuite:
     AttemptId.from("diagnosis-attempt").fold(problem => fail(problem.toString), identity)
   private val job = JobRef(
     JobId.from("42").fold(problem => fail(problem.toString), identity),
-    None,
     None
   )
   private val maximumItems =

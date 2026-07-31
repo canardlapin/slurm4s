@@ -239,7 +239,7 @@ final class SlurmCliScheduler[F[_]: Monad](
       case failed: InvocationResult.SpawnFailed => CancellationAttempt.InvocationFailed(failed)
     }
 
-  private def identity(job: JobRef): JobKey = job.key
+  private def identity(job: JobRef): JobRef = job
 
   /** Bundle command streams for retention.
     *

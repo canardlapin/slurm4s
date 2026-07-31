@@ -73,7 +73,7 @@ final case class JobArrayPlan private (
       elements.map { element =>
         ArrayElementBinding(
           element,
-          JobRef(parent.jobId, parent.cluster, Some(element.index))
+          JobRef(parent.jobId, Some(element.index))
         )
       },
       ArrayPlanFailure("array-parent-is-element", "an array parent binding cannot have an index")

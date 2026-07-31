@@ -162,7 +162,6 @@ class AgentSchedulerShapeSuite extends munit.FunSuite:
   private def job: JobRef =
     JobRef(
       JobId.from("4242").toOption.get,
-      Some(ClusterName.from("alpha").toOption.get),
       Some(ArrayIndex.from(7).toOption.get)
     )
 

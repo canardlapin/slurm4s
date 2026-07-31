@@ -41,12 +41,21 @@ object SbatchParsable:
     EvidenceText.decode(stdout.bytes).flatMap { raw =>
       val line = raw.stripSuffix("\n").stripSuffix("\r")
       line.split(";", -1).toVector match
-        case Vector(jobText)                                      => job(jobText, None)
-        case Vector(jobText, clusterText) if clusterText.nonEmpty =>
-          ClusterName.from(clusterText).left.map(validation("invalid-cluster", _)).flatMap {
-            cluster =>
-              job(jobText, Some(cluster))
-          }
+        case Vector(jobText) => job(jobText)
+        // `sbatch --parsable` appends `;cluster` only on a federated submission. Federation is
+        // unsupported for v0.1, and accepting the id while discarding the cluster would produce a
+        // JobRef that silently addresses the wrong cluster on every later query and cancellation.
+        // Refusing is the honest response to a site this version cannot address.
+        case Vector(_, clusterText) if clusterText.nonEmpty =>
+          Left(
+            Diagnostics.one(
+              Diagnostic(
+                "federation-unsupported",
+                "sbatch reported a federated submission; cross-cluster routing is not supported",
+                Map("cluster" -> clusterText.take(255))
+              )
+            )
+          )
         case _ =>
           Left(
             Diagnostics
@@ -54,12 +63,12 @@ object SbatchParsable:
           )
     }
 
-  private def job(raw: String, cluster: Option[ClusterName]): Either[Diagnostics, JobRef] =
+  private def job(raw: String): Either[Diagnostics, JobRef] =
     JobId
       .from(raw)
       .left
       .map(validation("invalid-job-id", _))
-      .map(JobRef(_, cluster, None))
+      .map(JobRef(_, None))
 
   private def validation(code: String, failure: ValidationFailure): Diagnostics =
     Diagnostics.one(Diagnostic(code, failure.reason, Map("field" -> failure.field)))
@@ -136,14 +145,15 @@ object SqueueJsonV0043:
 
               matchedJobs.map { matched =>
                 JobObservation(
-                  job = matched.copy(cluster = reportedCluster.orElse(matched.cluster)),
+                  job = matched,
                   state = parsedState,
                   freshness = Freshness.Current(stdout.observedAt),
                   reason = reason,
                   rawFields = raw,
                   evidence = EvidenceBundle(stdout),
                   timing = timing,
-                  flags = report.flags
+                  flags = report.flags,
+                  reportedCluster = reportedCluster
                 )
               }
             }

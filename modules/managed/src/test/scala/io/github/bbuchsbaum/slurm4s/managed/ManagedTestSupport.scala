@@ -10,7 +10,7 @@ private[managed] object ManagedTestSupport:
   val evidence: EvidenceBundle = EvidenceBundle(
     BoundedEvidence.capture(EvidenceSource.DurableJournal, instant, Vector(1, 2, 3))
   )
-  val job: JobRef = JobRef(JobId.from("7001").toOption.get, None, None)
+  val job: JobRef = JobRef(JobId.from("7001").toOption.get, None)
 
   def request(key: String, body: String = "true"): LaunchSpec =
     LaunchSpec(

@@ -15,7 +15,6 @@ class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
   )
   private val job = JobRef(
     JobId.from("42").fold(problem => fail(problem.toString), identity),
-    None,
     None
   )
   private val request = JobRequest(

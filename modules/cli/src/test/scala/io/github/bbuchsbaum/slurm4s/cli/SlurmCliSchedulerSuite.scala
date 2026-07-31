@@ -250,7 +250,7 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
 
   private def token(value: String): SiteToken = SiteToken.from("test", value).toOption.get
 
-  private def jobRef(id: String): JobRef = JobRef(JobId.from(id).toOption.get, None, None)
+  private def jobRef(id: String): JobRef = JobRef(JobId.from(id).toOption.get, None)
 
   private def bytes(text: String): BoundedEvidence =
     BoundedEvidence.capture(
