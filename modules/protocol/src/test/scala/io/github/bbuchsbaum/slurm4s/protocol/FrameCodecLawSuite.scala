@@ -96,12 +96,15 @@ class FrameCodecLawSuite extends munit.ScalaCheckSuite:
             s"a truncated stream produced ${recovered.size} frames that are not a prefix " +
               s"of the ${values.size} frames it was cut from"
           )
-          // finish must agree with whether the cut landed on a boundary, and the only way it can be
-          // on a boundary is if every frame arrived.
+          // finish must agree with whether the cut landed on a frame boundary. Any boundary counts,
+          // not only the end of the stream: a cut after two whole frames of five is a clean stop.
+          val boundaries = values
+            .scanLeft(0L)((at, value) => at + FrameCodec.HeaderBytes.toLong + value.size)
+            .toSet
           assertEquals(
             decoder.finish.isRight,
-            recovered.size == values.size && truncated.size == stream(values).size,
-            "finish disagreed with whether the stream ended on a frame boundary"
+            boundaries.contains(truncated.size),
+            s"finish disagreed with whether a cut at ${truncated.size} bytes was a frame boundary"
           )
           true
     }
