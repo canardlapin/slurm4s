@@ -4,10 +4,6 @@ import cats.Order
 import cats.Show
 import io.github.bbuchsbaum.remoteexec.kernel.TextIdentifier
 
-private[core] object IdentifierRules:
-  def text(field: String, raw: String, maximumLength: Int): Either[ValidationFailure, String] =
-    TextIdentifier.validate(field, raw, maximumLength)
-
 object JobId extends TextIdentifier("jobId", 200)
 type JobId = JobId.Type
 

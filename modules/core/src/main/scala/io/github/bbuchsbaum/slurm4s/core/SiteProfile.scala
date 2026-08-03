@@ -3,6 +3,7 @@ package io.github.bbuchsbaum.slurm4s.core
 import cats.data.NonEmptyChain
 import cats.data.ValidatedNec
 import cats.syntax.all.*
+import io.github.bbuchsbaum.remoteexec.kernel.TextIdentifier
 
 /** Shared validation for a site-supplied name.
   *
@@ -15,7 +16,7 @@ abstract private[core] class SiteName(field: String):
   opaque type Type = String
 
   def from(raw: String): Either[ValidationFailure, Type] =
-    IdentifierRules.text(field, raw, 255)
+    TextIdentifier.validate(field, raw, 255)
 
   def unsafeFrom(raw: String): Type =
     from(raw).fold(problem => throw new IllegalArgumentException(problem.reason), identity)
@@ -105,7 +106,7 @@ object NativeOption:
 
   def from(name: String, value: String): Either[ValidationFailure, NativeOption] =
     for
-      checkedName <- IdentifierRules.text("nativeOptionName", name, 100)
+      checkedName <- TextIdentifier.validate("nativeOptionName", name, 100)
       _ <- Either.cond(
         Name.matches(checkedName),
         (),
@@ -119,7 +120,7 @@ object NativeOption:
           s"'$checkedName' is rendered by slurm4s and cannot be overridden natively"
         )
       )
-      checkedValue <- IdentifierRules.text("nativeOptionValue", value, 4096)
+      checkedValue <- TextIdentifier.validate("nativeOptionValue", value, 4096)
     yield NativeOption(checkedName, checkedValue)
 
 final case class SiteIntent(

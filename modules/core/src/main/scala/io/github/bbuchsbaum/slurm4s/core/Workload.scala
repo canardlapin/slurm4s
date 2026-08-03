@@ -4,12 +4,13 @@ import cats.Order
 import cats.Show
 import cats.data.NonEmptyVector
 import scodec.bits.ByteVector
+import io.github.bbuchsbaum.remoteexec.kernel.TextIdentifier
 
 object RelativeOutputPath:
   opaque type Type = String
 
   def from(raw: String): Either[ValidationFailure, Type] =
-    IdentifierRules.text("relativeOutputPath", raw, 4096).flatMap { path =>
+    TextIdentifier.validate("relativeOutputPath", raw, 4096).flatMap { path =>
       val segments = path.split('/').toVector
       // "." is rejected alongside ".." so that a/./b and a/b cannot be two distinct values naming
       // one file. Duplicate detection in OutputManifest and DeclaredOutputs compares these values
