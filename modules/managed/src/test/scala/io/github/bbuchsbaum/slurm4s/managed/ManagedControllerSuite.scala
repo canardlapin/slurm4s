@@ -271,6 +271,35 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
     yield ()
   }
 
+  test("a rejected submission record recovers the claim rather than stranding it") {
+    for
+      underlying <- InMemoryControlStore.create[IO]()
+      store = rejectingStore(
+        underlying,
+        {
+          case ControlCommand.RecordSubmission(_, _, _, _) => true
+          case _                                           => false
+        }
+      )
+      calls <- Ref.of[IO, Int](0)
+      controller = ManagedController[IO](store, schedulerWithSubmit(calls, IO.pure(accepted)))
+      key = SubmissionKey.from("record-rejected").toOption.get
+      _ <- controller.submit(request("record-rejected"))
+      dispatched <- controller.dispatchSubmission(key)
+      count <- calls.get
+      snapshot <- underlying.snapshot
+      // sbatch ran, so the claim cannot stay in Submitting: a typed rejection of the record is
+      // still an effect that ended without a persisted result, and the attempt must say so.
+      _ = assertEquals(count, 1)
+      _ = assert(dispatched.isLeft)
+      _ = assert(
+        snapshot.attempts(key).phase.isInstanceOf[ManagedPhase.AcceptanceUnknown],
+        s"expected AcceptanceUnknown, found ${snapshot.attempts(key).phase}"
+      )
+      _ = assert(snapshot.outbox.values.exists(_.status.isInstanceOf[OutboxStatus.Uncertain]))
+    yield ()
+  }
+
   test("cancellation after a cancellation claim recovers before invoking scancel") {
     for
       underlying <- InMemoryControlStore.create[IO]()
@@ -517,6 +546,30 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
       _ <- cancellation.join
       outcome <- fiber.join
     yield outcome
+
+  /** Fails a matched command with a typed rejection rather than an effect failure. */
+  private def rejectingStore(
+      underlying: ControlStore[IO],
+      matches: ControlCommand => Boolean
+  ): ControlStore[IO] = new ControlStore[IO]:
+    def transact(command: ControlCommand): IO[Either[ControlFailure, ControlCommit]] =
+      if !matches(command) then underlying.transact(command)
+      else
+        IO.pure(
+          Left(ControlFailure.JournalCorrupt("record rejected by a store fault injection"))
+        )
+
+    def snapshot: IO[ControlState] = underlying.snapshot
+    def attempt(submissionKey: SubmissionKey): IO[Option[ManagedAttempt]] =
+      underlying.attempt(submissionKey)
+    def events(after: EventCursor, maximum: Int): IO[EventPage] =
+      underlying.events(after, maximum)
+    def pendingOutbox(maximum: Int): IO[Vector[OutboxEntry]] =
+      underlying.pendingOutbox(maximum)
+    def nonTerminal(maximum: Int): IO[Vector[ManagedAttempt]] =
+      underlying.nonTerminal(maximum)
+    def bound(maximum: Int): IO[Vector[ManagedAttempt]] =
+      underlying.bound(maximum)
 
   private def pausingStore(
       underlying: ControlStore[IO],

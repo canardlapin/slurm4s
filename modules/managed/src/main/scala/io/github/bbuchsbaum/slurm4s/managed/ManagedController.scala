@@ -313,10 +313,18 @@ final class ManagedController[F[_]: Async](
               .map(commitAttempt)
           }
         }
-        operation.guaranteeCase {
-          case Outcome.Succeeded(_) => Async[F].unit
-          case _                    => recoverSubmissionClaim(attempt)
-        }
+        operation
+          .guaranteeCase {
+            case Outcome.Succeeded(_) => Async[F].unit
+            case _                    => recoverSubmissionClaim(attempt)
+          }
+          // A typed rejection is also an effect that ended without a persisted result: `sbatch` may
+          // already have run, so the claim must not stay in `Submitting`. The guarantee above sees
+          // `Succeeded` for a `Left` and has already completed here, so no path recovers twice.
+          .flatTap {
+            case Left(_)  => recoverSubmissionClaim(attempt)
+            case Right(_) => Async[F].unit
+          }
 
   private def invokeCancellation(
       submissionKey: SubmissionKey,
@@ -330,14 +338,21 @@ final class ManagedController[F[_]: Async](
           .map(commitAttempt)
       }
     }
-    operation.guaranteeCase {
-      case Outcome.Succeeded(_) => Async[F].unit
-      case _                    =>
-        recoverCancellationClaim(
-          submissionKey,
-          "cancellation effect ended without a persisted result"
-        )
-    }
+    val recover = recoverCancellationClaim(
+      submissionKey,
+      "cancellation effect ended without a persisted result"
+    )
+    operation
+      .guaranteeCase {
+        case Outcome.Succeeded(_) => Async[F].unit
+        case _                    => recover
+      }
+      // As on the submission path, a typed rejection leaves `scancel` possibly already run with
+      // nothing persisted, so the claim must not stay in `Cancelling`.
+      .flatTap {
+        case Left(_)  => recover
+        case Right(_) => Async[F].unit
+      }
 
   private def recoverSubmissionClaim(attempt: ManagedAttempt): F[Unit] =
     Clock[F].realTimeInstant.flatMap { now =>
