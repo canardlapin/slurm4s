@@ -10,6 +10,10 @@ and controller-safe coalesced observation.
 [PRD.html](PRD.html) is the normative product specification; the source modules and executable
 tests are the implementation authority.
 
+> **Maturity:** `0.1-development` / pre-release. The foundation and local
+> vertical are usable for development, but scheduler, remote-site, and release
+> evidence remain package-specific; APIs may change.
+
 ## Initial modules
 
 | Module | Boundary |
