@@ -36,6 +36,22 @@ class StructuredResultCodecSuite extends munit.FunSuite:
     )
   }
 
+  test("a legacy cluster field cannot fail a job reference it no longer belongs to") {
+    // `JobRef` deliberately dropped cluster identity, so the decoder discards any `cluster` it
+    // finds. Validating a discarded value only turns a readable durable record into an
+    // unreadable one, and this is the compatibility path where that costs the most.
+    val legacy = io.circe.Json.obj(
+      "jobId" -> io.circe.Json.fromString("4242"),
+      "arrayIndex" -> io.circe.Json.Null,
+      "cluster" -> io.circe.Json.fromString("not a valid cluster name!")
+    )
+
+    assertEquals(
+      StructuredJson.decodeJob(legacy).map(_.jobId.value),
+      Right("4242")
+    )
+  }
+
   test("worker progress events round trip with identity and release") {
     val event = WorkerEvent(
       sequence = 7L,

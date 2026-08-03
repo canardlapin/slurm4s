@@ -519,10 +519,9 @@ private[protocol] object StructuredJson:
     for
       cursor <- objectCursor(json, "job")
       id <- identifier(cursor, "jobId", JobId.from)
-      clusterText <- optionalField[String](cursor, "cluster")
-      cluster <- clusterText.traverse(raw =>
-        ClusterName.from(raw).left.map(problem => invalid(problem.reason))
-      )
+      // A legacy record may still carry `cluster`. `JobRef` no longer models it, so it is ignored
+      // outright: validating a value this decoder discards can only reject a record it would
+      // otherwise read correctly.
       indexValue <- optionalField[Int](cursor, "arrayIndex")
       index <- indexValue.traverse(raw =>
         ArrayIndex.from(raw).left.map(problem => invalid(problem.reason))

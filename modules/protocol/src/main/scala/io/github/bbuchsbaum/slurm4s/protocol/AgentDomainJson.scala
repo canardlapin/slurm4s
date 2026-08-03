@@ -1639,8 +1639,8 @@ object AgentDomainJson:
       cursor <- objectCursor(json, "remote job reference")
       jobText <- field[String](cursor, "jobId")
       jobId <- JobId.from(jobText).left.map(_.reason)
-      clusterText <- field[Option[String]](cursor, "cluster")
-      cluster <- clusterText.traverse(raw => ClusterName.from(raw).left.map(_.reason))
+      // As in `StructuredJson.decodeJob`, a legacy `cluster` is ignored rather than validated:
+      // `JobRef` dropped cluster identity, so this decoder must not fail on a field it discards.
       arrayRaw <- field[Option[Int]](cursor, "arrayIndex")
       arrayIndex <- arrayRaw.traverse(raw => ArrayIndex.from(raw).left.map(_.reason))
     yield JobRef(jobId, arrayIndex)
