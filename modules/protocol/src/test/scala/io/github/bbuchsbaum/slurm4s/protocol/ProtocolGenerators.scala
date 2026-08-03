@@ -299,6 +299,147 @@ object ProtocolGenerators:
       Gen.zip(diagnostics, instant).map(LogReadResult.Failed.apply)
     )
 
+  // --- The persisted codecs: a dropped field here is data loss on disk, not just on the wire. ---
+
+  val contentDigest: Gen[ContentDigest] =
+    Gen
+      .listOfN(64, Gen.oneOf("0123456789abcdef".toVector))
+      .map(hex => ContentDigest.unsafeFrom(s"sha256:${hex.mkString}"))
+
+  val submissionKey: Gen[SubmissionKey] =
+    Gen.oneOf("key-1", "key-2", "submission-abc").map(SubmissionKey.unsafeFrom)
+
+  val attemptId: Gen[AttemptId] =
+    Gen.oneOf("attempt-1", "attempt-2", "attempt-abc").map(AttemptId.unsafeFrom)
+
+  val attemptEpoch: Gen[AttemptEpoch] = Gen.choose(1L, 64L).map(AttemptEpoch.unsafeFrom)
+
+  val resultSchemaId: Gen[ResultSchemaId] =
+    Gen.oneOf("schema.a", "schema.b", "slurm4s.test").map(ResultSchemaId.unsafeFrom)
+
+  val workerRelease: Gen[WorkerRelease] =
+    for
+      id <- Gen.oneOf("release-1", "release-2").map(WorkerReleaseId.unsafeFrom)
+      digest <- contentDigest
+    yield WorkerRelease(id, digest)
+
+  val workloadOperation: Gen[WorkloadOperation] =
+    Gen.oneOf(
+      contentDigest.map(WorkloadOperation.Script.apply),
+      Gen
+        .zip(
+          Gen.oneOf("op.alpha", "op.beta").map(OperationId.unsafeFrom),
+          Gen.choose(1L, 9L).map(value => OperationVersion.unsafeFrom(value.toString))
+        )
+        .map(WorkloadOperation.Registered.apply)
+    )
+
+  val registeredOperation: Gen[RegisteredOperation] =
+    for
+      id <- Gen.oneOf("op.alpha", "op.beta").map(OperationId.unsafeFrom)
+      version <- Gen.choose(1L, 9L).map(value => OperationVersion.unsafeFrom(value.toString))
+      inputSchema <- Gen.oneOf("in.a", "in.b").map(SchemaId.unsafeFrom)
+      outputSchema <- resultSchemaId
+    yield RegisteredOperation(id, version, inputSchema, outputSchema)
+
+  /** No whitespace: RelativeOutputPath rejects it, so a generator emitting it would fail
+    * construction rather than exercise a codec. Non-ASCII is included because it must survive.
+    */
+  val relativeOutputPath: Gen[RelativeOutputPath] =
+    Gen
+      .oneOf("out.txt", "nested/result.json", "deep/a/b.bin", "\u00e9t\u00e9.txt")
+      .map(RelativeOutputPath.unsafeFrom)
+
+  /** Distinct paths: the manifest and the handle both reject duplicates, so a generator producing
+    * them would fail construction rather than test a codec.
+    */
+  private val distinctOutputPaths: Gen[Vector[RelativeOutputPath]] =
+    Gen.choose(0, 3).flatMap(Gen.listOfN(_, relativeOutputPath)).map(_.distinct.toVector)
+
+  val outputEntry: Gen[OutputEntry] =
+    for
+      path <- relativeOutputPath
+      size <- Gen.choose(0L, 1_000_000L)
+      digest <- contentDigest
+    yield OutputEntry.from(path, size, digest).toOption.get
+
+  val outputManifest: Gen[OutputManifest] =
+    Gen
+      .choose(0, 3)
+      .flatMap(Gen.listOfN(_, outputEntry))
+      .map { entries =>
+        OutputManifest.from(entries.toVector.distinctBy(_.path)).toOption.get
+      }
+
+  val resultEnvelopeStatus: Gen[ResultEnvelopeStatus] =
+    Gen.oneOf(
+      Gen.const(ResultEnvelopeStatus.Succeeded),
+      Gen
+        .zip(Gen.oneOf("failed", "invalid-result"), Gen.oneOf("boom", "bad input"))
+        .map(ResultEnvelopeStatus.Failed.apply)
+    )
+
+  val retrySafety: Gen[RetrySafety] =
+    Gen.oneOf(
+      RetrySafety.Unknown,
+      RetrySafety.NoAutomaticRetry,
+      RetrySafety.SafeForAutomaticRetry
+    )
+
+  /** Built through the public factories, so `status` and `value` stay in the pairing the type
+    * actually admits: a success carries a value, a failure carries a code and message and no value.
+    * Generating those two fields independently would produce combinations no encoder can ever see.
+    */
+  val resultEnvelope: Gen[ResultEnvelope] =
+    for
+      key <- submissionKey
+      attempt <- attemptId
+      epoch <- attemptEpoch
+      job <- Gen.option(jobRef)
+      operation <- workloadOperation
+      schema <- resultSchemaId
+      status <- resultEnvelopeStatus
+      value <- Generators.evidenceBytes
+      outputs <- outputManifest
+      release <- workerRelease
+      at <- instant
+    yield status match
+      case ResultEnvelopeStatus.Succeeded =>
+        ResultEnvelope
+          .succeeded(key, attempt, epoch, job, operation, schema, value, outputs, release, at)
+      case ResultEnvelopeStatus.Failed(code, message) =>
+        ResultEnvelope
+          .failed(key, attempt, epoch, job, operation, schema, code, message, outputs, release, at)
+
+  /** `retrySafety` has a default on `from`, so it is generated explicitly. */
+  val durableResultHandle: Gen[DurableResultHandle] =
+    for
+      key <- submissionKey
+      attempt <- attemptId
+      epoch <- attemptEpoch
+      job <- Gen.option(jobRef)
+      operation <- workloadOperation
+      schema <- resultSchemaId
+      outputs <- distinctOutputPaths
+      release <- workerRelease
+      safety <- retrySafety
+    yield DurableResultHandle
+      .from(
+        key,
+        attempt,
+        epoch,
+        job,
+        operation,
+        schema,
+        ByteLimit.defaultEvidence,
+        ByteLimit.maximumCommandCapture,
+        outputs,
+        release,
+        safety
+      )
+      .toOption
+      .get
+
   private def nonEmpty[A](value: Gen[A]): Gen[NonEmptyVector[A]] =
     for
       head <- value

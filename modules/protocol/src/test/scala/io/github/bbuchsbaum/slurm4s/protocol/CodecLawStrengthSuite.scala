@@ -80,6 +80,36 @@ class CodecLawStrengthSuite extends munit.FunSuite:
     detects[Diagnostic]("Diagnostic.fields", diagnostic, _.copy(fields = Map.empty))
   }
 
+  /** `retrySafety` defaults on `DurableResultHandle.from`, which is the same shape of hazard as
+    * reportedCluster: a persisted codec could omit it and still construct a valid handle.
+    *
+    * These types have private constructors, so the collapse rebuilds through the public factory
+    * rather than copying — which is also how a decoder would have to build them, and therefore how
+    * a decoder would drop the field.
+    */
+  test("the handle law would catch a persisted codec that drops retrySafety") {
+    detects[DurableResultHandle](
+      "DurableResultHandle.retrySafety",
+      durableResultHandle,
+      handle =>
+        DurableResultHandle
+          .from(
+            handle.submissionKey,
+            handle.attemptId,
+            handle.attemptEpoch,
+            handle.job,
+            handle.operation,
+            handle.resultSchema,
+            handle.maximumResultBytes,
+            handle.maximumEnvelopeBytes,
+            handle.declaredOutputs,
+            handle.workerRelease
+          )
+          .toOption
+          .get
+    )
+  }
+
   test("evidence bytes set the high bit, so a codec that assumes text cannot pass by luck") {
     val samples = Vector.fill(Samples)(Generators.evidenceBytes.sample).flatten
     assert(

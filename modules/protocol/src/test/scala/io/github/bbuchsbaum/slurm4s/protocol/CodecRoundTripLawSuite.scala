@@ -102,6 +102,33 @@ class CodecRoundTripLawSuite extends munit.ScalaCheckSuite:
     }
   }
 
+  /** The persisted codecs. A field dropped here is data lost on disk rather than on a wire that can
+    * be retried, and the journal is what a controller replays after a crash.
+    */
+  property("a result envelope round-trips through its persisted encoding") {
+    forAll(resultEnvelope) { value =>
+      val encoded = ResultEnvelopeCodec
+        .encode(value, ByteLimit.maximumCommandCapture, ByteLimit.maximumCommandCapture)
+      assertEquals(
+        encoded.flatMap(
+          ResultEnvelopeCodec
+            .decode(_, ByteLimit.maximumCommandCapture, ByteLimit.maximumCommandCapture)
+        ),
+        Right(value)
+      )
+    }
+  }
+
+  property("a durable result handle round-trips, including its retry-safety field") {
+    forAll(durableResultHandle) { value =>
+      val encoded = DurableResultHandleCodec.encode(value, ByteLimit.maximumCommandCapture)
+      assertEquals(
+        encoded.flatMap(DurableResultHandleCodec.decode(_, ByteLimit.maximumCommandCapture)),
+        Right(value)
+      )
+    }
+  }
+
   property("a log request round-trips its reference, cursor and limit") {
     forAll(Gen.zip(logRef, logCursor, Gen.choose(1, 1 << 20))) { (ref, cursor, limit) =>
       val bound = ByteLimit.from(limit).toOption.get
