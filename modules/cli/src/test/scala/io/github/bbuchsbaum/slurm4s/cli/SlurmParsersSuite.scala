@@ -186,6 +186,30 @@ class SlurmParsersSuite extends munit.FunSuite:
     )
   }
 
+  test("every documented Slurm duration shape parses to a limit") {
+    // `squeue` renders a sub-hour limit as MM:SS, so a 30-minute job reports "30:00". The
+    // day-hour forms are the remaining documented shapes. Each previously fell through to
+    // Unknown, which an operator reads as "the site did not report a limit".
+    val cases = Vector(
+      "30:00" -> 30L, // MM:SS
+      "5:00" -> 5L, // MM:SS, single-digit minutes
+      "0:30" -> 1L, // MM:SS, rounded up as elsewhere
+      "2-12" -> 3600L, // D-HH
+      "2-12:30" -> 3630L, // D-HH:MM
+      "1-00:00:00" -> 1440L, // D-HH:MM:SS, already supported
+      "01:30:00" -> 90L, // HH:MM:SS, already supported
+      "45" -> 45L // bare minutes, already supported
+    )
+
+    cases.foreach { case (text, expected) =>
+      assertEquals(
+        ScontrolOneliner.timing(Map("JobState" -> "RUNNING", "TimeLimit" -> text)).timeLimit,
+        ObservedTimeLimit.Limited(WallTimeMinutes.from(expected).toOption.get),
+        s"TimeLimit=$text should parse to $expected minutes"
+      )
+    }
+  }
+
   test("strict accounting fallback distinguishes OOM from ordinary non-zero exit") {
     val expected = NonEmptyVector.one(JobRef(JobId.from("1001").toOption.get, None))
     val oom = SacctParsable2.parse(evidence("1001|OUT_OF_MEMORY|0:9|OutOfMemory\n"), expected)

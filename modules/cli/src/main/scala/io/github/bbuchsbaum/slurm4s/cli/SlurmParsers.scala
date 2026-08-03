@@ -598,7 +598,10 @@ object SlurmStateParser:
 private[cli] object SlurmTiming:
   private val MissingText = Set("", "NONE", "N/A", "NA", "UNKNOWN", "(NULL)", "NULL")
   private val DayTime = "([0-9]+)-([0-9]+):([0-9]{2}):([0-9]{2})".r
+  private val DayHourMinute = "([0-9]+)-([0-9]+):([0-9]{2})".r
+  private val DayHour = "([0-9]+)-([0-9]+)".r
   private val ClockTime = "([0-9]+):([0-9]{2}):([0-9]{2})".r
+  private val MinuteSecond = "([0-9]+):([0-9]{2})".r
 
   def fromJson(fields: JsonObject, state: SlurmState): JobTiming =
     JobTiming(
@@ -707,11 +710,20 @@ private[cli] object SlurmTiming:
       case missing if MissingText.contains(missing) =>
         ObservedTimeLimit.Unknown(Option(normalized).filter(_.nonEmpty))
       case _ =>
+        // Slurm's documented duration shapes, longest first. `MM:SS` is not a corner case: it is
+        // what `squeue` prints for every limit under an hour, so omitting it reported a routine
+        // 30-minute limit as if the site had disclosed nothing.
         val totalMinutes = normalized match
           case DayTime(days, hours, minutes, seconds) =>
             durationMinutes(days, hours, minutes, seconds)
+          case DayHourMinute(days, hours, minutes) =>
+            durationMinutes(days, hours, minutes, "0")
+          case DayHour(days, hours) =>
+            durationMinutes(days, hours, "0", "0")
           case ClockTime(hours, minutes, seconds) =>
             durationMinutes("0", hours, minutes, seconds)
+          case MinuteSecond(minutes, seconds) =>
+            durationMinutes("0", "0", minutes, seconds)
           case value => value.toLongOption.filter(_ > 0L)
         totalMinutes.fold[ObservedTimeLimit](
           ObservedTimeLimit.Unknown(Some(normalized.take(512)))
