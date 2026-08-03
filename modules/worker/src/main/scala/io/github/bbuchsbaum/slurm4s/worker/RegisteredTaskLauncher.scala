@@ -938,12 +938,15 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       s"worker-${sha256(ByteVector.view(identity.getBytes(StandardCharsets.UTF_8))).take(32)}"
     )
 
-  private def launchScriptBytes(
-      invocation: Path,
-      result: Path,
-      events: Path
-  ): ByteVector =
-    val command = Vector(
+  /** The worker `run` invocation for one task, quoted for `sh`.
+    *
+    * One definition because it is one contract with the worker's own `run` subcommand: the
+    * single-task script, the local array script and the remote array script must name the same
+    * three paths under the same flags, or a task the worker can run under one launch path fails
+    * under another.
+    */
+  private def runCommand(invocation: Path, result: Path, events: Path): String =
+    Vector(
       settings.executable.toAbsolutePath.normalize().toString,
       "run",
       "--invocation",
@@ -953,39 +956,32 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       "--events",
       events.toString
     ).map(shellQuote).mkString(" ")
+
+  /** The same invocation with its logs redirected beside the invocation, for an array element. */
+  private def elementCommand(invocation: Path, result: Path, events: Path): String =
+    val directory = invocation.getParent
+    val stdout = shellQuote(directory.resolve("stdout.log").toString)
+    val stderr = shellQuote(directory.resolve("stderr.log").toString)
+    s"${runCommand(invocation, result, events)} >$stdout 2>$stderr"
+
+  private def launchScriptBytes(
+      invocation: Path,
+      result: Path,
+      events: Path
+  ): ByteVector =
+    val command = runCommand(invocation, result, events)
     ByteVector.view(s"#!/bin/sh\nexec $command\n".getBytes(StandardCharsets.UTF_8))
 
   private def arrayLaunchScriptBytes[O](
       elements: Vector[(PreparedRegisteredSubmission[O], RegisteredTaskArrayElement[?])]
   ): ByteVector =
-    val cases = elements
-      .map { case (prepared, element) =>
-        val directory = prepared.invocationPath.getParent
-        val command = Vector(
-          settings.executable.toAbsolutePath.normalize().toString,
-          "run",
-          "--invocation",
-          prepared.invocationPath.toString,
-          "--result",
-          prepared.resultPath.toString,
-          "--events",
-          prepared.eventPath.toString
-        ).map(shellQuote).mkString(" ")
-        val stdout = shellQuote(directory.resolve("stdout.log").toString)
-        val stderr = shellQuote(directory.resolve("stderr.log").toString)
-        s"  '${element.index.value}') exec $command >$stdout 2>$stderr ;;"
-      }
-      .mkString("\n")
-    val script =
-      s"""#!/bin/sh
-         |umask 077
-         |set -eu
-         |case "${'$'}{SLURM_ARRAY_TASK_ID-}" in
-         |$cases
-         |  *) exit 64 ;;
-         |esac
-         |""".stripMargin
-    ByteVector.view(script.getBytes(StandardCharsets.UTF_8))
+    arrayDispatchScript(elements.map { case (prepared, element) =>
+      element.index -> elementCommand(
+        prepared.invocationPath,
+        prepared.resultPath,
+        prepared.eventPath
+      )
+    })
 
   private def writeRemoteBatchScripts(
       directory: Path,
@@ -1141,20 +1137,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         yield ()
 
   private def remoteElementCommand(element: PreparedRemoteRegisteredSubmission): String =
-    val command = Vector(
-      settings.executable.toAbsolutePath.normalize().toString,
-      "run",
-      "--invocation",
-      element.invocationPath.toString,
-      "--result",
-      element.resultPath.toString,
-      "--events",
-      element.eventPath.toString
-    ).map(shellQuote).mkString(" ")
-    val directory = element.invocationPath.getParent
-    val stdout = shellQuote(directory.resolve("stdout.log").toString)
-    val stderr = shellQuote(directory.resolve("stderr.log").toString)
-    s"$command >$stdout 2>$stderr"
+    elementCommand(element.invocationPath, element.resultPath, element.eventPath)
 
   private def arrayDispatchScript(branches: Vector[(ArrayIndex, String)]): ByteVector =
     val cases = branches
