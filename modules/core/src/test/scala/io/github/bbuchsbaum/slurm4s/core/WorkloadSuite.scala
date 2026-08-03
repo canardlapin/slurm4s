@@ -1,9 +1,11 @@
 package io.github.bbuchsbaum.slurm4s.core
 
+import scodec.bits.ByteVector
+
 class WorkloadSuite extends munit.FunSuite:
   test("opaque scripts make exit-only meaning explicit") {
     val payload = Payload.Script(
-      source = ScriptSource.Inline("analysis.R", "quit(status = 0)".getBytes.toVector),
+      source = ScriptSource.Inline("analysis.R", ByteVector.view("quit(status = 0)".getBytes)),
       arguments = Vector("--vanilla"),
       resultContract = ResultContract.ExitOnly
     )
@@ -23,8 +25,8 @@ class WorkloadSuite extends munit.FunSuite:
 
     val codec = new ResultCodec[String]:
       val schemaId: ResultSchemaId = ResultSchemaId.from("example.text.v1").toOption.get
-      def encode(_value: String): Either[ResultCodecFailure, Vector[Byte]] = Right(Vector.empty)
-      def decode(_bytes: Vector[Byte]): Either[ResultCodecFailure, String] = Right("")
+      def encode(_value: String): Either[ResultCodecFailure, ByteVector] = Right(ByteVector.empty)
+      def decode(_bytes: ByteVector): Either[ResultCodecFailure, String] = Right("")
     assert(ResultContract.Structured.from(codec, limit, Vector(output, output)).isLeft)
   }
 

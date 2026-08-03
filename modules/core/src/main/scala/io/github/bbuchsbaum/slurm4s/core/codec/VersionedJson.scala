@@ -7,7 +7,8 @@ import io.circe.parser
 import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
 import io.github.bbuchsbaum.slurm4s.core.SchemaId
 
-import java.nio.ByteBuffer
+import scodec.bits.ByteVector
+
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
@@ -54,7 +55,7 @@ object VersionedJson:
   val supportedMajor: Int = 1
   private val canonicalPrinter = Printer.noSpaces.copy(dropNullValues = false, sortKeys = true)
 
-  def encode(envelope: WireEnvelope): Vector[Byte] =
+  def encode(envelope: WireEnvelope): ByteVector =
     val protocol = Json.obj(
       "major" -> Json.fromInt(envelope.protocol.major),
       "minor" -> Json.fromInt(envelope.protocol.minor)
@@ -68,9 +69,9 @@ object VersionedJson:
       case (fields, (name, value)) => fields.add(name, value)
     }
     val canonical = canonicalPrinter.print(Json.fromJsonObject(withExtensions)) + "\n"
-    canonical.getBytes(StandardCharsets.UTF_8).toVector
+    ByteVector.view(canonical.getBytes(StandardCharsets.UTF_8))
 
-  def decode(bytes: Vector[Byte]): Either[CodecFailure, WireEnvelope] =
+  def decode(bytes: ByteVector): Either[CodecFailure, WireEnvelope] =
     for
       text <- decodeUtf8(bytes)
       json <- parser.parse(text).left.map(error => CodecFailure.InvalidJson(error.message))
@@ -119,10 +120,10 @@ object VersionedJson:
       )
     )
 
-  private def decodeUtf8(bytes: Vector[Byte]): Either[CodecFailure, String] =
+  private def decodeUtf8(bytes: ByteVector): Either[CodecFailure, String] =
     val decoder = StandardCharsets.UTF_8
       .newDecoder()
       .onMalformedInput(CodingErrorAction.REPORT)
       .onUnmappableCharacter(CodingErrorAction.REPORT)
-    try Right(decoder.decode(ByteBuffer.wrap(bytes.toArray)).toString)
+    try Right(decoder.decode(bytes.toByteBuffer).toString)
     catch case error: CharacterCodingException => Left(CodecFailure.InvalidUtf8(error.getMessage))

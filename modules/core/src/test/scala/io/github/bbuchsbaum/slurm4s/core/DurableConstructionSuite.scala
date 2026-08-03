@@ -1,6 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.core
 
 import io.github.bbuchsbaum.remoteexec.kernel.ContentDigest
+import scodec.bits.ByteVector
 
 /** P8.A5b: the durable descriptions of an attempt are constructible only in valid states.
   *
@@ -50,7 +51,7 @@ class DurableConstructionSuite extends munit.FunSuite:
     )
 
   private def invocation(
-      input: Vector[Byte],
+      input: ByteVector,
       maximumInput: Int
   ): Either[ValidationFailure, TaskInvocation] =
     TaskInvocation.from(
@@ -80,8 +81,8 @@ class DurableConstructionSuite extends munit.FunSuite:
   }
 
   test("an invocation cannot carry more input than the bound it declares") {
-    assert(invocation(Vector.fill(64)(1.toByte), 32).isLeft)
-    assert(invocation(Vector.fill(32)(1.toByte), 32).isRight)
+    assert(invocation(ByteVector.fill(64L)(1.toByte), 32).isLeft)
+    assert(invocation(ByteVector.fill(32L)(1.toByte), 32).isRight)
   }
 
   test("binding a handle to its job is the only mutation it admits") {

@@ -4,6 +4,8 @@ import io.github.bbuchsbaum.remoteexec.kernel.ContentDigest
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 /** P8.B2 law family 4: result authority.
@@ -28,8 +30,8 @@ class ResultAuthorityLawSuite extends munit.ScalaCheckSuite:
       OperationVersion.unsafeFrom("1")
     )
 
-  private val bytes: Gen[Vector[Byte]] =
-    Gen.listOf(Gen.choose(Byte.MinValue, Byte.MaxValue)).map(_.toVector)
+  private val bytes: Gen[ByteVector] =
+    Gen.listOf(Gen.choose(Byte.MinValue, Byte.MaxValue)).map(v => ByteVector(v*))
 
   private val failureCode: Gen[String] = Gen.oneOf("outputs", "codec", "worker", "timeout")
 

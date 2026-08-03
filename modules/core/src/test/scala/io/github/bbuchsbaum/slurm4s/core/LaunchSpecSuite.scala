@@ -1,5 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.core
 
+import scodec.bits.ByteVector
+
 /** P8.D1: lowering refuses what it cannot carry instead of quietly rewriting it.
   *
   * The SSH adapter used to accept any `JobRequest[A]`, replace its result contract with `ExitOnly`,
@@ -64,7 +66,7 @@ class LaunchSpecSuite extends munit.FunSuite:
 
   private val intCodec: InputCodec[Int] = new InputCodec[Int]:
     def schemaId: SchemaId = SchemaId.unsafeFrom("example.in.v1")
-    def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-      Right(value.toString.getBytes("UTF-8").toVector)
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+    def encode(value: Int): Either[ResultCodecFailure, ByteVector] =
+      Right(ByteVector.view(value.toString.getBytes("UTF-8")))
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] =
       Right(new String(bytes.toArray, "UTF-8").toInt)

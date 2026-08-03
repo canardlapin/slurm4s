@@ -3,6 +3,8 @@ package io.github.bbuchsbaum.slurm4s.core
 import org.scalacheck.Arbitrary
 import org.scalacheck.Gen
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 /** P8.B2: the shared generator surface.
@@ -74,7 +76,7 @@ object Generators:
   val evidenceBundle: Gen[EvidenceBundle] =
     for
       at <- instant
-      bytes <- Gen.listOf(Gen.choose(Byte.MinValue, Byte.MaxValue)).map(_.toVector)
+      bytes <- Gen.listOf(Gen.choose(Byte.MinValue, Byte.MaxValue)).map(v => ByteVector(v*))
     yield EvidenceBundle(BoundedEvidence.capture(EvidenceSource.DurableJournal, at, bytes))
 
   val acceptanceUncertainty: Gen[AcceptanceUncertainty] =

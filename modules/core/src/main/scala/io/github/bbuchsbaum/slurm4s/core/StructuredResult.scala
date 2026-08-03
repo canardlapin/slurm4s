@@ -2,6 +2,8 @@ package io.github.bbuchsbaum.slurm4s.core
 
 import cats.data.NonEmptyVector
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 enum WorkloadOperation derives CanEqual:
@@ -20,7 +22,7 @@ final case class ResultEnvelope private (
     operation: WorkloadOperation,
     resultSchema: ResultSchemaId,
     status: ResultEnvelopeStatus,
-    value: Option[Vector[Byte]],
+    value: Option[ByteVector],
     outputs: OutputManifest,
     workerRelease: WorkerRelease,
     completedAt: Instant
@@ -122,7 +124,7 @@ final case class TaskInvocation private (
     attemptEpoch: AttemptEpoch,
     job: Option[JobRef],
     operation: RegisteredOperation,
-    inputBytes: Vector[Byte],
+    inputBytes: ByteVector,
     declaredOutputs: Vector[RelativeOutputPath],
     maximumInputBytes: ByteLimit,
     maximumResultBytes: ByteLimit,
@@ -212,7 +214,7 @@ object TaskInvocation:
       attemptEpoch: AttemptEpoch,
       job: Option[JobRef],
       operation: RegisteredOperation,
-      inputBytes: Vector[Byte],
+      inputBytes: ByteVector,
       declaredOutputs: Vector[RelativeOutputPath],
       maximumInputBytes: ByteLimit,
       maximumResultBytes: ByteLimit,
@@ -255,7 +257,7 @@ object ResultEnvelope:
       job: Option[JobRef],
       operation: WorkloadOperation,
       resultSchema: ResultSchemaId,
-      value: Vector[Byte],
+      value: ByteVector,
       outputs: OutputManifest,
       workerRelease: WorkerRelease,
       completedAt: Instant
@@ -309,7 +311,7 @@ object ResultEnvelope:
       operation: WorkloadOperation,
       resultSchema: ResultSchemaId,
       status: ResultEnvelopeStatus,
-      value: Option[Vector[Byte]],
+      value: Option[ByteVector],
       outputs: OutputManifest,
       workerRelease: WorkerRelease,
       completedAt: Instant

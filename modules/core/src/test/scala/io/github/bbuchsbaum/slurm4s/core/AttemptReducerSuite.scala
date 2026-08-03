@@ -1,5 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.core
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 import java.nio.charset.StandardCharsets
 
@@ -11,7 +13,7 @@ class AttemptReducerSuite extends munit.FunSuite:
     BoundedEvidence.capture(
       EvidenceSource.CommandStdout("sbatch"),
       Instant.EPOCH,
-      "9876\n".getBytes(StandardCharsets.UTF_8).toVector
+      ByteVector.view("9876\n".getBytes(StandardCharsets.UTF_8))
     )
   )
 

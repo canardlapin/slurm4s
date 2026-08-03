@@ -3,6 +3,7 @@ package io.github.bbuchsbaum.slurm4s.core
 import cats.Order
 import cats.Show
 import cats.data.NonEmptyVector
+import scodec.bits.ByteVector
 
 object RelativeOutputPath:
   opaque type Type = String
@@ -35,7 +36,7 @@ object RelativeOutputPath:
 type RelativeOutputPath = RelativeOutputPath.Type
 
 enum ScriptSource derives CanEqual:
-  case Inline(name: String, bytes: Vector[Byte])
+  case Inline(name: String, bytes: ByteVector)
   case StagedLocal(path: String)
   case ExistingRemote(path: String)
 

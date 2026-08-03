@@ -1,12 +1,14 @@
 package io.github.bbuchsbaum.slurm4s.core
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 
 class FailureDiagnosisSuite extends munit.FunSuite:
   private val observedAt = Instant.parse("2026-07-22T12:00:00Z")
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.SchedulerText("test"), observedAt, Vector(1, 2, 3))
+    BoundedEvidence.capture(EvidenceSource.SchedulerText("test"), observedAt, ByteVector(1, 2, 3))
   )
   private val attempt =
     AttemptId.from("diagnosis-attempt").fold(problem => fail(problem.toString), identity)
@@ -192,7 +194,8 @@ class FailureDiagnosisSuite extends munit.FunSuite:
   }
 
   test("log recognition rejects an incoherent page cursor without throwing") {
-    val bytes = "Traceback (most recent call last)".getBytes(StandardCharsets.UTF_8).toVector
+    val bytes =
+      ByteVector.view("Traceback (most recent call last)".getBytes(StandardCharsets.UTF_8))
     val invalidPage = LogPage(
       bytes,
       LogCursor(LogOffset.from(1L).fold(problem => fail(problem.toString), identity), None),
@@ -244,7 +247,7 @@ class FailureDiagnosisSuite extends munit.FunSuite:
       start: Long,
       maximumExcerptBytes: Int = 32
   ): Vector[LogHint] =
-    val bytes = text.getBytes(StandardCharsets.UTF_8).toVector
+    val bytes = ByteVector.view(text.getBytes(StandardCharsets.UTF_8))
     val next = LogOffset
       .from(start + bytes.size.toLong)
       .fold(problem => fail(problem.toString), identity)
