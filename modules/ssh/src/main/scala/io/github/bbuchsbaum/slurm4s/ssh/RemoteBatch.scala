@@ -566,7 +566,7 @@ final class RemoteScriptBatchElementHandle[F[_]: Async, I] private[ssh] (
     job match
       case None        => AccountingProbe.Inconclusive.pure[F]
       case Some(value) =>
-        remote.accounting(NonEmptyVector.one(value)).map {
+        budget.use(remote.accounting(NonEmptyVector.one(value))).map {
           case AgentCall.Failed(failure) =>
             AccountingProbe.Unavailable(RemoteScriptExecutionResult.AgentUnavailable(failure))
           case AgentCall.Succeeded(result @ SchedulerQueryResult.InvocationFailed(_)) =>
