@@ -3,13 +3,21 @@
 ## Scala and JVM
 
 The minimum supported runtime is JDK 17. Published artifacts are compiled and tested with Scala
-3.7.4. That final 3.7 patch is the sole supported compiler baseline for v1; moving to a different
-minor line requires an explicit compatibility decision and full gate. Compiler, Cats, Cats
-Effect, FS2, Circe, and protocol-version changes require their own tracked change and cannot
-arrive as an incidental dependency refresh.
+3.3.8 LTS, which is the sole publication baseline for v1. Scala 3.8.4 is a verification-only lane:
+both lines run in CI, but `publish / skip` is bound to the non-baseline version, so no artifact is
+produced from 3.8.4. Moving the publication line requires an explicit compatibility decision and a
+full gate. Compiler, Cats, Cats Effect, FS2, Circe, and protocol-version changes require their own
+tracked change and cannot arrive as an incidental dependency refresh.
 
-The exact compiler release is recorded by the official
-[Scala 3.7.4 release](https://www.scala-lang.org/news/3.7.4/).
+Publishing from the LTS line is deliberate. A Scala 3 compiler reads TASTy from its own or an
+earlier minor line, so publishing from a later line would exclude every 3.3 LTS consumer. Because
+all Scala 3 versions share `_3` artifact coordinates, cross-publishing both lines would attempt to
+publish one artifact twice. The reasoning is recorded in
+[ADR 0001](architecture/0001-foundation-boundaries.md).
+
+The exact compiler releases are recorded by the official
+[Scala 3.3.8](https://www.scala-lang.org/news/3.3.8/) and
+[Scala 3.8.4](https://www.scala-lang.org/news/3.8.4/) releases.
 
 The project follows early SemVer before 1.0 and SemVer after 1.0. Source compatibility is a goal;
 wire, persisted-state, event-journal, and fixture compatibility are explicit contracts.

@@ -32,7 +32,8 @@ an interpreter failure that cannot yet be classified safely.
 
 ## Build
 
-The minimum runtime is JDK 17. The publication and verification baseline is Scala 3.7.4.
+The minimum runtime is JDK 17. Scala 3.3.8 LTS is the publication baseline; Scala 3.8.4 is a
+verification-only lane. Both run in CI, and `sbt +test` covers each.
 
 ```shell
 sbt test

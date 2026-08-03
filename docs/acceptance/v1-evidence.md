@@ -2,9 +2,16 @@
 
 - Snapshot: 2026-07-22
 - Work item: `bd-01KY6ET05M2J54TGQSN9ZMH7CD`
-- Compiler baseline: Scala 3.7.4
+- Compiler baseline at this snapshot: Scala 3.7.4
 - Runtime floor: JDK 17
 - Status: **local requirements implemented; external P5 evidence incomplete**
+
+> **Amended 2026-08-03.** The publication baseline is now Scala 3.3.8 LTS with 3.8.4 as a
+> verification-only lane, changed under P8.B4 and recorded in
+> [ADR 0001](../architecture/0001-foundation-boundaries.md). The measurements below are the
+> 2026-07-22 snapshot and are left as recorded; they are not restated for the current baseline.
+> A later run on 2026-08-03 reported 428 tests passing on Scala 3.3.8, but that run was `sbt test`
+> alone, not a full execution of this gate, and it does not re-close any row here.
 
 This is a live audit of `PRD.html` sections 15–20 against the current source tree. A tracker state,
 test name, synthetic fixture, or green local build is not accepted as proof by itself. Each claim
@@ -68,8 +75,8 @@ tools/acceptance/v1-local-gate.sh
 
 The gate checks shell syntax, verifies the fail-closed fake-Slurm acceptance harness, validates
 that every F-01…F-18 and Q-01…Q-10 row remains present, runs formatting, executes the complete
-Scala 3.7.4 test suite, and packages the worker. `SLURM4S_CACHE_ROOT` may point sbt and Coursier
-at a writable cache root.
+test suite on the current baseline, and packages the worker. `SLURM4S_CACHE_ROOT` may point sbt and
+Coursier at a writable cache root.
 
 At this snapshot, formatting passed, all **154 tests** passed, and `worker/packageBin` succeeded.
 JDK 25 emitted Scala 3.7.4's terminally deprecated `sun.misc.Unsafe` warning; bytecode and Java

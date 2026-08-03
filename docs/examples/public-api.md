@@ -1,7 +1,7 @@
 # Compile-checked public API examples
 
 The `slurm4s-examples` module is executable documentation. Its main sources compile against
-the published modules on Scala 3.7.4, but the examples module itself is not published. This makes
+the published modules on Scala 3.3.8 LTS, but the examples module itself is not published. This makes
 API drift a build failure without adding an examples artifact to the library surface.
 
 The complete source is
