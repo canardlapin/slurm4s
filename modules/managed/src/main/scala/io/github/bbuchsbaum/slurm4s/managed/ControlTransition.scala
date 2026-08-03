@@ -412,8 +412,8 @@ object ControlTransition:
       at: Instant
   ): Either[ControlFailure, ControlCommit] =
     val candidates = activeBound(state, requested.toVector.toSet)
-    val updated = result match
-      case SchedulerQueryResult.Succeeded(batch) =>
+    val updated = querySplit("active-observation-unavailable", result) match
+      case Right(batch) =>
         // JobRef is the operational identity, so a report either names a bound attempt or it does
         // not. There is no longer a cluster to disagree about.
         val byJob = batch.results.toVector.map(value => observationJob(value) -> value).toMap
@@ -425,8 +425,7 @@ object ControlTransition:
             )
           }
         }
-      case failure =>
-        val (diagnostics, evidence) = queryFailure("active-observation-unavailable", failure)
+      case Left((diagnostics, evidence)) =>
         candidates.map { case (key, current) =>
           val next = current.observation match
             case ManagedObservation.Current(value) =>
@@ -457,8 +456,8 @@ object ControlTransition:
       at: Instant
   ): Either[ControlFailure, ControlCommit] =
     val candidates = activeBound(state, requested.toVector.toSet)
-    val updated = result match
-      case SchedulerQueryResult.Succeeded(batch) =>
+    val updated = querySplit("accounting-unavailable", result) match
+      case Right(batch) =>
         val byJob = batch.records.toVector.map(record => record.job -> record).toMap
         candidates.flatMap { case (key, current) =>
           current.currentJob.flatMap(byJob.get).map { record =>
@@ -467,12 +466,11 @@ object ControlTransition:
               updatedAt = at
             )
             key -> record.outcome.fold(withAccounting)(outcome =>
-              terminal(withAccounting, outcome, at)
+              terminal(withAccounting, outcome, record.evidence, at)
             )
           }
         }
-      case failure =>
-        val (diagnostics, evidence) = queryFailure("accounting-unavailable", failure)
+      case Left((diagnostics, evidence)) =>
         candidates.map { case (key, current) =>
           key -> current.copy(
             accounting = ManagedAccounting.Unavailable(at, diagnostics, evidence),
@@ -653,14 +651,15 @@ object ControlTransition:
         case _ => Left(ControlFailure.InvalidPhase(key, current.phase, "recover-cancellation"))
     }
 
+  /** Takes the evidence rather than re-reading it from `current.accounting`, so the only caller's
+    * knowledge that the accounting is current is expressed in the signature instead of a `throw`.
+    */
   private def terminal(
       current: ManagedAttempt,
       outcome: WorkloadOutcome,
+      evidence: EvidenceBundle,
       at: Instant
   ): ManagedAttempt =
-    val evidence = current.accounting match
-      case ManagedAccounting.Current(record) => record.evidence
-      case _ => throw new IllegalStateException("terminal needs accounting")
     current.copy(
       phase = ManagedPhase.Terminal(outcome, evidence),
       cancellation = current.cancellation match
@@ -724,19 +723,26 @@ object ControlTransition:
     case ObservationResult.NotFound(job, _, _)  => job
     case ObservationResult.Failed(job, _, _, _) => job
 
-  private def queryFailure[A](
+  /** Splits a query result into its payload or the diagnostics and evidence explaining its failure.
+    *
+    * Returning the split rather than assuming a failure keeps the function total: a caller cannot
+    * reach the failure branch with a successful result, and a new `SchedulerQueryResult` case fails
+    * to compile here instead of throwing at runtime.
+    */
+  private def querySplit[A](
       code: String,
       result: SchedulerQueryResult[A]
-  ): (Diagnostics, EvidenceBundle) = result match
+  ): Either[(Diagnostics, EvidenceBundle), A] = result match
+    case SchedulerQueryResult.Succeeded(value)   => Right(value)
     case SchedulerQueryResult.Empty(_, evidence) =>
-      Diagnostics.one(Diagnostic(code, "scheduler query returned no rows")) -> evidence
+      Left(Diagnostics.one(Diagnostic(code, "scheduler query returned no rows")) -> evidence)
     case SchedulerQueryResult.InvocationFailed(invocation) =>
-      Diagnostics.one(Diagnostic(code, "scheduler query invocation failed")) -> evidenceOf(
-        invocation
+      Left(
+        Diagnostics.one(Diagnostic(code, "scheduler query invocation failed")) -> evidenceOf(
+          invocation
+        )
       )
-    case SchedulerQueryResult.ParseFailed(diagnostics, evidence) => diagnostics -> evidence
-    case SchedulerQueryResult.Succeeded(_)                       =>
-      throw new IllegalArgumentException("successful query is not a failure")
+    case SchedulerQueryResult.ParseFailed(diagnostics, evidence) => Left(diagnostics -> evidence)
 
   private def evidenceOf(invocation: InvocationResult): EvidenceBundle = invocation match
     case InvocationResult.Exited(_, stdout, stderr)   => EvidenceBundle(stdout, Vector(stderr))
