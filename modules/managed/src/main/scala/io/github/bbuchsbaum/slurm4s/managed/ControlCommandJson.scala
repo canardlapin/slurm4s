@@ -5,8 +5,6 @@ import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.AgentDomainJson
 
-import scodec.bits.ByteVector
-
 import java.time.Instant
 import java.util.Base64
 import scala.util.Try
@@ -171,8 +169,14 @@ private[managed] object ControlCommandJson:
       attempt <- AttemptId.from(attemptText).left.map(_.reason)
       epoch <- epoch(cursor)
       encoded <- string(cursor, "requestBase64")
-      bytes <- Try(ByteVector.view(Base64.getDecoder.decode(encoded))).toEither.left
-        .map(_.getMessage)
+      // Bounded before decoding, not after. A journal frame may be far larger than a canonical
+      // request is allowed to be, so a record could otherwise make the reader allocate several times
+      // the permitted size before `CanonicalRequest.validated` got to refuse it.
+      bytes <- AgentDomainJson.decodeBase64Bounded(
+        encoded,
+        ByteLimit.maximumCommandCapture,
+        "requestBase64"
+      )
       digestText <- string(cursor, "requestDigest")
       digest <- ContentDigest.from(digestText).left.map(_.reason)
       request <- CanonicalRequest.validated(bytes, digest)

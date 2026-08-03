@@ -1235,7 +1235,13 @@ object AgentDomainJson:
   private def maximumEncodedLength(maximumBytes: ByteLimit): Long =
     ((maximumBytes.value.toLong + 2L) / 3L) * 4L
 
-  private def decodeBase64Bounded(
+  /** Decodes base64 while refusing anything that would decode past `maximumBytes`, checking the
+    * encoded length first so the refusal happens before the allocation.
+    *
+    * Shared rather than private because the durable control journal decodes base64 under the same
+    * rule, and two copies of this arithmetic would be two places for the ordering to regress.
+    */
+  def decodeBase64Bounded(
       encoded: String,
       maximumBytes: ByteLimit,
       fieldName: String
