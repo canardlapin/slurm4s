@@ -97,7 +97,7 @@ class LocalCaptureBoundSuite extends munit.CatsEffectSuite:
               case other                             => fail(s"unexpected result: $other")
             assertEquals(
               evidence.bytes.size,
-              ByteLimit.defaultEvidence.value,
+              ByteLimit.defaultEvidence.value.toLong,
               "retained evidence must respect the evidence bound"
             )
             assert(evidence.truncated, "narrowed evidence must be reported as truncated")

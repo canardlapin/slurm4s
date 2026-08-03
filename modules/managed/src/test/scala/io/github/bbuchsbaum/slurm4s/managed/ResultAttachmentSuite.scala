@@ -4,6 +4,8 @@ import cats.effect.IO
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.ResultEnvelopeCodec
 
+import scodec.bits.ByteVector
+
 import java.nio.file.Files
 import java.time.Instant
 
@@ -58,7 +60,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
     ResultAttachment.attachVerified(attempt, handle, contract, bytes, Vector(output), later) match
       case VerifiedAttachment.Succeeded(payload) =>
         assertEquals(payload.value, "typed-value")
-        assertEquals(payload.encodedValue, "typed-value".getBytes("UTF-8").toVector)
+        assertEquals(payload.encodedValue, ByteVector.view("typed-value".getBytes("UTF-8")))
         assertEquals(payload.submissionKey, handle.submissionKey)
         assertEquals(payload.attemptId, handle.attemptId)
         assertEquals(payload.attemptEpoch, handle.attemptEpoch)
@@ -90,7 +92,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
           _ <- IO.blocking { val _ = Files.write(path, "replacement".getBytes("UTF-8")) }
         yield attached match
           case VerifiedAttachment.Succeeded(payload) =>
-            assertEquals(payload.encodedValue, "typed-value".getBytes("UTF-8").toVector)
+            assertEquals(payload.encodedValue, ByteVector.view("typed-value".getBytes("UTF-8")))
           case other => fail(s"expected verified payload, received $other")
       }(path => IO.blocking { val _ = Files.deleteIfExists(path) })
   }
@@ -111,7 +113,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       attempt,
       handle,
       wrongContract,
-      "not-json".getBytes("UTF-8").toVector,
+      ByteVector.view("not-json".getBytes("UTF-8")),
       Vector.empty,
       later
     )
@@ -125,7 +127,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       attempt,
       handle,
       contract,
-      "not-json".getBytes("UTF-8").toVector,
+      ByteVector.view("not-json".getBytes("UTF-8")),
       Vector(output),
       later
     )
@@ -143,7 +145,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       attempt,
       staleHandle,
       contract,
-      Vector.empty,
+      ByteVector.empty,
       Vector.empty,
       later
     )
@@ -192,7 +194,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       current,
       originalHandle,
       contract,
-      Vector.empty,
+      ByteVector.empty,
       Vector.empty,
       later.plusSeconds(3L)
     )
@@ -200,7 +202,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       original,
       rebuilt(originalHandle, retrySafety = Some(RetrySafety.SafeForAutomaticRetry)),
       contract,
-      Vector.empty,
+      ByteVector.empty,
       Vector.empty,
       later.plusSeconds(3L)
     )
@@ -310,7 +312,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       handle.job,
       handle.operation,
       handle.resultSchema,
-      "typed-value".getBytes("UTF-8").toVector,
+      ByteVector.view("typed-value".getBytes("UTF-8")),
       outputs,
       handle.workerRelease,
       Instant.parse("2026-07-22T12:00:02Z")
@@ -318,9 +320,9 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
 
   private def stringCodec(schema: ResultSchemaId): ResultCodec[String] = new ResultCodec[String]:
     val schemaId: ResultSchemaId = schema
-    def encode(value: String): Either[ResultCodecFailure, Vector[Byte]] =
-      Right(value.getBytes("UTF-8").toVector)
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, String] =
+    def encode(value: String): Either[ResultCodecFailure, ByteVector] =
+      Right(ByteVector.view(value.getBytes("UTF-8")))
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, String] =
       Right(new String(bytes.toArray, "UTF-8"))
 
   private def invalidCode[A](result: ExecutionResult[A]): String = result match

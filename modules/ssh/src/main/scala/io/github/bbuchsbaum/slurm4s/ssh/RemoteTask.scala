@@ -8,6 +8,7 @@ import io.github.bbuchsbaum.slurm4s.protocol.*
 import io.github.bbuchsbaum.slurm4s.task.SlurmTaskCall
 
 import scala.concurrent.duration.*
+import scodec.bits.ByteVector
 
 /** How often a caller may ask the target about work it has already submitted.
   *
@@ -93,11 +94,11 @@ object RemoteTaskDescriptor:
   def encode(
       descriptor: RemoteTaskDescriptor,
       maximumBytes: ByteLimit = RemoteTaskWireLimits.MaximumDescriptorBytes
-  ): Either[RemoteTaskDescriptorCodecFailure, Vector[Byte]] =
+  ): Either[RemoteTaskDescriptorCodecFailure, ByteVector] =
     RemoteRegisteredSubmissionCodec.encode(descriptor.submission, maximumBytes)
 
   def decode(
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       maximumBytes: ByteLimit = RemoteTaskWireLimits.MaximumDescriptorBytes
   ): Either[RemoteTaskDescriptorCodecFailure, RemoteTaskDescriptor] =
     RemoteRegisteredSubmissionCodec.decode(bytes, maximumBytes).map(RemoteTaskDescriptor.apply)
@@ -441,7 +442,7 @@ private[ssh] object RemoteResultValidation:
       expectedHandle: DurableResultHandle,
       storedHandle: DurableResultHandle,
       contract: ResultContract.Structured[A],
-      envelopeBytes: Vector[Byte],
+      envelopeBytes: ByteVector,
       observedAt: java.time.Instant
   ): ExecutionResult[A] =
     val evidence = EvidenceBundle(

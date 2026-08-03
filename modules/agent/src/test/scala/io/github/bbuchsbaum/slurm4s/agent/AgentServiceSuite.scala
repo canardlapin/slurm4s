@@ -16,6 +16,8 @@ import io.github.bbuchsbaum.slurm4s.protocol.RemoteRegisteredTaskRequest
 import io.github.bbuchsbaum.slurm4s.protocol.RemoteResultRead
 import io.github.bbuchsbaum.slurm4s.protocol.RemoteResultRef
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 class AgentServiceSuite extends munit.CatsEffectSuite:
@@ -73,7 +75,12 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
         reads.update(_ + 1) *>
           IO.pure(
             LogReadResult.Page(
-              LogPage(Vector.fill(maximum.value)(0xff.toByte), cursor, false, Instant.EPOCH)
+              LogPage(
+                ByteVector.fill(maximum.value.toLong)(0xff.toByte),
+                cursor,
+                false,
+                Instant.EPOCH
+              )
             )
           )
       }
@@ -189,7 +196,7 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
     SubmissionKey.from("submission-1").toOption.get,
     JobName.from("opaque-script").toOption.get,
     Payload.Script(
-      ScriptSource.Inline("job.sh", "#!/bin/sh\ntrue\n".getBytes("UTF-8").toVector),
+      ScriptSource.Inline("job.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
       Vector.empty,
       ResultContract.ExitOnly
     ),
@@ -198,7 +205,7 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
 
   private val acceptedJob = JobRef(JobId.from("42").toOption.get, None)
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.AgentProtocol, Instant.EPOCH, Vector.empty)
+    BoundedEvidence.capture(EvidenceSource.AgentProtocol, Instant.EPOCH, ByteVector.empty)
   )
 
   private def scheduler(cancellations: Ref[IO, Int]): Scheduler[IO] = new Scheduler[IO]:
@@ -240,7 +247,7 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
     LogStream.Stdout,
     "stdout.log"
   )
-  private val logBytes = "abcdef".getBytes("UTF-8").toVector
+  private val logBytes = ByteVector.view("abcdef".getBytes("UTF-8"))
   private val identity = FileIdentity.from("stable-file").toOption.get
 
   private val logReader: AgentLogReader[IO] = AgentLogReader { (_, cursor, maximum) =>

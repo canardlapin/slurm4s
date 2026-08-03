@@ -10,6 +10,8 @@ import io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 
+import scodec.bits.ByteVector
+
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -168,7 +170,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
           "remote-result-read-failed",
           error.getClass.getSimpleName,
           observedAt,
-          Vector.empty,
+          ByteVector.empty,
           0L
         )
       }
@@ -183,7 +185,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
           "remote-script-exit-read-failed",
           error.getClass.getSimpleName,
           observedAt,
-          Vector.empty,
+          ByteVector.empty,
           0L
         )
       }
@@ -578,7 +580,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         "remote-result-limit-rejected",
         "requested read limit exceeds the target envelope limit",
         observedAt,
-        Vector.empty,
+        ByteVector.empty,
         0L
       )
     else
@@ -589,7 +591,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
           "remote-result-reference-unknown",
           "no durable result metadata exists for the reference",
           observedAt,
-          Vector.empty,
+          ByteVector.empty,
           0L
         )
       else
@@ -650,7 +652,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
             capture._2
           )
 
-  private def readBounded(path: Path, maximum: ByteLimit): (Vector[Byte], Long) =
+  private def readBounded(path: Path, maximum: ByteLimit): (ByteVector, Long) =
     val sizeBefore = Files.size(path)
     val input = Files.newInputStream(path, StandardOpenOption.READ)
     val output = ByteArrayOutputStream()
@@ -662,7 +664,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         val count = input.read(buffer, 0, requested)
         if count < 0 then done = true
         else output.write(buffer, 0, count)
-      val retained = output.toByteArray.toVector
+      val retained = ByteVector.view(output.toByteArray)
       val sizeAfter = Files.size(path)
       retained -> math.max(math.max(sizeBefore, sizeAfter), retained.size.toLong)
     finally
@@ -673,7 +675,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       code: String,
       detail: String,
       observedAt: java.time.Instant,
-      retained: Vector[Byte],
+      retained: ByteVector,
       originalBytes: Long
   ): RemoteResultRead =
     val evidence = BoundedEvidence.fromCapture(
@@ -698,7 +700,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       code: String,
       detail: String,
       observedAt: java.time.Instant,
-      retained: Vector[Byte],
+      retained: ByteVector,
       originalBytes: Long
   ): RemoteScriptExitRead =
     val evidence = BoundedEvidence.fromCapture(
@@ -915,7 +917,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
     val identity =
       s"${key.value}\u0000$sourceIdentity\u0000$invocationIdentity"
     AttemptId.from(
-      s"script-${sha256(identity.getBytes(StandardCharsets.UTF_8).toVector).take(32)}"
+      s"script-${sha256(ByteVector.view(identity.getBytes(StandardCharsets.UTF_8))).take(32)}"
     )
 
   private def deterministicAttempt[I, O](
@@ -923,20 +925,24 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       operation: OperationRef[I, O]
   ): Either[ValidationFailure, AttemptId] =
     val identity = s"${key.value}\u0000${operation.id.value}\u0000${operation.version.value}"
-    AttemptId.from(s"worker-${sha256(identity.getBytes(StandardCharsets.UTF_8).toVector).take(32)}")
+    AttemptId.from(
+      s"worker-${sha256(ByteVector.view(identity.getBytes(StandardCharsets.UTF_8))).take(32)}"
+    )
 
   private def deterministicAttempt(
       key: SubmissionKey,
       operation: RegisteredOperation
   ): Either[ValidationFailure, AttemptId] =
     val identity = s"${key.value}\u0000${operation.id.value}\u0000${operation.version.value}"
-    AttemptId.from(s"worker-${sha256(identity.getBytes(StandardCharsets.UTF_8).toVector).take(32)}")
+    AttemptId.from(
+      s"worker-${sha256(ByteVector.view(identity.getBytes(StandardCharsets.UTF_8))).take(32)}"
+    )
 
   private def launchScriptBytes(
       invocation: Path,
       result: Path,
       events: Path
-  ): Vector[Byte] =
+  ): ByteVector =
     val command = Vector(
       settings.executable.toAbsolutePath.normalize().toString,
       "run",
@@ -947,11 +953,11 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       "--events",
       events.toString
     ).map(shellQuote).mkString(" ")
-    s"#!/bin/sh\nexec $command\n".getBytes(StandardCharsets.UTF_8).toVector
+    ByteVector.view(s"#!/bin/sh\nexec $command\n".getBytes(StandardCharsets.UTF_8))
 
   private def arrayLaunchScriptBytes[O](
       elements: Vector[(PreparedRegisteredSubmission[O], RegisteredTaskArrayElement[?])]
-  ): Vector[Byte] =
+  ): ByteVector =
     val cases = elements
       .map { case (prepared, element) =>
         val directory = prepared.invocationPath.getParent
@@ -979,7 +985,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
          |  *) exit 64 ;;
          |esac
          |""".stripMargin
-    script.getBytes(StandardCharsets.UTF_8).toVector
+    ByteVector.view(script.getBytes(StandardCharsets.UTF_8))
 
   private def writeRemoteBatchScripts(
       directory: Path,
@@ -1150,7 +1156,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
     val stderr = shellQuote(directory.resolve("stderr.log").toString)
     s"$command >$stdout 2>$stderr"
 
-  private def arrayDispatchScript(branches: Vector[(ArrayIndex, String)]): Vector[Byte] =
+  private def arrayDispatchScript(branches: Vector[(ArrayIndex, String)]): ByteVector =
     val cases = branches
       .sortBy(_._1)
       .map { case (index, command) =>
@@ -1166,18 +1172,18 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
          |  *) exit 64 ;;
          |esac
          |""".stripMargin
-    script.getBytes(StandardCharsets.UTF_8).toVector
+    ByteVector.view(script.getBytes(StandardCharsets.UTF_8))
 
   private def boundedShardScript(
       elements: Vector[PreparedRemoteRegisteredSubmission],
       slotsPerShard: PositiveInt
-  ): Vector[Byte] =
+  ): ByteVector =
     boundedCommandScript(elements.map(remoteElementCommand), slotsPerShard)
 
   private def boundedCommandScript(
       commands: Vector[String],
       slotsPerShard: PositiveInt
-  ): Vector[Byte] =
+  ): ByteVector =
     val launches = commands.map { command =>
       s"""($command) &
          |active=${'$'}((active + 1))
@@ -1186,7 +1192,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
          |fi
          |""".stripMargin
     }.mkString
-    s"""#!/bin/bash
+    ByteVector.view(s"""#!/bin/bash
        |umask 077
        |set -u
        |if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
@@ -1206,11 +1212,11 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
        |  wait_one
        |done
        |exit "${'$'}status"
-       |""".stripMargin.getBytes(StandardCharsets.UTF_8).toVector
+       |""".stripMargin.getBytes(StandardCharsets.UTF_8))
 
   private def gangRankScript(
       elements: Vector[PreparedRemoteRegisteredSubmission]
-  ): Vector[Byte] =
+  ): ByteVector =
     val cases = elements.zipWithIndex
       .map { case (element, rank) =>
         s"  '$rank') exec ${remoteElementCommand(element)} ;;"
@@ -1225,27 +1231,27 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
          |  *) exit 64 ;;
          |esac
          |""".stripMargin
-    script.getBytes(StandardCharsets.UTF_8).toVector
+    ByteVector.view(script.getBytes(StandardCharsets.UTF_8))
 
-  private def gangCommandScript(commands: Vector[String]): Vector[Byte] =
+  private def gangCommandScript(commands: Vector[String]): ByteVector =
     val cases = commands.zipWithIndex
       .map { case (command, rank) =>
         s"  '$rank') exec $command ;;"
       }
       .mkString("\n")
-    s"""#!/bin/sh
+    ByteVector.view(s"""#!/bin/sh
        |set -eu
        |case "${'$'}{SLURM_PROCID-}" in
        |$cases
        |  *) exit 64 ;;
        |esac
-       |""".stripMargin.getBytes(StandardCharsets.UTF_8).toVector
+       |""".stripMargin.getBytes(StandardCharsets.UTF_8))
 
   private def gangLaunchScript(
       dispatch: Path,
       nodes: PositiveInt,
       tasksPerNode: PositiveInt
-  ): Vector[Byte] =
+  ): ByteVector =
     val tasks = nodes.toInt.toLong * tasksPerNode.toInt.toLong
     val command = Vector(
       "srun",
@@ -1255,7 +1261,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       "--exact",
       dispatch.toString
     ).map(shellQuote).mkString(" ")
-    s"#!/bin/sh\nset -eu\nexec $command\n".getBytes(StandardCharsets.UTF_8).toVector
+    ByteVector.view(s"#!/bin/sh\nset -eu\nexec $command\n".getBytes(StandardCharsets.UTF_8))
 
   private def remoteScriptLaunchBytes(
       invocation: ScriptInvocation,
@@ -1264,7 +1270,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       stdout: String,
       stderr: String,
       exitStatus: Path
-  ): Vector[Byte] =
+  ): ByteVector =
     val prefix = invocation match
       case ScriptInvocation.Direct     => Vector(program.toString)
       case ScriptInvocation.Via(value) =>
@@ -1283,7 +1289,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
     // remaining window. `umask` is set before anything opens a file so stdout and stderr are
     // created private too, rather than inheriting the site default.
     val temporaryName = shellQuote(s"${exitStatus.toString}.tmp.") + "\"$$\""
-    s"""#!/bin/sh
+    ByteVector.view(s"""#!/bin/sh
        |umask 077
        |set +e
        |$command >$stdoutPath 2>$stderrPath
@@ -1298,14 +1304,14 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
        |  mv -f "${'$'}temporary" $exitPath
        |fi
        |exit "${'$'}status"
-       |""".stripMargin.getBytes(StandardCharsets.UTF_8).toVector
+       |""".stripMargin.getBytes(StandardCharsets.UTF_8))
 
   private def shellQuote(value: String): String =
     s"'${value.replace("'", "'\"'\"'")}'"
 
   private def writeStable(
       target: Path,
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       executable: Boolean
   ): Either[Diagnostics, Unit] =
     AtomicFiles.writeStableBlocking(target, bytes, executable).left.map {
@@ -1344,7 +1350,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       val _ = Files.setPosixFilePermissions(path, PosixFilePermissions.fromString(value))
     catch case _: UnsupportedOperationException => ()
 
-  private def sha256(bytes: Vector[Byte]): String =
+  private def sha256(bytes: ByteVector): String =
     MessageDigest
       .getInstance("SHA-256")
       .digest(bytes.toArray)

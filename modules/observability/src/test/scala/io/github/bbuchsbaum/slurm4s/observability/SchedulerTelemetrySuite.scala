@@ -7,11 +7,12 @@ import io.github.bbuchsbaum.slurm4s.testkit.SchedulerProgram
 
 import java.time.Instant
 import scala.concurrent.duration.*
+import scodec.bits.ByteVector
 
 class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
   private val observedAt = Instant.parse("2026-07-22T12:00:00Z")
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.SchedulerText("test"), observedAt, Vector(1, 2, 3))
+    BoundedEvidence.capture(EvidenceSource.SchedulerText("test"), observedAt, ByteVector(1, 2, 3))
   )
   private val job = JobRef(
     JobId.from("42").fold(problem => fail(problem.toString), identity),

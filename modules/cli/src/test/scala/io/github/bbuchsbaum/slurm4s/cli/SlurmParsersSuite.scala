@@ -3,6 +3,8 @@ package io.github.bbuchsbaum.slurm4s.cli
 import cats.data.NonEmptyVector
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
@@ -68,7 +70,7 @@ class SlurmParsersSuite extends munit.FunSuite:
     assertEquals(queue.head.rawFields("site_metadata"), """{"label":"α|β"}""")
     assertEquals(
       queue.head.evidence.primary.bytes,
-      resource(s"$directory/squeue.json").getBytes(StandardCharsets.UTF_8).toVector
+      ByteVector.view(resource(s"$directory/squeue.json").getBytes(StandardCharsets.UTF_8))
     )
   }
 
@@ -513,7 +515,7 @@ class SlurmParsersSuite extends munit.FunSuite:
     BoundedEvidence.capture(
       EvidenceSource.CommandStdout("fixture"),
       Instant.parse("2026-07-22T12:00:00Z"),
-      value.getBytes(StandardCharsets.UTF_8).toVector
+      ByteVector.view(value.getBytes(StandardCharsets.UTF_8))
     )
 
   private def resource(path: String): String =

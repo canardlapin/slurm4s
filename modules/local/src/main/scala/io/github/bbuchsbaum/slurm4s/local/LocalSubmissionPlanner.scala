@@ -7,6 +7,8 @@ import io.github.bbuchsbaum.slurm4s.cli.PreparedSubmission
 import io.github.bbuchsbaum.slurm4s.cli.SubmissionPlanner
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -116,7 +118,7 @@ final class LocalSubmissionPlanner[F[_]: Async](settings: LocalWorkspaceSettings
           )
         else Right(remote)
 
-  private def materializeBytes(bytes: Vector[Byte], directory: Path): Either[Diagnostics, Path] =
+  private def materializeBytes(bytes: ByteVector, directory: Path): Either[Diagnostics, Path] =
     if bytes.size > settings.maxScriptBytes.value then
       Left(
         Diagnostics.one(
@@ -165,7 +167,7 @@ final class LocalSubmissionPlanner[F[_]: Async](settings: LocalWorkspaceSettings
             )
           )
 
-  private def readBounded(path: Path): Either[Diagnostics, Vector[Byte]] =
+  private def readBounded(path: Path): Either[Diagnostics, ByteVector] =
     val input = Files.newInputStream(path, StandardOpenOption.READ)
     val output = ByteArrayOutputStream()
     val buffer = new Array[Byte](8192)
@@ -186,7 +188,7 @@ final class LocalSubmissionPlanner[F[_]: Async](settings: LocalWorkspaceSettings
             Diagnostic("script-too-large", "the staged script exceeds the configured byte limit")
           )
         )
-      else Right(output.toByteArray.toVector)
+      else Right(ByteVector.view(output.toByteArray))
     finally
       input.close()
       output.close()

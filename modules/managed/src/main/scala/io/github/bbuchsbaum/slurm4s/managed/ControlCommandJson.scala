@@ -5,6 +5,8 @@ import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.AgentDomainJson
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 import java.util.Base64
 import scala.util.Try
@@ -169,7 +171,8 @@ private[managed] object ControlCommandJson:
       attempt <- AttemptId.from(attemptText).left.map(_.reason)
       epoch <- epoch(cursor)
       encoded <- string(cursor, "requestBase64")
-      bytes <- Try(Base64.getDecoder.decode(encoded).toVector).toEither.left.map(_.getMessage)
+      bytes <- Try(ByteVector.view(Base64.getDecoder.decode(encoded))).toEither.left
+        .map(_.getMessage)
       digestText <- string(cursor, "requestDigest")
       digest <- ContentDigest.from(digestText).left.map(_.reason)
       request <- CanonicalRequest.validated(bytes, digest)

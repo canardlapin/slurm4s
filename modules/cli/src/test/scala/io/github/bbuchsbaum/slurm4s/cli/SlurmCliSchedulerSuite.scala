@@ -5,6 +5,8 @@ import cats.effect.IO
 import cats.effect.Ref
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
@@ -19,7 +21,7 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
   private val evidence = BoundedEvidence.capture(
     EvidenceSource.CommandStdout("test"),
     Instant.parse("2026-07-22T12:00:00Z"),
-    Vector.empty
+    ByteVector.empty
   )
 
   test("a single job that has left the queue is absent, not an invocation failure") {
@@ -254,7 +256,7 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
     BoundedEvidence.capture(
       EvidenceSource.CommandStdout("squeue"),
       Instant.parse("2026-07-25T12:00:00Z"),
-      text.getBytes(java.nio.charset.StandardCharsets.UTF_8).toVector
+      ByteVector.view(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
     )
 
   private def recordingPlanner(): SubmissionPlanner[IO] =

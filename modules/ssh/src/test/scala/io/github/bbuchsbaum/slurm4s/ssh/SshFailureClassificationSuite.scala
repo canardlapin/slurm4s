@@ -5,6 +5,8 @@ import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 class SshFailureClassificationSuite extends munit.CatsEffectSuite:
@@ -155,7 +157,7 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     val runner = new SshProcessRunner[IO]:
       def exchange(
           launch: SshLaunch,
-          request: Vector[Byte],
+          request: ByteVector,
           policy: SshExchangePolicy
       ): IO[SshProcessOutcome] = IO.pure(outcome)
     val target = SshTarget.from("cluster").toOption.get
@@ -183,8 +185,8 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     BoundedEvidence.capture(
       EvidenceSource.CommandStderr("ssh"),
       Instant.EPOCH,
-      value.getBytes("UTF-8").toVector
+      ByteVector.view(value.getBytes("UTF-8"))
     )
 
   private def emptyEvidence(source: EvidenceSource): BoundedEvidence =
-    BoundedEvidence.capture(source, Instant.EPOCH, Vector.empty)
+    BoundedEvidence.capture(source, Instant.EPOCH, ByteVector.empty)

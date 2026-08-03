@@ -4,6 +4,8 @@ import cats.effect.IO
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -44,15 +46,14 @@ class RemoteRegisteredTaskLauncherSuite extends munit.CatsEffectSuite:
     yield preparedEither match
       case Left(diagnostics) => fail(diagnostics.toString)
       case Right(prepared)   =>
-        val invocationBytes = Files.readAllBytes(prepared.invocationPath).toVector
+        val invocationBytes = ByteVector.view(Files.readAllBytes(prepared.invocationPath))
         val invocation = TaskInvocationCodec
           .decode(invocationBytes, ByteLimit.maximumCommandCapture, inputLimit)
           .toOption
           .get
-        val handleBytes =
-          Files
-            .readAllBytes(prepared.invocationPath.getParent.resolve("result-handle.json"))
-            .toVector
+        val handleBytes = ByteVector.view(
+          Files.readAllBytes(prepared.invocationPath.getParent.resolve("result-handle.json"))
+        )
 
         assertEquals(invocation.operation, request.operation)
         assertEquals(invocation.inputBytes, request.inputBytes)
@@ -86,7 +87,7 @@ class RemoteRegisteredTaskLauncherSuite extends munit.CatsEffectSuite:
           prepared.resultHandle.job,
           prepared.resultHandle.operation,
           prepared.resultHandle.resultSchema,
-          "42".getBytes(StandardCharsets.UTF_8).toVector,
+          ByteVector.view("42".getBytes(StandardCharsets.UTF_8)),
           OutputManifest.empty,
           prepared.resultHandle.workerRelease,
           Instant.parse("2026-07-24T12:00:00Z")
@@ -121,7 +122,7 @@ class RemoteRegisteredTaskLauncherSuite extends munit.CatsEffectSuite:
       yield result match
         case RemoteResultRead.Failed(diagnostics, evidence, _) =>
           assertEquals(diagnostics.toVector.map(_.code), Vector("remote-result-envelope-too-large"))
-          assertEquals(evidence.primary.bytes.size, envelopeLimit.value)
+          assertEquals(evidence.primary.bytes.size, envelopeLimit.value.toLong)
           assertEquals(evidence.primary.originalByteCount, original.size.toLong)
           assert(evidence.primary.truncated)
         case other => fail(s"expected bounded oversized-result failure, received $other")
@@ -165,7 +166,7 @@ class RemoteRegisteredTaskLauncherSuite extends munit.CatsEffectSuite:
       SchemaId.from("example.int-input.v1").toOption.get,
       ResultSchemaId.from("example.int-result.v1").toOption.get
     ),
-    "41".getBytes(StandardCharsets.UTF_8).toVector,
+    ByteVector.view("41".getBytes(StandardCharsets.UTF_8)),
     ResourceRequest.validate(1, 1, None, None, None).toOption.get,
     Map.empty,
     resultLimit,

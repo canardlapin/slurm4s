@@ -5,6 +5,8 @@ import cats.effect.IO
 import cats.effect.Ref
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 import scala.concurrent.duration.*
 
@@ -13,7 +15,7 @@ class ObservationScaleSuite extends munit.CatsEffectSuite:
   private val batchSize = 256
   private val observedAt = Instant.parse("2026-07-22T12:00:00Z")
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.DurableJournal, observedAt, Vector.empty)
+    BoundedEvidence.capture(EvidenceSource.DurableJournal, observedAt, ByteVector.empty)
   )
 
   test("4096 active jobs use bounded coalesced controller calls with complete fair coverage") {
@@ -54,7 +56,7 @@ class ObservationScaleSuite extends munit.CatsEffectSuite:
     val request = LaunchSpec(
       key,
       JobName.from("scale-observer").toOption.get,
-      ScriptSource.Inline("scale.sh", "true\n".getBytes("UTF-8").toVector),
+      ScriptSource.Inline("scale.sh", ByteVector.view("true\n".getBytes("UTF-8"))),
       Vector.empty,
       ResultContract.ExitOnly.descriptor,
       ResourceRequest.validate(1, 1, None, None, None).toOption.get

@@ -18,6 +18,8 @@ import io.github.bbuchsbaum.slurm4s.cli.SlurmCommand
 import io.github.bbuchsbaum.slurm4s.cli.SlurmExecutable
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.nio.file.NoSuchFileException
@@ -195,7 +197,7 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
       val evidence = BoundedEvidence.capture(
         EvidenceSource.CommandLaunch(command.executable.fileName),
         observedAt,
-        Vector.empty
+        ByteVector.empty
       )
       InvocationResult.SpawnFailed(
         SpawnFailureKind.EnvironmentInvalid,
@@ -215,7 +217,7 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
       val evidence = BoundedEvidence.capture(
         EvidenceSource.CommandLaunch(command.executable.fileName),
         observedAt,
-        Vector.empty
+        ByteVector.empty
       )
       InvocationResult.SpawnFailed(
         SpawnFailureKind.ExecutableMissing,
@@ -239,7 +241,7 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
       val evidence = BoundedEvidence.capture(
         EvidenceSource.CommandLaunch(command.executable.fileName),
         observedAt,
-        Vector.empty
+        ByteVector.empty
       )
       Left(
         InvocationResult.SpawnFailed(
@@ -256,14 +258,17 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
       )
     }
 
-final private case class CaptureState(bytes: Vector[Byte], totalBytes: Long):
+final private case class CaptureState(bytes: ByteVector, totalBytes: Long):
   def append(chunk: Chunk[Byte], limit: ByteLimit): CaptureState =
-    val remaining = math.max(0, limit.value - bytes.size)
-    val retained = if remaining == 0 then Vector.empty else chunk.take(remaining).toVector
+    // Bounded by an Int-valued limit, so narrowing for Chunk.take cannot overflow. The chunk
+    // converts to owned bytes directly rather than through a boxed intermediate.
+    val remaining = math.max(0L, limit.value.toLong - bytes.size)
+    val retained =
+      if remaining == 0L then ByteVector.empty else chunk.take(remaining.toInt).toByteVector
     CaptureState(bytes ++ retained, totalBytes + chunk.size.toLong)
 
   def evidence(source: EvidenceSource, observedAt: java.time.Instant): BoundedEvidence =
     BoundedEvidence.fromCapture(source, observedAt, bytes, totalBytes)
 
 private object CaptureState:
-  val empty: CaptureState = CaptureState(Vector.empty, 0L)
+  val empty: CaptureState = CaptureState(ByteVector.empty, 0L)

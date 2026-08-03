@@ -17,6 +17,8 @@ import io.github.bbuchsbaum.slurm4s.core.DurationMillis
 import io.github.bbuchsbaum.slurm4s.core.EvidenceSource
 import io.github.bbuchsbaum.slurm4s.protocol.FrameCodec
 
+import scodec.bits.ByteVector
+
 import java.io.IOException
 import scala.concurrent.duration.*
 import scala.util.control.NonFatal
@@ -68,14 +70,14 @@ enum SshProcessStage derives CanEqual:
 trait SshProcessRunner[F[_]]:
   def exchange(
       launch: SshLaunch,
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy
   ): F[SshProcessOutcome]
 
 final class SystemSshProcessRunner[F[_]: Async](using Processes[F]) extends SshProcessRunner[F]:
   def exchange(
       launch: SshLaunch,
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy
   ): F[SshProcessOutcome] =
     for
@@ -139,14 +141,14 @@ final class SystemSshProcessRunner[F[_]: Async](using Processes[F]) extends SshP
 
   private def run(
       process: Process[F],
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy,
       stdout: Ref[F, SshCapture],
       stderr: Ref[F, SshCapture],
       writeCompleted: Ref[F, Boolean]
   ): F[SshProcessOutcome] =
     runStreams(
-      Stream.emits(request).covary[F].through(process.stdin).compile.drain,
+      Stream.chunk(Chunk.byteVector(request)).covary[F].through(process.stdin).compile.drain,
       process.stdout,
       process.stderr,
       process.exitValue,
@@ -258,7 +260,7 @@ final class SystemSshProcessRunner[F[_]: Async](using Processes[F]) extends SshP
           evidence = BoundedEvidence.capture(
             EvidenceSource.CommandLaunch("ssh"),
             observedAt,
-            Vector.empty
+            ByteVector.empty
           )
         )
       )
@@ -267,14 +269,17 @@ final class SystemSshProcessRunner[F[_]: Async](using Processes[F]) extends SshP
 final private case class SshProcessStageException(stage: SshProcessStage, underlying: Throwable)
     extends RuntimeException(null, underlying, false, false)
 
-final private case class SshCapture(bytes: Vector[Byte], totalBytes: Long):
+final private case class SshCapture(bytes: ByteVector, totalBytes: Long):
   def append(chunk: Chunk[Byte], limit: ByteLimit): SshCapture =
-    val remaining = math.max(0, limit.value - bytes.size)
-    val retained = if remaining == 0 then Vector.empty else chunk.take(remaining).toVector
+    // Bounded by an Int-valued limit, so narrowing for Chunk.take cannot overflow. The chunk
+    // converts to owned bytes directly rather than through a boxed intermediate.
+    val remaining = math.max(0L, limit.value.toLong - bytes.size)
+    val retained =
+      if remaining == 0L then ByteVector.empty else chunk.take(remaining.toInt).toByteVector
     SshCapture(bytes ++ retained, totalBytes + chunk.size.toLong)
 
   def evidence(source: EvidenceSource, observedAt: java.time.Instant): BoundedEvidence =
     BoundedEvidence.fromCapture(source, observedAt, bytes, totalBytes)
 
 private object SshCapture:
-  val empty: SshCapture = SshCapture(Vector.empty, 0L)
+  val empty: SshCapture = SshCapture(ByteVector.empty, 0L)

@@ -7,6 +7,8 @@ import io.circe.JsonObject
 import io.circe.parser
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -18,7 +20,7 @@ import java.util.Locale
 import scala.util.Try
 
 object EvidenceText:
-  def decode(bytes: Vector[Byte]): Either[Diagnostics, String] =
+  def decode(bytes: ByteVector): Either[Diagnostics, String] =
     val decoder = StandardCharsets.UTF_8
       .newDecoder()
       .onMalformedInput(CodingErrorAction.REPORT)

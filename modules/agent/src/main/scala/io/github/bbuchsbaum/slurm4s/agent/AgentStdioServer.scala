@@ -3,6 +3,7 @@ package io.github.bbuchsbaum.slurm4s.agent
 import cats.effect.Ref
 import cats.effect.kernel.Concurrent
 import cats.syntax.all.*
+import fs2.Chunk
 import fs2.Pipe
 import fs2.Stream
 import io.circe.Json
@@ -15,6 +16,7 @@ import io.github.bbuchsbaum.slurm4s.protocol.FrameCodec
 import io.github.bbuchsbaum.slurm4s.protocol.FrameDecoder
 import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
 import io.github.bbuchsbaum.slurm4s.protocol.HandshakeJson
+import scodec.bits.ByteVector
 
 enum AgentCommand derives CanEqual:
   case ServeStdio
@@ -70,7 +72,7 @@ final class AgentStdioServer[F[_]: Concurrent](
       val responses = input.chunks
         .evalMap { chunk =>
           decoder.modify { current =>
-            current.feed(chunk.toVector) match
+            current.feed(chunk.toByteVector) match
               case Left(failure)         => (current, Left(AgentWireException(failure.toString)))
               case Right((next, frames)) => (next, Right(frames))
           }
@@ -90,10 +92,10 @@ final class AgentStdioServer[F[_]: Concurrent](
         .evalMap { response =>
           FrameCodec.encode(AgentMessageCodec.encode(response), limits) match
             case Left(failure) =>
-              Concurrent[F].raiseError[Vector[Byte]](AgentWireException(failure.toString))
+              Concurrent[F].raiseError[ByteVector](AgentWireException(failure.toString))
             case Right(frame) => frame.pure[F]
         }
-        .flatMap(Stream.emits)
+        .flatMap(frame => Stream.chunk(Chunk.byteVector(frame)))
 
       responses ++ Stream
         .eval(

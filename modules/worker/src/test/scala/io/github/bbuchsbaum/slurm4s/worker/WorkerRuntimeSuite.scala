@@ -9,6 +9,8 @@ import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.ResultEnvelopeCodec
 import io.github.bbuchsbaum.slurm4s.protocol.TaskInvocationCodec
 
+import scodec.bits.ByteVector
+
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
@@ -412,7 +414,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       yield
         assertEquals(
           result._1,
-          Right("input".getBytes("UTF-8").toVector)
+          Right(ByteVector.view("input".getBytes("UTF-8")))
         )
         assertEquals(result._2, Left(TaskIoFailure.InputNotDeclared(missingName)))
         assert(result._3.startsWith(root.resolve("workspace").resolve("scratch")))
@@ -430,7 +432,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         None,
         WorkloadOperation.Registered(task.operation.id, task.operation.version),
         task.operation.outputSchema,
-        "1".getBytes("UTF-8").toVector,
+        ByteVector.view("1".getBytes("UTF-8")),
         OutputManifest.empty,
         release,
         java.time.Instant.parse("2026-07-22T12:00:00Z")
@@ -474,7 +476,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         assertEquals(lines.size, events.size)
         val decoded = lines.map(line =>
           io.github.bbuchsbaum.slurm4s.protocol.WorkerEventCodec
-            .decode(s"$line\n".getBytes("UTF-8").toVector, envelopeLimit)
+            .decode(ByteVector.view(s"$line\n".getBytes("UTF-8")), envelopeLimit)
         )
         assert(decoded.forall(_.isRight))
         assertEquals(decoded.flatMap(_.toOption.map(_.sequence)).sorted, events.map(_.sequence))
@@ -528,7 +530,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       yield result match
         case RegisteredSubmissionResult.Submitted(prepared, SubmissionAttempt.Completed(_)) =>
           val retried = retryPrepared.toOption.get
-          val invocationBytes = Files.readAllBytes(prepared.invocationPath).toVector
+          val invocationBytes = ByteVector.view(Files.readAllBytes(prepared.invocationPath))
           assertEquals(
             TaskInvocationCodec.decode(invocationBytes, envelopeLimit, inputLimit),
             Right(prepared.invocation)
@@ -623,7 +625,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           )
           assertEquals(
             prepared.elements.toVector.map(_.invocation.inputBytes),
-            Vector("41", "99").map(_.getBytes("UTF-8").toVector)
+            Vector("41", "99").map(text => ByteVector.view(text.getBytes("UTF-8")))
           )
           assertEquals(prepared.elements.toVector.map(_.resultPath).distinct.size, 2)
           assertEquals(prepared.plan.elements.toVector.map(_.stdout.locator).distinct.size, 2)
@@ -662,15 +664,15 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
     )
     val inputCodec: InputCodec[String] = new InputCodec[String]:
       val schemaId: SchemaId = operation.inputSchema
-      def encode(value: String): Either[ResultCodecFailure, Vector[Byte]] =
-        Right(value.getBytes("UTF-8").toVector)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, String] =
+      def encode(value: String): Either[ResultCodecFailure, ByteVector] =
+        Right(ByteVector.view(value.getBytes("UTF-8")))
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, String] =
         Right(new String(bytes.toArray, "UTF-8"))
     val outputCodec: ResultCodec[Int] = new ResultCodec[Int]:
       val schemaId: ResultSchemaId = operation.outputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-        Right(value.toString.getBytes("UTF-8").toVector)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] =
+        Right(ByteVector.view(value.toString.getBytes("UTF-8")))
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] =
         bytesToInt(bytes)
     override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
 
@@ -678,13 +680,13 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       for
         _ <- context.progress(ProgressEvent("computing"))
         value <- IO.fromEither(
-          bytesToInt(input.getBytes("UTF-8").toVector).left.map(failure =>
+          bytesToInt(ByteVector.view(input.getBytes("UTF-8"))).left.map(failure =>
             new IllegalArgumentException(failure.message)
           )
         )
         _ <- writes.traverse_ { path =>
           context.outputs
-            .write(path, s"answer=${value + 1}\n".getBytes("UTF-8").toVector, outputLimit)
+            .write(path, ByteVector.view(s"answer=${value + 1}\n".getBytes("UTF-8")), outputLimit)
             .flatMap {
               case Right(_)      => IO.unit
               case Left(failure) => IO.raiseError(new IllegalStateException(failure.toString))
@@ -757,7 +759,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       payload
     )
 
-  private def bytesToInt(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+  private def bytesToInt(bytes: ByteVector): Either[ResultCodecFailure, Int] =
     scala.util
       .Try(new String(bytes.toArray, "UTF-8").toInt)
       .toEither
@@ -790,7 +792,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
                 BoundedEvidence.capture(
                   EvidenceSource.WorkerEvent,
                   java.time.Instant.parse("2026-07-22T12:00:00Z"),
-                  Vector.empty
+                  ByteVector.empty
                 )
               )
             )

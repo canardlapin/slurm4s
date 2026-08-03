@@ -4,6 +4,7 @@ import cats.effect.IO
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
+import scodec.bits.ByteVector
 
 class RemoteSchedulerSuite extends munit.CatsEffectSuite:
   test("disconnect after request write remains acceptance unknown") {
@@ -86,7 +87,7 @@ class RemoteSchedulerSuite extends munit.CatsEffectSuite:
       SubmissionKey.from("ssh-scheduler-test").toOption.get,
       JobName.from("ssh-scheduler-test").toOption.get,
       Payload.Script(
-        ScriptSource.Inline("test.sh", "#!/bin/sh\ntrue\n".getBytes("UTF-8").toVector),
+        ScriptSource.Inline("test.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
         Vector.empty,
         ResultContract.ExitOnly
       ),

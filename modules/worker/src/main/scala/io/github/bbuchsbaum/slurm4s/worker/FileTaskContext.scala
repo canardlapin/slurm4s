@@ -6,6 +6,8 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -91,7 +93,7 @@ object FileTaskContext:
     def read(
         name: InputName,
         maximumBytes: ByteLimit
-    ): IO[Either[TaskIoFailure, Vector[Byte]]] =
+    ): IO[Either[TaskIoFailure, ByteVector]] =
       declared.get(name) match
         case None       => IO.pure(Left(TaskIoFailure.InputNotDeclared(name)))
         case Some(path) =>
@@ -112,7 +114,7 @@ object FileTaskContext:
 
     def write(
         path: RelativeOutputPath,
-        bytes: Vector[Byte],
+        bytes: ByteVector,
         maximumBytes: ByteLimit
     ): IO[Either[TaskIoFailure, OutputEntry]] =
       if bytes.size > maximumBytes.value then
@@ -206,7 +208,7 @@ object FileTaskContext:
   private def readBounded(
       path: Path,
       maximum: ByteLimit
-  ): Either[Throwable, Vector[Byte]] =
+  ): Either[Throwable, ByteVector] =
     val input = Files.newInputStream(path, StandardOpenOption.READ)
     val output = ByteArrayOutputStream()
     val buffer = new Array[Byte](8192)
@@ -222,7 +224,7 @@ object FileTaskContext:
           total += count.toLong
       Either.cond(
         total <= maximum.value.toLong,
-        output.toByteArray.toVector,
+        ByteVector.view(output.toByteArray),
         new IllegalArgumentException(s"file exceeds ${maximum.value} bytes")
       )
     catch case NonFatal(error) => Left(error)
@@ -267,7 +269,7 @@ object FileTaskContext:
         }
     finally stream.close()
 
-  private def digest(bytes: Vector[Byte]): ContentDigest =
+  private def digest(bytes: ByteVector): ContentDigest =
     val hex = MessageDigest
       .getInstance("SHA-256")
       .digest(bytes.toArray)

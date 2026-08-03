@@ -60,6 +60,30 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     )
   }
 
+  test("an inline script's bytes keep the numeric wire shape an older peer already reads") {
+    val script = ByteVector.view("#!/bin/sh\nexit 0\n".getBytes(StandardCharsets.UTF_8))
+    val request = LaunchSpec(
+      SubmissionKey.from("wire-inline").toOption.get,
+      JobName.from("wire-inline").toOption.get,
+      ScriptSource.Inline("run.sh", script),
+      Vector.empty,
+      ResultContract.ExitOnly.descriptor,
+      ResourceRequest.validate(1, 1, None, None, None).toOption.get,
+      Map.empty
+    )
+
+    val encoded = AgentDomainJson.encodeSubmitRequest(request).toOption.get
+    assertEquals(
+      encoded.hcursor.downField("source").focus.map(_.noSpaces),
+      Some(
+        """{"Inline":{"name":"run.sh","bytes":""" +
+          """[35,33,47,98,105,110,47,115,104,10,101,120,105,116,32,48,10]}}"""
+      ),
+      "inline script bytes travel as a JSON array of signed byte values"
+    )
+    assertEquals(AgentDomainJson.decodeSubmitRequest(encoded), Right(request))
+  }
+
   test("agent submit wire round-trips validated environment names and rejects export injection") {
     val request = LaunchSpec(
       SubmissionKey.from("wire-environment").toOption.get,

@@ -6,13 +6,15 @@ import fs2.Stream
 import fs2.io.process.Processes
 import io.github.bbuchsbaum.slurm4s.core.DurationMillis
 
+import scodec.bits.ByteVector
+
 import java.io.IOException
 
 class SystemSshProcessRunnerSuite extends munit.CatsEffectSuite:
   given Processes[IO] = Processes.forIO
 
   test("system process runner writes stdin and drains stdout without a shell") {
-    val request = Vector[Byte](0, 1, 2, 3, 4)
+    val request = ByteVector(0, 1, 2, 3, 4)
     SystemSshProcessRunner[IO]
       .exchange(
         SshLaunch("/bin/cat", Vector.empty),
@@ -22,7 +24,7 @@ class SystemSshProcessRunnerSuite extends munit.CatsEffectSuite:
       .map {
         case SshProcessOutcome.Exited(0, true, stdout, stderr) =>
           assertEquals(stdout.bytes, request)
-          assertEquals(stderr.bytes, Vector.empty)
+          assertEquals(stderr.bytes, ByteVector.empty)
         case other => fail(s"unexpected process result: $other")
       }
   }
@@ -70,8 +72,8 @@ class SystemSshProcessRunnerSuite extends munit.CatsEffectSuite:
               stderr
             ) =>
           assert(diagnostic.startsWith("io-error"))
-          assertEquals(stdout.bytes, Vector.empty)
-          assertEquals(stderr.bytes, Vector.empty)
+          assertEquals(stdout.bytes, ByteVector.empty)
+          assertEquals(stderr.bytes, ByteVector.empty)
         case other => fail(s"unexpected process result: $other")
       }
   }
@@ -90,8 +92,8 @@ class SystemSshProcessRunnerSuite extends munit.CatsEffectSuite:
       cancelled <- waitCancelled.tryGet
     yield outcome match
       case SshProcessOutcome.TimedOut(true, stdout, stderr) =>
-        assertEquals(stdout.bytes, Vector(7.toByte))
-        assertEquals(stderr.bytes, Vector.empty)
+        assertEquals(stdout.bytes, ByteVector(7))
+        assertEquals(stderr.bytes, ByteVector.empty)
         assertEquals(cancelled, Some(()))
       case other => fail(s"unexpected process result: $other")
   }

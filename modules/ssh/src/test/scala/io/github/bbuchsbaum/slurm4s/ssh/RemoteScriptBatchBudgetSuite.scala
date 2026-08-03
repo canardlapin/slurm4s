@@ -7,6 +7,8 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 import scala.concurrent.duration.DurationInt
 
@@ -21,7 +23,7 @@ class RemoteScriptBatchBudgetSuite extends munit.CatsEffectSuite:
 
   private val observedAt = Instant.parse("2026-07-24T12:00:00Z")
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
   )
   private val parentJob = JobRef(JobId.from("9200").toOption.get, None)
 
@@ -100,7 +102,7 @@ class RemoteScriptBatchBudgetSuite extends munit.CatsEffectSuite:
   ) extends SshProcessRunner[IO]:
     def exchange(
         launch: SshLaunch,
-        request: Vector[Byte],
+        request: ByteVector,
         policy: SshExchangePolicy
     ): IO[SshProcessOutcome] =
       requestOf(request) match
@@ -136,11 +138,15 @@ class RemoteScriptBatchBudgetSuite extends munit.CatsEffectSuite:
               0,
               requestWriteCompleted = true,
               BoundedEvidence.capture(EvidenceSource.CommandStdout("ssh"), observedAt, frame),
-              BoundedEvidence.capture(EvidenceSource.CommandStderr("ssh"), observedAt, Vector.empty)
+              BoundedEvidence.capture(
+                EvidenceSource.CommandStderr("ssh"),
+                observedAt,
+                ByteVector.empty
+              )
             )
           )
 
-  private def requestOf(request: Vector[Byte]): Option[AgentEnvelope] =
+  private def requestOf(request: ByteVector): Option[AgentEnvelope] =
     FrameDecoder
       .empty(FrameLimits.default)
       .feed(request)

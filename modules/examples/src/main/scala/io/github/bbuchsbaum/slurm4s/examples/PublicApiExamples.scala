@@ -17,6 +17,8 @@ import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
 import io.github.bbuchsbaum.slurm4s.ssh.*
 import io.github.bbuchsbaum.slurm4s.worker.*
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.time.Instant
@@ -205,16 +207,16 @@ final class IncrementTask private (
 ) extends SlurmTask[Int, Int]:
   val inputCodec: InputCodec[Int] = new InputCodec[Int]:
     val schemaId: SchemaId = operation.inputSchema
-    def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-      Right(value.toString.getBytes(StandardCharsets.UTF_8).toVector)
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+    def encode(value: Int): Either[ResultCodecFailure, ByteVector] =
+      Right(ByteVector.view(value.toString.getBytes(StandardCharsets.UTF_8)))
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] =
       IncrementTask.decodeInt(bytes)
 
   val outputCodec: ResultCodec[Int] = new ResultCodec[Int]:
     val schemaId: ResultSchemaId = operation.outputSchema
-    def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-      Right(value.toString.getBytes(StandardCharsets.UTF_8).toVector)
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+    def encode(value: Int): Either[ResultCodecFailure, ByteVector] =
+      Right(ByteVector.view(value.toString.getBytes(StandardCharsets.UTF_8)))
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] =
       IncrementTask.decodeInt(bytes)
 
   override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
@@ -238,7 +240,7 @@ object IncrementTask:
       IncrementTask(OperationRef(id, version, input, output))
     }
 
-  private def decodeInt(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+  private def decodeInt(bytes: ByteVector): Either[ResultCodecFailure, Int] =
     Try(new String(bytes.toArray, StandardCharsets.UTF_8).toInt).toEither.leftMap { error =>
       ResultCodecFailure("invalid-int", Option(error.getMessage).getOrElse("invalid integer"))
     }

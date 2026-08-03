@@ -7,6 +7,8 @@ import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -192,7 +194,9 @@ class BatchSuite extends munit.CatsEffectSuite:
     val topology = compileOne
     val base = SubmissionKey.from("worker-script-batch").toOption.get
     val script =
-      "#!/bin/sh\nprintf '<%s>\\n' \"$@\"\nexit 7\n".getBytes(StandardCharsets.UTF_8).toVector
+      ByteVector.view(
+        "#!/bin/sh\nprintf '<%s>\\n' \"$@\"\nexit 7\n".getBytes(StandardCharsets.UTF_8)
+      )
     val request = RemoteScriptBatchRequest(
       base,
       JobName.from("worker-script-batch").toOption.get,
@@ -294,7 +298,7 @@ class BatchSuite extends munit.CatsEffectSuite:
         RemoteRegisteredBatchElement(
           index,
           BatchElementKey.derive(base, index).toOption.get,
-          index.value.toString.getBytes(StandardCharsets.UTF_8).toVector
+          ByteVector.view(index.value.toString.getBytes(StandardCharsets.UTF_8))
         )
       },
       Map.empty,

@@ -17,6 +17,8 @@ import io.github.bbuchsbaum.slurm4s.core.codec.WireEnvelope
 import io.github.bbuchsbaum.slurm4s.protocol.FrameCodec
 import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
 
+import scodec.bits.ByteVector
+
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
@@ -144,7 +146,7 @@ final class FileJournalControlStore[F[_]: Async] private (
     * the original diagnosis; the torn tail it leaves behind is recognized as uncommitted and
     * truncated on the next open.
     */
-  private def append(frame: Vector[Byte]): Unit =
+  private def append(frame: ByteVector): Unit =
     val start = channel.size()
     try
       channel.position(start)
@@ -411,7 +413,7 @@ private object JournalCodec:
       revision: StoreRevision,
       command: ControlCommand,
       maximumRecordBytes: ByteLimit
-  ): Either[ControlFailure, Vector[Byte]] =
+  ): Either[ControlFailure, ByteVector] =
     val commandJson = ControlCommandJson.encode(command)
     val payload = Json.obj(
       "priorRevision" -> Json.fromLong(priorRevision.value),
@@ -452,13 +454,13 @@ private object JournalCodec:
         payload.flip()
         val bytes = new Array[Byte](length)
         payload.get(bytes)
-        val record = decode(bytes.toVector).fold(
+        val record = decode(ByteVector.view(bytes)).fold(
           problem => throw JournalException(ControlFailure.JournalCorrupt(problem)),
           identity
         )
         JournalRead.Complete(position + total, record)
 
-  private def decode(bytes: Vector[Byte]): Either[String, JournalRecord] =
+  private def decode(bytes: ByteVector): Either[String, JournalRecord] =
     for
       envelope <- VersionedJson.decode(bytes).left.map(_.toString)
       _ <- Either.cond(envelope.schema == schema, (), "wrong journal schema")

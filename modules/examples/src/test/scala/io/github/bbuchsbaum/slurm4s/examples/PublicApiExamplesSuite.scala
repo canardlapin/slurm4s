@@ -11,6 +11,8 @@ import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
 import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
 import io.github.bbuchsbaum.slurm4s.ssh.*
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 
@@ -22,7 +24,7 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
   test("opaque and declared-output builders preserve distinct result contracts") {
     val source = ScriptSource.Inline(
       "analysis.sh",
-      "#!/bin/sh\ntrue\n".getBytes(StandardCharsets.UTF_8).toVector
+      ByteVector.view("#!/bin/sh\ntrue\n".getBytes(StandardCharsets.UTF_8))
     )
     val exitOnly = JobRequests
       .exitOnly("opaque-1", "opaque", source, Vector.empty, resources)
@@ -98,7 +100,7 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
     val runner = new SshProcessRunner[IO]:
       def exchange(
           launch: SshLaunch,
-          request: Vector[Byte],
+          request: ByteVector,
           policy: SshExchangePolicy
       ): IO[SshProcessOutcome] =
         IO.raiseError(new AssertionError(s"unexpected exchange: $launch $request $policy"))

@@ -9,6 +9,8 @@ import cats.syntax.all.*
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import scala.concurrent.duration.*
 
@@ -407,6 +409,6 @@ final class ManagedController[F[_]: Async](
       BoundedEvidence.capture(
         EvidenceSource.DurableJournal,
         at,
-        message.getBytes(StandardCharsets.UTF_8).toVector
+        ByteVector.view(message.getBytes(StandardCharsets.UTF_8))
       )
     )

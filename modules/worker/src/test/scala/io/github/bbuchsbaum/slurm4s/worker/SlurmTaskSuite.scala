@@ -3,6 +3,8 @@ package io.github.bbuchsbaum.slurm4s.worker
 import cats.effect.IO
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
@@ -24,7 +26,7 @@ class SlurmTaskSuite extends munit.FunSuite:
         assertEquals(operation.descriptor, Increment.operation.descriptor)
         assertEquals(
           inputCodec.encode(input),
-          Right("41".getBytes(StandardCharsets.UTF_8).toVector)
+          Right(ByteVector.view("41".getBytes(StandardCharsets.UTF_8)))
         )
         assertEquals(contract.descriptor.schema, Some(Increment.outputCodec.schemaId))
       case other => fail(s"expected a registered task, received $other")
@@ -42,16 +44,16 @@ class SlurmTaskSuite extends munit.FunSuite:
 
     val inputCodec: InputCodec[Int] = new InputCodec[Int]:
       val schemaId: SchemaId = operation.inputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-        Right(value.toString.getBytes(StandardCharsets.UTF_8).toVector)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] =
+        Right(ByteVector.view(value.toString.getBytes(StandardCharsets.UTF_8)))
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] =
         decodeInt(bytes)
 
     val outputCodec: ResultCodec[Int] = new ResultCodec[Int]:
       val schemaId: ResultSchemaId = operation.outputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] =
         inputCodec.encode(value)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] =
         decodeInt(bytes)
 
     override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
@@ -59,7 +61,7 @@ class SlurmTaskSuite extends munit.FunSuite:
     def run(input: Int, context: TaskContext[IO]): IO[Int] =
       IO.pure(input + 1)
 
-    private def decodeInt(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+    private def decodeInt(bytes: ByteVector): Either[ResultCodecFailure, Int] =
       Try(new String(bytes.toArray, StandardCharsets.UTF_8).toInt).toEither.left.map(error =>
         ResultCodecFailure("invalid-int", error.getMessage)
       )

@@ -3,6 +3,8 @@ package io.github.bbuchsbaum.slurm4s.worker
 import cats.effect.Resource
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.nio.file.Path
 
 enum TaskContextAssurance derives CanEqual:
@@ -18,12 +20,12 @@ enum TaskIoFailure derives CanEqual:
   case OutputValidation(failures: Vector[OutputValidationFailure])
 
 trait InputAccess[F[_]]:
-  def read(name: InputName, maximumBytes: ByteLimit): F[Either[TaskIoFailure, Vector[Byte]]]
+  def read(name: InputName, maximumBytes: ByteLimit): F[Either[TaskIoFailure, ByteVector]]
 
 trait OutputStaging[F[_]]:
   def write(
       path: RelativeOutputPath,
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       maximumBytes: ByteLimit
   ): F[Either[TaskIoFailure, OutputEntry]]
 

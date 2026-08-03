@@ -2,12 +2,15 @@ package io.github.bbuchsbaum.slurm4s.ssh
 
 import cats.data.NonEmptyVector
 import cats.effect.IO
+import fs2.Chunk
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.agent.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 import io.github.bbuchsbaum.slurm4s.testkit.SchedulerProgram
 import io.github.bbuchsbaum.slurm4s.worker.*
+
+import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -33,7 +36,7 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
   )
   private val job = JobRef(JobId.from("9001").toOption.get, None)
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
   )
 
   private val temporaryRoot = FunFixture[Path](
@@ -373,20 +376,20 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
     val inputCodec: InputCodec[Int] = intCodec(operation.inputSchema)
     val outputCodec: ResultCodec[Int] = new ResultCodec[Int]:
       val schemaId: ResultSchemaId = operation.outputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] = encodeInt(value)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] = decodeInt(bytes)
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] = encodeInt(value)
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] = decodeInt(bytes)
     override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
     def run(input: Int, context: TaskContext[IO]): IO[Int] = IO.pure(input + 1)
 
   private def intCodec(schema: SchemaId): InputCodec[Int] = new InputCodec[Int]:
     val schemaId: SchemaId = schema
-    def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] = encodeInt(value)
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] = decodeInt(bytes)
+    def encode(value: Int): Either[ResultCodecFailure, ByteVector] = encodeInt(value)
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] = decodeInt(bytes)
 
-  private def encodeInt(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-    Right(value.toString.getBytes(StandardCharsets.UTF_8).toVector)
+  private def encodeInt(value: Int): Either[ResultCodecFailure, ByteVector] =
+    Right(ByteVector.view(value.toString.getBytes(StandardCharsets.UTF_8)))
 
-  private def decodeInt(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+  private def decodeInt(bytes: ByteVector): Either[ResultCodecFailure, Int] =
     Try(new String(bytes.toArray, StandardCharsets.UTF_8).toInt).toEither.left.map(error =>
       ResultCodecFailure("invalid-int", Option(error.getMessage).getOrElse("invalid integer"))
     )
@@ -464,7 +467,7 @@ final private class FlakySshRunner(delegate: SshProcessRunner[IO]) extends SshPr
 
   def exchange(
       launch: SshLaunch,
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy
   ): IO[SshProcessOutcome] =
     if remaining > 0 then
@@ -476,7 +479,7 @@ final private class FlakySshRunner(delegate: SshProcessRunner[IO]) extends SshPr
           BoundedEvidence.capture(
             EvidenceSource.CommandLaunch("ssh"),
             Instant.parse("2026-07-24T12:00:00Z"),
-            Vector.empty
+            ByteVector.empty
           )
         )
       )
@@ -488,24 +491,24 @@ final private class RemoteLoopbackRunner(server: AgentStdioServer[IO]) extends S
 
   def exchange(
       launch: SshLaunch,
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy
   ): IO[SshProcessOutcome] =
     count += 1
     Stream
-      .emits(request)
+      .chunk(Chunk.byteVector(request))
       .covary[IO]
       .chunkN(5)
       .flatMap(Stream.chunk)
       .through(server.pipe)
       .compile
-      .toVector
+      .to(ByteVector)
       .map { response =>
         val now = Instant.parse("2026-07-24T12:00:00Z")
         SshProcessOutcome.Exited(
           0,
           requestWriteCompleted = true,
           BoundedEvidence.capture(EvidenceSource.CommandStdout("ssh"), now, response),
-          BoundedEvidence.capture(EvidenceSource.CommandStderr("ssh"), now, Vector.empty)
+          BoundedEvidence.capture(EvidenceSource.CommandStderr("ssh"), now, ByteVector.empty)
         )
       }

@@ -14,6 +14,8 @@ import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
 import io.github.bbuchsbaum.slurm4s.task.SlurmTaskCall
 import io.github.bbuchsbaum.slurm4s.task.SlurmBatch
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 
 final case class SlurmSshConfig(
@@ -334,7 +336,7 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
               BoundedEvidence.capture(
                 EvidenceSource.AgentProtocol,
                 at,
-                failure.toString.getBytes(StandardCharsets.UTF_8).toVector
+                ByteVector.view(failure.toString.getBytes(StandardCharsets.UTF_8))
               )
             )
           )

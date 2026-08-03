@@ -5,6 +5,8 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.ResultEnvelopeCodec
 
+import scodec.bits.ByteVector
+
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
@@ -19,7 +21,7 @@ import java.time.Instant
   */
 final case class VerifiedResultPayload[+A](
     value: A,
-    encodedValue: Vector[Byte],
+    encodedValue: ByteVector,
     submissionKey: SubmissionKey,
     attemptId: AttemptId,
     attemptEpoch: AttemptEpoch,
@@ -114,7 +116,7 @@ object ResultAttachment:
           BoundedEvidence.capture(
             EvidenceSource.ResultEnvelope,
             observedAt,
-            Vector.empty,
+            ByteVector.empty,
             handle.maximumEnvelopeBytes
           )
         )
@@ -133,7 +135,7 @@ object ResultAttachment:
       attempt: ManagedAttempt,
       handle: DurableResultHandle,
       contract: ResultContract.Structured[A],
-      envelopeBytes: Vector[Byte],
+      envelopeBytes: ByteVector,
       observedOutputs: Vector[OutputEntry],
       observedAt: Instant
   ): ExecutionResult[A] =
@@ -150,7 +152,7 @@ object ResultAttachment:
       attempt: ManagedAttempt,
       handle: DurableResultHandle,
       contract: ResultContract.Structured[A],
-      envelopeBytes: Vector[Byte],
+      envelopeBytes: ByteVector,
       observedOutputs: Vector[OutputEntry],
       observedAt: Instant
   ): VerifiedAttachment[A] =
@@ -300,7 +302,7 @@ object ResultAttachment:
   ): VerifiedAttachment[A] =
     VerifiedAttachment.ResultInvalid(Diagnostics.one(Diagnostic(code, message)), evidence)
 
-  private def readBounded(path: Path, maximum: ByteLimit): Vector[Byte] =
+  private def readBounded(path: Path, maximum: ByteLimit): ByteVector =
     val input = Files.newInputStream(path, StandardOpenOption.READ)
     val output = ByteArrayOutputStream()
     val buffer = new Array[Byte](8192)
@@ -314,7 +316,7 @@ object ResultAttachment:
         else
           output.write(buffer, 0, count)
           total += count.toLong
-      output.toByteArray.toVector
+      ByteVector.view(output.toByteArray)
     finally
       input.close()
       output.close()

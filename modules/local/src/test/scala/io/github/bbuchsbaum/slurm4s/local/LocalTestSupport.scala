@@ -4,6 +4,8 @@ import cats.effect.IO
 import cats.effect.Resource
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Comparator
@@ -25,7 +27,8 @@ object LocalTestSupport:
     LaunchSpec(
       submissionKey = SubmissionKey.from(key).toOption.get,
       name = JobName.from("opaque-analysis").toOption.get,
-      source = ScriptSource.Inline("analysis.sh", "#!/bin/sh\nprintf result\n".getBytes.toVector),
+      source =
+        ScriptSource.Inline("analysis.sh", ByteVector.view("#!/bin/sh\nprintf result\n".getBytes)),
       arguments = Vector.empty,
       resultContract = ResultContract.ExitOnly.descriptor,
       resources = ResourceRequest.validate(1, 1, Some(1), None, None).toOption.get

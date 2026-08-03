@@ -4,6 +4,7 @@ import cats.data.NonEmptyVector
 import cats.effect.IO
 import cats.effect.Ref
 import cats.syntax.all.*
+import fs2.Chunk
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.agent.*
 import io.github.bbuchsbaum.slurm4s.batch.*
@@ -11,6 +12,8 @@ import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.task.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 import io.github.bbuchsbaum.slurm4s.worker.*
+
+import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -31,7 +34,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
   private val observedAt = Instant.parse("2026-07-24T12:00:00Z")
   private val parentJob = JobRef(JobId.from("9100").toOption.get, None)
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
   )
   private val resultLimit = ByteLimit.from(128).toOption.get
   private val envelopeLimit = ByteLimit.from(4096).toOption.get
@@ -249,7 +252,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
         IO.pure(
           LogReadResult.Page(
             LogPage(
-              ref.locator.getBytes(StandardCharsets.UTF_8).toVector,
+              ByteVector.view(ref.locator.getBytes(StandardCharsets.UTF_8)),
               cursor,
               endOfFile = true,
               observedAt
@@ -324,19 +327,19 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
     )
     val inputCodec: InputCodec[Int] = new InputCodec[Int]:
       val schemaId: SchemaId = operation.inputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] = encodeInt(value)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] = decodeInt(bytes)
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] = encodeInt(value)
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] = decodeInt(bytes)
     val outputCodec: ResultCodec[Int] = new ResultCodec[Int]:
       val schemaId: ResultSchemaId = operation.outputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] = encodeInt(value)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] = decodeInt(bytes)
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] = encodeInt(value)
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] = decodeInt(bytes)
     override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
     def run(input: Int, context: TaskContext[IO]): IO[Int] = IO.pure(input + 1)
 
-  private def encodeInt(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-    Right(value.toString.getBytes(StandardCharsets.UTF_8).toVector)
+  private def encodeInt(value: Int): Either[ResultCodecFailure, ByteVector] =
+    Right(ByteVector.view(value.toString.getBytes(StandardCharsets.UTF_8)))
 
-  private def decodeInt(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+  private def decodeInt(bytes: ByteVector): Either[ResultCodecFailure, Int] =
     Try(new String(bytes.toArray, StandardCharsets.UTF_8).toInt).toEither.left.map(error =>
       ResultCodecFailure("invalid-int", Option(error.getMessage).getOrElse("invalid integer"))
     )
@@ -390,17 +393,17 @@ final private class BatchLoopbackRunner(
 ) extends SshProcessRunner[IO]:
   def exchange(
       launch: SshLaunch,
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy
   ): IO[SshProcessOutcome] =
     Stream
-      .emits(request)
+      .chunk(Chunk.byteVector(request))
       .covary[IO]
       .chunkN(5)
       .flatMap(Stream.chunk)
       .through(server.pipe)
       .compile
-      .toVector
+      .to(ByteVector)
       .map { response =>
         val now = Instant.parse("2026-07-24T12:00:00Z")
         SshProcessOutcome.Exited(
@@ -410,7 +413,7 @@ final private class BatchLoopbackRunner(
           BoundedEvidence.capture(
             EvidenceSource.CommandStderr("ssh"),
             now,
-            Vector.empty
+            ByteVector.empty
           )
         )
       }

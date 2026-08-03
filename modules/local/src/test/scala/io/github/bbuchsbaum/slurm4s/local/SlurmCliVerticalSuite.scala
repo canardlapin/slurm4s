@@ -7,6 +7,8 @@ import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.testkit.ExpectedCommand
 import io.github.bbuchsbaum.slurm4s.testkit.ScriptedCommandExecutor
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.time.Instant
@@ -270,5 +272,5 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
       if stdout then EvidenceSource.CommandStdout(executable.fileName)
       else EvidenceSource.CommandStderr(executable.fileName),
       Instant.parse("2026-07-22T12:00:00Z"),
-      text.getBytes(StandardCharsets.UTF_8).toVector
+      ByteVector.view(text.getBytes(StandardCharsets.UTF_8))
     )

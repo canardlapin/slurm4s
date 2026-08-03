@@ -11,6 +11,8 @@ import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 import io.github.bbuchsbaum.slurm4s.task.SlurmBatch
 
+import scodec.bits.ByteVector
+
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
@@ -745,7 +747,7 @@ private[ssh] object RemoteScriptBatches:
   private def readLocalScript(
       path: Path,
       maximumBytes: ByteLimit
-  ): Either[LocalSourceFailure, Vector[Byte]] =
+  ): Either[LocalSourceFailure, ByteVector] =
     if !Files.isRegularFile(path) then Left(LocalSourceFailure.NotRegular)
     else
       val input = Files.newInputStream(path, StandardOpenOption.READ)
@@ -758,7 +760,7 @@ private[ssh] object RemoteScriptBatches:
           if count < 0 then done = true
           else output.write(buffer, 0, count)
         if output.size() > maximumBytes.value then Left(LocalSourceFailure.LimitExceeded)
-        else Right(output.toByteArray.toVector)
+        else Right(ByteVector.view(output.toByteArray))
       finally
         input.close()
         output.close()

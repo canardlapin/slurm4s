@@ -7,6 +7,7 @@ import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+import scodec.bits.ByteVector
 
 /** P8.B2 law family 2: submission and cancellation uncertainty.
   *
@@ -98,7 +99,7 @@ class UncertaintyLawSuite extends munit.ScalaCheckSuite:
       SubmissionKey.from("uncertainty-law").toOption.get,
       JobName.from("uncertainty-law").toOption.get,
       Payload.Script(
-        ScriptSource.Inline("test.sh", "#!/bin/sh\ntrue\n".getBytes("UTF-8").toVector),
+        ScriptSource.Inline("test.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
         Vector.empty,
         ResultContract.ExitOnly
       ),
