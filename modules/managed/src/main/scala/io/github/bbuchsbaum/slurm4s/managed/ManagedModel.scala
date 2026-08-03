@@ -2,10 +2,10 @@ package io.github.bbuchsbaum.slurm4s.managed
 
 import cats.Order
 import cats.Show
-import io.circe.Printer
 import io.github.bbuchsbaum.remoteexec.kernel.TextIdentifier
 import io.github.bbuchsbaum.remoteexec.kernel.byteVectorCanEqual
 import io.github.bbuchsbaum.slurm4s.core.*
+import io.github.bbuchsbaum.slurm4s.core.codec.CanonicalJson
 import io.github.bbuchsbaum.slurm4s.protocol.AgentDomainJson
 
 import scodec.bits.ByteVector
@@ -56,8 +56,6 @@ final case class CanonicalRequest private (
       .flatMap(AgentDomainJson.decodeSubmitRequest)
 
 object CanonicalRequest:
-  private val printer = Printer.noSpaces.copy(dropNullValues = false, sortKeys = true)
-
   def from(
       request: LaunchSpec,
       policy: ManagedRequestPolicy = ManagedRequestPolicy.rejectEnvironmentValues
@@ -70,7 +68,7 @@ object CanonicalRequest:
 
   private def encode(request: LaunchSpec): Either[String, CanonicalRequest] =
     AgentDomainJson.encodeSubmitRequest(request).flatMap { json =>
-      val bytes = ByteVector.view(printer.print(json).getBytes(StandardCharsets.UTF_8))
+      val bytes = CanonicalJson.bytes(json)
       Either.cond(
         bytes.size <= ByteLimit.maximumCommandCapture.value,
         CanonicalRequest(bytes, digest(bytes)),

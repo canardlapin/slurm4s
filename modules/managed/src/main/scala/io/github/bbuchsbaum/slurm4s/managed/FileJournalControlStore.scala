@@ -6,12 +6,12 @@ import cats.effect.Resource
 import cats.effect.std.Semaphore
 import cats.syntax.all.*
 import io.circe.Json
-import io.circe.Printer
 import io.github.bbuchsbaum.slurm4s.core.ByteLimit
 import io.github.bbuchsbaum.slurm4s.core.EventCursor
 import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
 import io.github.bbuchsbaum.slurm4s.core.SchemaId
 import io.github.bbuchsbaum.slurm4s.core.SubmissionKey
+import io.github.bbuchsbaum.slurm4s.core.codec.CanonicalJson
 import io.github.bbuchsbaum.slurm4s.core.codec.VersionedJson
 import io.github.bbuchsbaum.slurm4s.core.codec.WireEnvelope
 import io.github.bbuchsbaum.slurm4s.protocol.FrameCodec
@@ -406,7 +406,6 @@ final private case class JournalException(failure: ControlFailure)
 
 private object JournalCodec:
   private val schema = SchemaId.unsafeFrom("slurm4s.control-command")
-  private val printer = Printer.noSpaces.copy(dropNullValues = false, sortKeys = true)
 
   def encode(
       priorRevision: StoreRevision,
@@ -478,7 +477,7 @@ private object JournalCodec:
   private def checksum(json: Json): String =
     MessageDigest
       .getInstance("SHA-256")
-      .digest(printer.print(json).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+      .digest(CanonicalJson.print(json).getBytes(java.nio.charset.StandardCharsets.UTF_8))
       .map(byte => f"${byte & 0xff}%02x")
       .mkString
 

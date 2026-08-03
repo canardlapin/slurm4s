@@ -3,6 +3,8 @@ package io.github.bbuchsbaum.slurm4s.managed
 import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all.*
+import io.github.bbuchsbaum.slurm4s.core.codec.CanonicalJson
+import io.github.bbuchsbaum.slurm4s.protocol.AgentDomainJson
 
 import java.nio.file.Files
 import java.nio.file.Path
@@ -131,6 +133,32 @@ class JournalReplayLawSuite extends munit.CatsEffectSuite:
       val first = ControlCommandJson.encode(command).noSpaces
       val second = ControlCommandJson.encode(command).noSpaces
       assertEquals(second, first, s"encoding was not deterministic for $command")
+    }
+  }
+
+  /** Pins the other durable consumer of canonicalization to the one shared rendering (P7.4).
+    *
+    * A managed request's digest of its canonical bytes *is* its identity — the controller treats
+    * two requests with the same digest as the same request — so if this object went back to
+    * rendering with a printer of its own, an identical request could canonicalize differently and
+    * stop matching what was already recorded. Comparing against `CanonicalJson` is what makes that
+    * regression fail a test rather than surface as a phantom digest conflict.
+    */
+  test("a canonical request is rendered by the shared canonicalization, not a private printer") {
+    val specs = Vector.fill(50)(ManagedGenerators.managedLaunchSpec.sample).flatten
+    assert(specs.sizeIs > 0, "no requests were generated")
+    specs.foreach { spec =>
+      val canonical = CanonicalRequest
+        .from(spec)
+        .fold(failure => fail(s"a generated request did not canonicalize: $failure"), identity)
+      val expected = CanonicalJson.bytes(
+        AgentDomainJson.encodeSubmitRequest(spec).toOption.get
+      )
+      assertEquals(
+        canonical.bytes,
+        expected,
+        "the canonical request bytes diverged from the shared canonical rendering"
+      )
     }
   }
 

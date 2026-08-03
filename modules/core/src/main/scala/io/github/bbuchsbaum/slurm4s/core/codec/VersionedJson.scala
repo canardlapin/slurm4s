@@ -2,7 +2,6 @@ package io.github.bbuchsbaum.slurm4s.core.codec
 
 import io.circe.Json
 import io.circe.JsonObject
-import io.circe.Printer
 import io.circe.parser
 import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
 import io.github.bbuchsbaum.slurm4s.core.SchemaId
@@ -53,7 +52,6 @@ object WireEnvelope:
 
 object VersionedJson:
   val supportedMajor: Int = 1
-  private val canonicalPrinter = Printer.noSpaces.copy(dropNullValues = false, sortKeys = true)
 
   def encode(envelope: WireEnvelope): ByteVector =
     val protocol = Json.obj(
@@ -68,7 +66,7 @@ object VersionedJson:
     val withExtensions = envelope.extensions.toIterable.foldLeft(base) {
       case (fields, (name, value)) => fields.add(name, value)
     }
-    val canonical = canonicalPrinter.print(Json.fromJsonObject(withExtensions)) + "\n"
+    val canonical = CanonicalJson.print(Json.fromJsonObject(withExtensions)) + "\n"
     ByteVector.view(canonical.getBytes(StandardCharsets.UTF_8))
 
   def decode(bytes: ByteVector): Either[CodecFailure, WireEnvelope] =
