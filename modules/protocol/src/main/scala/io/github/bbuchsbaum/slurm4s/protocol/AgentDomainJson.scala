@@ -2150,32 +2150,20 @@ object AgentDomainJson:
     }
   }
 
+  /** The bounded rule above, adapted to circe's failure type for use inside a `Decoder`.
+    *
+    * The two differ only in how they report, so this forwards rather than restating the arithmetic:
+    * the check-before-allocate ordering is the part that must not drift, and it is easy to
+    * reintroduce a copy that decodes first and bounds afterwards.
+    */
   private def decodeBase64(
       encoded: String,
       cursor: HCursor,
       maximumBytes: ByteLimit,
       fieldName: String
   ): Decoder.Result[ByteVector] =
-    if encoded.length.toLong > maximumEncodedLength(maximumBytes) then
-      Left(DecodingFailure(s"$fieldName exceeds its encoded size limit", cursor.history))
-    else
-      Try(ByteVector.view(Base64.getDecoder.decode(encoded))).toEither.left
-        .map { error =>
-          DecodingFailure(
-            Option(error.getMessage).filter(_.nonEmpty).getOrElse("invalid base64"),
-            cursor.history
-          )
-        }
-        .flatMap { bytes =>
-          Either.cond(
-            bytes.size <= maximumBytes.value.toLong,
-            bytes,
-            DecodingFailure(
-              s"$fieldName exceeds ${maximumBytes.value} decoded bytes",
-              cursor.history
-            )
-          )
-        }
+    decodeBase64Bounded(encoded, maximumBytes, fieldName).left
+      .map(reason => DecodingFailure(reason, cursor.history))
 
   private def slurmStateCode(state: SlurmState): String = state match
     case SlurmState.Pending     => "pending"
