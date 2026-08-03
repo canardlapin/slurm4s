@@ -120,6 +120,42 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     )
   }
 
+  test("observations carry reported cluster evidence across the wire") {
+    val observedAt = Instant.parse("2026-07-23T12:00:00Z")
+    val cluster = ClusterName.from("alpha").toOption.get
+    val observation = JobObservation(
+      job = JobRef(JobId.from("2003").toOption.get, None),
+      state = SlurmState.Running,
+      freshness = Freshness.Current(observedAt),
+      reason = None,
+      rawFields = Map.empty,
+      evidence = EvidenceBundle(
+        BoundedEvidence.capture(
+          EvidenceSource.CommandStdout("squeue"),
+          observedAt,
+          Vector.empty
+        )
+      ),
+      reportedCluster = Some(cluster)
+    )
+    val result: SchedulerQueryResult[ObservationBatch] =
+      SchedulerQueryResult.Succeeded(
+        ObservationBatch(NonEmptyVector.one(ObservationResult.Observed(observation)))
+      )
+    val encoded = AgentDomainJson.encodeObservation(result)
+
+    assertEquals(AgentDomainJson.decodeObservation(encoded), Right(result))
+
+    // A peer that never learned the field must still decode, so absence stays `None` rather than
+    // becoming a decode failure.
+    assertEquals(
+      AgentDomainJson
+        .decodeObservation(removeField(encoded, "reportedCluster"))
+        .map(observedCluster),
+      Right(None)
+    )
+  }
+
   test("legacy observations without timing decode conservatively") {
     val observedAt = Instant.parse("2026-07-23T12:00:00Z")
     val evidence = BoundedEvidence.capture(
@@ -421,6 +457,14 @@ class AgentDomainJsonSuite extends munit.FunSuite:
         case ObservationResult.Observed(value) => value.state
         case other                             => fail(s"unexpected observation result: $other")
     case other => fail(s"unexpected query result: $other")
+
+  private def observedCluster(result: SchedulerQueryResult[ObservationBatch]): Option[ClusterName] =
+    result match
+      case SchedulerQueryResult.Succeeded(batch) =>
+        batch.results.head match
+          case ObservationResult.Observed(value) => value.reportedCluster
+          case other                             => fail(s"unexpected observation result: $other")
+      case other => fail(s"unexpected query result: $other")
 
   private def removeField(json: Json, name: String): Json =
     json.arrayOrObject(

@@ -1973,8 +1973,9 @@ object AgentDomainJson:
     yield JobTiming(start, projectedEndAt, timeLimit)
   }
   private given Encoder[JobObservation] = Encoder.instance { value =>
-    // `flags` is emitted only when a flag was actually reported, so an observation without flags
-    // keeps the wire shape it had before flags existed and the decoder's default covers the rest.
+    // `flags` and `reportedCluster` are emitted only when actually reported, so an observation
+    // without them keeps the wire shape it had before they existed and the decoder's defaults
+    // cover the rest.
     Json.obj(
       Vector(
         "job" -> value.job.asJson,
@@ -1984,7 +1985,8 @@ object AgentDomainJson:
         "rawFields" -> value.rawFields.asJson,
         "evidence" -> value.evidence.asJson,
         "timing" -> value.timing.asJson
-      ) ++ Option.when(value.flags.nonEmpty)("flags" -> value.flags.asJson)*
+      ) ++ Option.when(value.flags.nonEmpty)("flags" -> value.flags.asJson)
+        ++ value.reportedCluster.map(cluster => "reportedCluster" -> cluster.asJson)*
     )
   }
   private given Decoder[JobObservation] = Decoder.instance { cursor =>
@@ -1999,7 +2001,18 @@ object AgentDomainJson:
       flags <- cursor
         .get[Option[Vector[SlurmStateFlag]]]("flags")
         .map(_.getOrElse(Vector.empty))
-    yield JobObservation(job, state, freshness, reason, rawFields, evidence, timing, flags)
+      reportedCluster <- cursor.get[Option[ClusterName]]("reportedCluster")
+    yield JobObservation(
+      job,
+      state,
+      freshness,
+      reason,
+      rawFields,
+      evidence,
+      timing,
+      flags,
+      reportedCluster
+    )
   }
   private given Encoder[ExitStatus] = deriveEncoder
   private given Decoder[ExitStatus] = deriveDecoder
