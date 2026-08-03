@@ -640,6 +640,10 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           )
           val script = Files.readString(prepared.launchScript)
           assert(script.contains("SLURM_ARRAY_TASK_ID"))
+          assert(
+            script.indexOf("umask 077") < script.indexOf(">'"),
+            s"array element logs must be created private, got:\n$script"
+          )
           assert(script.contains("'0')"))
           assert(script.contains("'1')"))
           assert(!script.contains("'41'"))

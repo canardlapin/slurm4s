@@ -122,6 +122,58 @@ class BatchSuite extends munit.CatsEffectSuite:
       }
   }
 
+  temporaryRoot.test("no generated script creates a workload log before setting a private umask") {
+    root =>
+      val executable = root.resolve("slurm4s-worker")
+      val _ = Files.writeString(executable, "#!/bin/sh\nexit 0\n")
+      val _ = executable.toFile.setExecutable(true, true)
+      val launcher = RegisteredTaskLauncher(
+        WorkerLaunchSettings(
+          root.resolve("workspace"),
+          executable,
+          release,
+          ByteLimit.from(1024).toOption.get,
+          ByteLimit.maximumCommandCapture,
+          ByteLimit.from(4096).toOption.get,
+          ByteLimit.from(8192).toOption.get
+        )
+      )
+      val plans = Vector(
+        "umask-independent" -> BatchExecutionPlan.Independent(),
+        "umask-sharded" -> BatchExecutionPlan.Sharded(
+          PositiveInt.from("shards", 3).toOption.get,
+          PositiveInt.from("slots", 5).toOption.get,
+          ShardAssignment.Exactly(PositiveInt.from("rows", 9).toOption.get)
+        ),
+        "umask-gang" -> BatchExecutionPlan.Gang(
+          PositiveInt.from("nodes", 9).toOption.get,
+          PositiveInt.from("tasksPerNode", 3).toOption.get
+        )
+      )
+
+      plans.traverse_ { case (name, execution) =>
+        launcher.prepareRemoteBatch(remoteRequest(name, execution)).flatMap {
+          case Left(diagnostics) =>
+            IO.raiseError(new AssertionError(diagnostics.toVector.map(_.code).mkString(",")))
+          case Right(prepared) =>
+            IO.blocking {
+              scriptsUnder(prepared.launchScript.getParent).foreach { script =>
+                val text = Files.readString(script)
+                // A shell-created log inherits the site default unless umask precedes it, and on a
+                // shared cluster that default is routinely world-readable.
+                val redirect = text.indexOf(">'")
+                if redirect >= 0 then
+                  val umask = text.indexOf("umask 077")
+                  assert(
+                    umask >= 0 && umask < redirect,
+                    s"$script redirects a log before setting umask:\n$text"
+                  )
+              }
+            }
+        }
+      }
+  }
+
   temporaryRoot.test("opaque script argv is exact and exit publication is atomic") { root =>
     val executable = root.resolve("slurm4s-worker")
     val _ = Files.writeString(executable, "#!/bin/sh\nexit 0\n")
@@ -219,6 +271,13 @@ class BatchSuite extends munit.CatsEffectSuite:
       )
       assertEquals(stdoutMode, "rw-------", "workload logs must be created private")
   }
+
+  private def scriptsUnder(directory: Path): Vector[Path] =
+    val stream = Files.walk(directory)
+    try
+      stream.iterator.asScala.toVector
+        .filter(path => Files.isRegularFile(path) && path.getFileName.toString.endsWith(".sh"))
+    finally stream.close()
 
   private def remoteRequest(
       name: String,

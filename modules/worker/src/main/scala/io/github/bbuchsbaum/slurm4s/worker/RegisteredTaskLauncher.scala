@@ -972,6 +972,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       .mkString("\n")
     val script =
       s"""#!/bin/sh
+         |umask 077
          |set -eu
          |case "${'$'}{SLURM_ARRAY_TASK_ID-}" in
          |$cases
@@ -1158,6 +1159,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       .mkString("\n")
     val script =
       s"""#!/bin/sh
+         |umask 077
          |set -eu
          |case "${'$'}{SLURM_ARRAY_TASK_ID-}" in
          |$cases
@@ -1185,6 +1187,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
          |""".stripMargin
     }.mkString
     s"""#!/bin/bash
+       |umask 077
        |set -u
        |if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
        |  echo 'slurm4s: bounded shards require Bash 4.3 or newer' >&2
@@ -1215,6 +1218,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       .mkString("\n")
     val script =
       s"""#!/bin/sh
+         |umask 077
          |set -eu
          |case "${'$'}{SLURM_PROCID-}" in
          |$cases
