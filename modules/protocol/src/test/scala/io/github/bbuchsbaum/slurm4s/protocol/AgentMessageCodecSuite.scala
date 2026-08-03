@@ -11,6 +11,8 @@ import io.github.bbuchsbaum.slurm4s.core.LogReadResult
 import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
 import io.github.bbuchsbaum.slurm4s.core.codec.CodecFailure
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 class AgentMessageCodecSuite extends munit.FunSuite:
@@ -106,7 +108,7 @@ class AgentMessageCodecSuite extends munit.FunSuite:
         AgentDomainJson.encodeLogResult(
           LogReadResult.Page(
             LogPage(
-              Vector.fill(pageLimit.value)(0xff.toByte),
+              ByteVector.fill(pageLimit.value.toLong)(0xff.toByte),
               LogCursor(
                 LogOffset.from(Long.MaxValue).toOption.get,
                 Some(FileIdentity.from("f" * 512).toOption.get)

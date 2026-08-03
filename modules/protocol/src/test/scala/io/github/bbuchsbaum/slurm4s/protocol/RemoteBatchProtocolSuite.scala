@@ -3,6 +3,8 @@ package io.github.bbuchsbaum.slurm4s.protocol
 import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 class RemoteBatchProtocolSuite extends munit.FunSuite:
@@ -100,7 +102,7 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
       ScriptProgram(
         ScriptSource.Inline(
           "analysis.sh",
-          Vector(0x00.toByte, 0x7f.toByte, 0x80.toByte, 0xff.toByte)
+          ByteVector(0x00, 0x7f, 0x80, 0xff)
         ),
         ScriptInvocation.Via(CommandPrefix.bash)
       ),
@@ -135,7 +137,7 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
         Submission.AcceptanceUnknown(
           AcceptanceUncertainty.ResponseLost,
           EvidenceBundle(
-            BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+            BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
           )
         )
       )
@@ -186,7 +188,7 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
           .derive(SubmissionKey.from("wire-batch").toOption.get, index)
           .toOption
           .get,
-        Vector(0x00.toByte, 0x7f.toByte, 0x80.toByte, 0xff.toByte)
+        ByteVector(0x00, 0x7f, 0x80, 0xff)
       )
     }
     RemoteRegisteredBatchRequest(
@@ -239,7 +241,7 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
       )
     }
     val evidence = EvidenceBundle(
-      BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+      BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
     )
     RemoteRegisteredBatchSubmission(
       topology,

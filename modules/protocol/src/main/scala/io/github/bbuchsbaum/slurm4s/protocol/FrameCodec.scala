@@ -1,6 +1,8 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
 import io.github.bbuchsbaum.slurm4s.core.ByteLimit
+import scodec.bits.ByteOrdering
+import scodec.bits.ByteVector
 
 final case class FrameLimits(maximumPayloadBytes: ByteLimit) derives CanEqual
 
@@ -9,52 +11,57 @@ object FrameLimits:
 
 enum FrameFailure derives CanEqual:
   case EmptyPayload
+
+  /** A length read from a frame header, so genuinely 32-bit. */
   case InvalidLength(received: Int)
-  case FrameTooLarge(received: Int, maximum: Int)
-  case TruncatedFrame(bufferedBytes: Int, expectedPayloadBytes: Option[Int])
+  case FrameTooLarge(received: Long, maximum: Int)
+  case TruncatedFrame(bufferedBytes: Long, expectedPayloadBytes: Option[Int])
 
 object FrameCodec:
   val HeaderBytes: Int = 4
 
-  def encode(payload: Vector[Byte], limits: FrameLimits): Either[FrameFailure, Vector[Byte]] =
+  def encode(payload: ByteVector, limits: FrameLimits): Either[FrameFailure, ByteVector] =
     val length = payload.size
-    if length == 0 then Left(FrameFailure.EmptyPayload)
-    else if length > limits.maximumPayloadBytes.value then
+    if length == 0L then Left(FrameFailure.EmptyPayload)
+    else if length > limits.maximumPayloadBytes.value.toLong then
       Left(FrameFailure.FrameTooLarge(length, limits.maximumPayloadBytes.value))
     else
+      // Narrowing is safe under the bound just checked. The ordering is stated rather than left to
+      // a default because it is the wire contract, not an implementation preference.
       Right(
-        Vector(
-          ((length >>> 24) & 0xff).toByte,
-          ((length >>> 16) & 0xff).toByte,
-          ((length >>> 8) & 0xff).toByte,
-          (length & 0xff).toByte
+        ByteVector.fromInt(
+          length.toInt,
+          size = HeaderBytes,
+          ordering = ByteOrdering.BigEndian
         ) ++ payload
       )
 
 final case class FrameDecoder private (
     limits: FrameLimits,
-    buffered: Vector[Byte],
+    buffered: ByteVector,
     expectedPayloadBytes: Option[Int]
 ):
-  def feed(input: Vector[Byte]): Either[FrameFailure, (FrameDecoder, Vector[Vector[Byte]])] =
+  def feed(input: ByteVector): Either[FrameFailure, (FrameDecoder, Vector[ByteVector])] =
     var remaining = buffered ++ input
     var expected = expectedPayloadBytes
-    val decoded = Vector.newBuilder[Vector[Byte]]
+    val decoded = Vector.newBuilder[ByteVector]
     var failure: Option[FrameFailure] = None
     var continue = true
 
     while continue && failure.isEmpty do
       expected match
-        case None if remaining.size >= FrameCodec.HeaderBytes =>
+        case None if remaining.size >= FrameCodec.HeaderBytes.toLong =>
           val length = FrameDecoder.readLength(remaining)
-          remaining = remaining.drop(FrameCodec.HeaderBytes)
+          remaining = remaining.drop(FrameCodec.HeaderBytes.toLong)
           if length <= 0 then failure = Some(FrameFailure.InvalidLength(length))
           else if length > limits.maximumPayloadBytes.value then
-            failure = Some(FrameFailure.FrameTooLarge(length, limits.maximumPayloadBytes.value))
+            failure = Some(
+              FrameFailure.FrameTooLarge(length.toLong, limits.maximumPayloadBytes.value)
+            )
           else expected = Some(length)
-        case Some(length) if remaining.size >= length =>
-          decoded += remaining.take(length)
-          remaining = remaining.drop(length)
+        case Some(length) if remaining.size >= length.toLong =>
+          decoded += remaining.take(length.toLong)
+          remaining = remaining.drop(length.toLong)
           expected = None
         case _ => continue = false
 
@@ -72,10 +79,12 @@ final case class FrameDecoder private (
 
 object FrameDecoder:
   def empty(limits: FrameLimits = FrameLimits.default): FrameDecoder =
-    FrameDecoder(limits, Vector.empty, None)
+    FrameDecoder(limits, ByteVector.empty, None)
 
-  private def readLength(bytes: Vector[Byte]): Int =
-    ((bytes(0) & 0xff) << 24) |
-      ((bytes(1) & 0xff) << 16) |
-      ((bytes(2) & 0xff) << 8) |
-      (bytes(3) & 0xff)
+  /** Reads the big-endian header length. Signed, so a header claiming 2 GiB or more arrives as a
+    * negative value and is rejected as an invalid length rather than silently believed.
+    */
+  private def readLength(bytes: ByteVector): Int =
+    bytes
+      .take(FrameCodec.HeaderBytes.toLong)
+      .toInt(signed = true, ordering = ByteOrdering.BigEndian)

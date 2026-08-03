@@ -1,5 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
+import scodec.bits.ByteVector
+
 /** Measures `FrameDecoder.feed` over one frame delivered in 64 KiB chunks.
   *
   * This is the scenario named in the acceptance criteria for the byte-representation change, and it
@@ -49,24 +51,24 @@ object FrameDecoderBenchmark:
       println(s"  MISMATCH: decoded $observedPayloadBytes, expected $expected")
 
   /** One encoded frame of `payloadBytes`, split into the chunks a transport would hand over. */
-  private def frameChunks(payloadBytes: Int): Vector[Vector[Byte]] =
-    val payload = Vector.tabulate(payloadBytes)(index => (index % 251).toByte)
+  private def frameChunks(payloadBytes: Int): Vector[ByteVector] =
+    val payload = ByteVector.view(Array.tabulate(payloadBytes)(index => (index % 251).toByte))
     val frame = FrameCodec
       .encode(payload, FrameLimits.default)
       .fold(
         failure => throw new IllegalStateException(s"benchmark frame rejected: $failure"),
         identity
       )
-    frame.grouped(ChunkBytes).toVector
+    frame.grouped(ChunkBytes.toLong).toVector
 
   /** Feeds every chunk through one decoder, returning the total decoded payload size. */
-  private def decodeOnce(chunks: Vector[Vector[Byte]]): Long =
+  private def decodeOnce(chunks: Vector[ByteVector]): Long =
     val (_, total) = chunks.foldLeft(FrameDecoder.empty() -> 0L) {
       case ((decoder, accumulated), chunk) =>
         decoder.feed(chunk) match
           case Left(failure) =>
             throw new IllegalStateException(s"benchmark decode failed: $failure")
           case Right((next, frames)) =>
-            next -> (accumulated + frames.map(_.size.toLong).sum)
+            next -> (accumulated + frames.map(_.size).sum)
     }
     total

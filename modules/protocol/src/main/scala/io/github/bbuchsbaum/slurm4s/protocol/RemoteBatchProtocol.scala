@@ -3,11 +3,12 @@ package io.github.bbuchsbaum.slurm4s.protocol
 import cats.data.NonEmptyVector
 import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
+import scodec.bits.ByteVector
 
 final case class RemoteRegisteredBatchElement(
     index: ArrayIndex,
     submissionKey: SubmissionKey,
-    inputBytes: Vector[Byte]
+    inputBytes: ByteVector
 ) derives CanEqual
 
 final case class RemoteRegisteredBatchRequest(

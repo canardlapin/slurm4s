@@ -1,5 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
+import scodec.bits.ByteVector
+
 /** Measures what `Vector[Byte]` actually costs, as opposed to what it is assumed to cost.
   *
   * The frame-accumulation benchmark showed that `FrameDecoder.feed` does not copy the payload,
@@ -23,8 +25,11 @@ object ByteRepresentationBenchmark:
     println("-- retained footprint of one 4 MiB payload --")
     val asArray = measureRetained("Array[Byte] ")(() => Array.tabulate(PayloadBytes)(byteAt))
     val asVector = measureRetained("Vector[Byte]")(() => Vector.tabulate(PayloadBytes)(byteAt))
+    val asByteVector =
+      measureRetained("ByteVector  ")(() => ByteVector.view(Array.tabulate(PayloadBytes)(byteAt)))
     if asArray > 0L then
-      println(f"Vector/Array ratio: ${asVector.toDouble / asArray.toDouble}%.1fx")
+      println(f"Vector[Byte]/Array: ${asVector.toDouble / asArray.toDouble}%.1fx")
+      println(f"ByteVector/Array:   ${asByteVector.toDouble / asArray.toDouble}%.1fx")
 
   /** Allocates through `build`, holding the result live across the measurement. */
   private def measureRetained(label: String)(build: () => AnyRef): Long =
@@ -44,7 +49,9 @@ object ByteRepresentationBenchmark:
     println("-- cost of handing 4 MiB to an array, which every codec and digest boundary pays --")
     val vector = Vector.tabulate(PayloadBytes)(byteAt)
     val array = Array.tabulate(PayloadBytes)(byteAt)
+    val byteVector = ByteVector.view(array)
     time("Vector[Byte].toArray")(() => vector.toArray.length.toLong)
+    time("ByteVector.toArray  ")(() => byteVector.toArray.length.toLong)
     time("Array[Byte].clone   ")(() => array.clone().length.toLong)
 
   private def time(label: String)(operation: () => Long): Unit =

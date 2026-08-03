@@ -5,6 +5,8 @@ import io.circe.Json
 import io.circe.JsonObject
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 
@@ -85,7 +87,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     val evidence = BoundedEvidence.capture(
       EvidenceSource.CommandStdout("squeue"),
       observedAt,
-      "queue-evidence".getBytes(StandardCharsets.UTF_8).toVector
+      ByteVector.view("queue-evidence".getBytes(StandardCharsets.UTF_8))
     )
     val observation = JobObservation(
       job = JobRef(JobId.from("2001").toOption.get, None),
@@ -133,7 +135,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
         BoundedEvidence.capture(
           EvidenceSource.CommandStdout("squeue"),
           observedAt,
-          Vector.empty
+          ByteVector.empty
         )
       ),
       reportedCluster = Some(cluster)
@@ -161,7 +163,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     val evidence = BoundedEvidence.capture(
       EvidenceSource.CommandStdout("squeue"),
       observedAt,
-      Vector.empty
+      ByteVector.empty
     )
     val observation = JobObservation(
       JobRef(JobId.from("2002").toOption.get, None),
@@ -199,7 +201,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
   test("log pages use an owned base64 wire shape and preserve unsigned byte patterns") {
     val result = LogReadResult.Page(
       LogPage(
-        Vector(0x00.toByte, 0x7f.toByte, 0x80.toByte, 0xff.toByte),
+        ByteVector(0x00, 0x7f, 0x80, 0xff),
         LogCursor(
           LogOffset.from(4L).toOption.get,
           Some(FileIdentity.from("fixture-file").toOption.get)
@@ -244,7 +246,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
         SchemaId.from("example.int-input.v1").toOption.get,
         ResultSchemaId.from("example.int-result.v1").toOption.get
       ),
-      Vector(0x00.toByte, 0x7f.toByte, 0x80.toByte, 0xff.toByte),
+      ByteVector(0x00, 0x7f, 0x80, 0xff),
       ResourceRequest
         .validate(
           2,
@@ -299,7 +301,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     )
 
     val evidence = EvidenceBundle(
-      BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+      BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
     )
     val attemptId = AttemptId.from("remote-response-attempt").toOption.get
     val epoch = AttemptEpoch.initial
@@ -428,7 +430,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     val evidence = BoundedEvidence.capture(
       EvidenceSource.CommandStdout("squeue"),
       observedAt,
-      Vector.empty
+      ByteVector.empty
     )
     AgentDomainJson.encodeObservation(
       SchedulerQueryResult.Succeeded(

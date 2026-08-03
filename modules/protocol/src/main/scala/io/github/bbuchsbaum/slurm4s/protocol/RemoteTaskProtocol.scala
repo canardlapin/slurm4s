@@ -5,6 +5,8 @@ import io.github.bbuchsbaum.slurm4s.core.codec.CodecFailure
 import io.github.bbuchsbaum.slurm4s.core.codec.VersionedJson
 import io.github.bbuchsbaum.slurm4s.core.codec.WireEnvelope
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 /** Transport form of a registered task. It contains an operation descriptor and already-encoded
@@ -14,7 +16,7 @@ final case class RemoteRegisteredTaskRequest(
     submissionKey: SubmissionKey,
     name: JobName,
     operation: RegisteredOperation,
-    inputBytes: Vector[Byte],
+    inputBytes: ByteVector,
     resources: ResourceRequest,
     environment: Map[EnvName, String],
     maximumResultBytes: ByteLimit,
@@ -38,7 +40,7 @@ enum RemoteResultRead derives CanEqual:
   case Pending(observedAt: Instant)
   case Available(
       storedHandle: DurableResultHandle,
-      envelopeBytes: Vector[Byte],
+      envelopeBytes: ByteVector,
       observedAt: Instant
   )
   case Failed(
@@ -63,7 +65,7 @@ object RemoteRegisteredSubmissionCodec:
   def encode(
       value: RemoteRegisteredSubmission,
       maximumBytes: ByteLimit = RemoteTaskWireLimits.MaximumDescriptorBytes
-  ): Either[RemoteTaskDescriptorCodecFailure, Vector[Byte]] =
+  ): Either[RemoteTaskDescriptorCodecFailure, ByteVector] =
     for
       schema <- SchemaId
         .from(SchemaName)
@@ -78,7 +80,7 @@ object RemoteRegisteredSubmissionCodec:
     yield bytes
 
   def decode(
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       maximumBytes: ByteLimit = RemoteTaskWireLimits.MaximumDescriptorBytes
   ): Either[RemoteTaskDescriptorCodecFailure, RemoteRegisteredSubmission] =
     for

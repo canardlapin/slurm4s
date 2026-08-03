@@ -12,6 +12,8 @@ import io.circe.generic.semiauto.deriveEncoder
 import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 import java.time.LocalDateTime
 import java.util.Base64
@@ -1220,7 +1222,7 @@ object AgentDomainJson:
       encoded: String,
       maximumBytes: ByteLimit,
       fieldName: String
-  ): Either[String, Vector[Byte]] =
+  ): Either[String, ByteVector] =
     val maximumEncoded = ((maximumBytes.value.toLong + 2L) / 3L) * 4L
     for
       _ <- Either.cond(
@@ -1228,7 +1230,7 @@ object AgentDomainJson:
         (),
         s"$fieldName exceeds its encoded size limit"
       )
-      bytes <- Try(Base64.getDecoder.decode(encoded).toVector).toEither.left.map(error =>
+      bytes <- Try(ByteVector.view(Base64.getDecoder.decode(encoded))).toEither.left.map(error =>
         Option(error.getMessage).filter(_.nonEmpty).getOrElse(s"$fieldName is invalid base64")
       )
       _ <- Either.cond(
@@ -1688,6 +1690,17 @@ object AgentDomainJson:
     Try(LocalDateTime.parse(raw)).toEither.left.map(_.getMessage)
   }
 
+  /** A JSON array of byte numbers, which is what the derived codecs in this object emitted while
+    * bytes were a `Vector[Byte]` and circe supplied the instance implicitly.
+    *
+    * Reproducing that shape is the point: these instances feed `deriveEncoder`/`deriveDecoder`, so
+    * anything else would silently change an existing wire format. It is deliberately not base64,
+    * even though every hand-written codec here uses base64 for bytes — that inconsistency predates
+    * this change and belongs to the codec-ownership work, not to a representation swap.
+    */
+  private given Encoder[ByteVector] = Encoder.encodeVector[Byte].contramap(_.toIndexedSeq.toVector)
+  private given Decoder[ByteVector] = Decoder.decodeVector[Byte].map(ByteVector.apply)
+
   private def stringEncoder[A](value: A => String): Encoder[A] =
     Encoder.encodeString.contramap(value)
   private def stringDecoder[A](construct: String => Either[ValidationFailure, A]): Decoder[A] =
@@ -1739,7 +1752,7 @@ object AgentDomainJson:
       source <- cursor.get[EvidenceSource]("source")
       observedAt <- cursor.get[Instant]("observedAt")
       encoded <- cursor.get[String]("bytesBase64")
-      bytes <- Try(Base64.getDecoder.decode(encoded).toVector).toEither.left
+      bytes <- Try(ByteVector.view(Base64.getDecoder.decode(encoded))).toEither.left
         .map(error => io.circe.DecodingFailure(error.getMessage, cursor.history))
       original <- cursor.get[Long]("originalByteCount")
       value <- Either
@@ -2109,8 +2122,8 @@ object AgentDomainJson:
     }
   }
 
-  private def decodeBase64(encoded: String, cursor: HCursor): Decoder.Result[Vector[Byte]] =
-    Try(Base64.getDecoder.decode(encoded).toVector).toEither.left.map { error =>
+  private def decodeBase64(encoded: String, cursor: HCursor): Decoder.Result[ByteVector] =
+    Try(ByteVector.view(Base64.getDecoder.decode(encoded))).toEither.left.map { error =>
       DecodingFailure(
         Option(error.getMessage).filter(_.nonEmpty).getOrElse("invalid base64"),
         cursor.history

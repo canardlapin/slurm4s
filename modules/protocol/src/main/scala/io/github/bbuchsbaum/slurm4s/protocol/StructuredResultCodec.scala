@@ -7,6 +7,8 @@ import io.github.bbuchsbaum.slurm4s.core.codec.CodecFailure
 import io.github.bbuchsbaum.slurm4s.core.codec.VersionedJson
 import io.github.bbuchsbaum.slurm4s.core.codec.WireEnvelope
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 import java.util.Base64
 import scala.util.Try
@@ -27,7 +29,7 @@ object ResultEnvelopeCodec:
       value: ResultEnvelope,
       maximumEnvelopeBytes: ByteLimit,
       maximumValueBytes: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
+  ): Either[StructuredCodecFailure, ByteVector] =
     for
       _ <- bounded(value.value.fold(0L)(_.size.toLong), maximumValueBytes)
       _ <- Either.cond(
@@ -40,7 +42,7 @@ object ResultEnvelopeCodec:
     yield bytes
 
   def decode(
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       maximumEnvelopeBytes: ByteLimit,
       maximumValueBytes: ByteLimit
   ): Either[StructuredCodecFailure, ResultEnvelope] =
@@ -133,7 +135,7 @@ object ResultEnvelopeCodec:
   private def decodeBase64(
       value: String,
       maximum: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
+  ): Either[StructuredCodecFailure, ByteVector] =
     val maximumEncoded = ((maximum.value.toLong + 2L) / 3L) * 4L
     for
       _ <- Either.cond(
@@ -144,7 +146,7 @@ object ResultEnvelopeCodec:
           math.min(maximumEncoded, Int.MaxValue.toLong).toInt
         )
       )
-      bytes <- Try(Base64.getDecoder.decode(value).toVector).toEither.left.map(error =>
+      bytes <- Try(ByteVector.view(Base64.getDecoder.decode(value))).toEither.left.map(error =>
         invalid(s"valueBase64 is invalid: ${error.getMessage}")
       )
       _ <- bounded(bytes.size.toLong, maximum)
@@ -160,7 +162,7 @@ object DurableResultHandleCodec:
   def encode(
       value: DurableResultHandle,
       maximumBytes: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
+  ): Either[StructuredCodecFailure, ByteVector] =
     for
       _ <- Either.cond(
         value.declaredOutputs.size <= MaximumOutputs &&
@@ -192,7 +194,7 @@ object DurableResultHandleCodec:
     yield bytes
 
   def decode(
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       maximumBytes: ByteLimit
   ): Either[StructuredCodecFailure, DurableResultHandle] =
     for
@@ -269,7 +271,7 @@ object TaskInvocationCodec:
   def encode(
       value: TaskInvocation,
       maximumBytes: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
+  ): Either[StructuredCodecFailure, ByteVector] =
     for
       _ <- Either.cond(
         value.inputBytes.size <= value.maximumInputBytes.value,
@@ -313,7 +315,7 @@ object TaskInvocationCodec:
     yield bytes
 
   def decode(
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       maximumBytes: ByteLimit,
       maximumAllowedInputBytes: ByteLimit
   ): Either[StructuredCodecFailure, TaskInvocation] =
@@ -407,7 +409,7 @@ object TaskInvocationCodec:
   private def decodeBase64(
       value: String,
       maximum: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
+  ): Either[StructuredCodecFailure, ByteVector] =
     val maximumEncoded = ((maximum.value.toLong + 2L) / 3L) * 4L
     for
       _ <- Either.cond(
@@ -418,7 +420,7 @@ object TaskInvocationCodec:
           math.min(maximumEncoded, Int.MaxValue.toLong).toInt
         )
       )
-      decoded <- Try(Base64.getDecoder.decode(value).toVector).toEither.left.map(error =>
+      decoded <- Try(ByteVector.view(Base64.getDecoder.decode(value))).toEither.left.map(error =>
         invalid(s"inputBase64 is invalid: ${error.getMessage}")
       )
       _ <- Either.cond(
@@ -635,7 +637,7 @@ object WorkerEventCodec:
   def encode(
       value: WorkerEvent,
       maximumBytes: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
+  ): Either[StructuredCodecFailure, ByteVector] =
     val bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, encodePayload(value)))
     Either.cond(
       bytes.size <= maximumBytes.value,
@@ -644,7 +646,7 @@ object WorkerEventCodec:
     )
 
   def decode(
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       maximumBytes: ByteLimit
   ): Either[StructuredCodecFailure, WorkerEvent] =
     for

@@ -3,6 +3,8 @@ package io.github.bbuchsbaum.slurm4s.protocol
 import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 /** Byte-exact coverage of the scheduler wire shapes that are still derived rather than owned.
@@ -170,7 +172,7 @@ class AgentSchedulerShapeSuite extends munit.FunSuite:
       EvidenceSource.CommandStdout("squeue"),
       observedAt,
       // Non-ASCII and control bytes must survive base64 without reinterpretation.
-      Vector[Byte](0, 127, -128, -1)
+      ByteVector(0, 127, -128, -1)
     )
 
   private def bundle: EvidenceBundle = EvidenceBundle(evidence, Vector(evidence))

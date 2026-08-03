@@ -2,6 +2,8 @@ package io.github.bbuchsbaum.slurm4s.protocol
 
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.io.InputStream
 import java.time.Instant
 
@@ -22,7 +24,8 @@ class StructuredResultCodecSuite extends munit.FunSuite:
   test("result envelope rejects missing successful value and bounded overflow") {
     val bytes = fixture("/fixtures/python-result-envelope-v1.json")
     val text = new String(bytes.toArray, "UTF-8")
-    val missing = text.replace("\"eyJhbnN3ZXIiOjQyfQ==\"", "null").getBytes("UTF-8").toVector
+    val missing =
+      ByteVector.view(text.replace("\"eyJhbnN3ZXIiOjQyfQ==\"", "null").getBytes("UTF-8"))
 
     assert(
       ResultEnvelopeCodec.decode(missing, envelopeLimit, valueLimit).left.exists {
@@ -139,7 +142,7 @@ class StructuredResultCodecSuite extends munit.FunSuite:
           SchemaId.from("example.input.v1").toOption.get,
           ResultSchemaId.from("example.output.v1").toOption.get
         ),
-        "input".getBytes("UTF-8").toVector,
+        ByteVector.view("input".getBytes("UTF-8")),
         Vector(RelativeOutputPath.from("results/value.txt").toOption.get),
         valueLimit,
         valueLimit,
@@ -170,11 +173,11 @@ class StructuredResultCodecSuite extends munit.FunSuite:
     )
   }
 
-  private def fixture(path: String): Vector[Byte] =
+  private def fixture(path: String): ByteVector =
     val stream: InputStream = Option(getClass.getResourceAsStream(path)).getOrElse(
       throw new IllegalStateException(s"missing fixture: $path")
     )
-    try stream.readAllBytes().toVector
+    try ByteVector.view(stream.readAllBytes())
     finally stream.close()
 
   test("a batched result read round-trips every entry in order") {

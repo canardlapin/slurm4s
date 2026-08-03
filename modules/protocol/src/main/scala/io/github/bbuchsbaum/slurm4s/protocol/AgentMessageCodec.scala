@@ -7,6 +7,7 @@ import io.github.bbuchsbaum.slurm4s.core.SchemaId
 import io.github.bbuchsbaum.slurm4s.core.codec.CodecFailure
 import io.github.bbuchsbaum.slurm4s.core.codec.VersionedJson
 import io.github.bbuchsbaum.slurm4s.core.codec.WireEnvelope
+import scodec.bits.ByteVector
 
 enum AgentCodecFailure derives CanEqual:
   case Envelope(failure: CodecFailure)
@@ -16,7 +17,7 @@ enum AgentCodecFailure derives CanEqual:
 object AgentMessageCodec:
   private val schema = SchemaId.unsafeFrom("slurm4s.agent-message")
 
-  def encode(message: AgentEnvelope): Vector[Byte] =
+  def encode(message: AgentEnvelope): ByteVector =
     val bodyFields = message.body match
       case AgentBody.Request(method, payload) =>
         JsonObject(
@@ -43,7 +44,7 @@ object AgentMessageCodec:
       )
     )
 
-  def decode(bytes: Vector[Byte]): Either[AgentCodecFailure, AgentEnvelope] =
+  def decode(bytes: ByteVector): Either[AgentCodecFailure, AgentEnvelope] =
     for
       envelope <- VersionedJson.decode(bytes).left.map(AgentCodecFailure.Envelope.apply)
       _ <- Either.cond(
