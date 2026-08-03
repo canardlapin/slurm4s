@@ -110,7 +110,10 @@ lazy val task = project
 
 lazy val protocol = project
   .in(file("modules/protocol"))
-  .dependsOn(core, batch)
+  // test->test so the codec laws generate domain values from core's Generators instead of
+  // duplicating them. It stays out of testkit because that artifact is published and would
+  // then carry ScalaCheck as a compile dependency.
+  .dependsOn(core % "compile->compile;test->test", batch)
   .settings(commonSettings)
   .settings(
     name := "slurm4s-protocol",

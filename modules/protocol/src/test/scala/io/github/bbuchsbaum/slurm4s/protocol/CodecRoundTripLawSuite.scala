@@ -1,0 +1,111 @@
+package io.github.bbuchsbaum.slurm4s.protocol
+
+import cats.data.NonEmptyVector
+import io.circe.Json
+import io.github.bbuchsbaum.slurm4s.core.ByteLimit
+
+import org.scalacheck.Gen
+import org.scalacheck.Prop.forAll
+
+/** Round-trip laws for the hand-written wire codecs (P6f.34).
+  *
+  * `decode(encode(x)) == Right(x)` is the one check that fails automatically when a codec stops
+  * carrying a field. The audit on 2026-08-03 found `JobObservation.reportedCluster` dropped, and
+  * found it by reading every codec against every case class by hand — a snapshot that cannot catch
+  * the next occurrence. The failure mode it exposed is structural: a field with a default lets the
+  * decoder omit it and still typecheck under `-Werror`, so nothing but a property over populated
+  * values will notice.
+  *
+  * These laws are therefore only as good as `ProtocolGenerators`, which is written to put a
+  * non-default value in every defaulted field. `CodecLawStrengthSuite` is the guard on that
+  * assumption: it proves these laws fail against a codec that drops a defaulted field.
+  */
+class CodecRoundTripLawSuite extends munit.ScalaCheckSuite:
+  import ProtocolGenerators.*
+
+  /** Names the value on failure. ScalaCheck reports the generated input, but the encoded JSON is
+    * what tells you which field went missing, and it is not recoverable from the input alone.
+    */
+  private def roundTrips[A](value: A, encoded: Json, decoded: Either[String, A])(using
+      munit.Location
+  ): Unit =
+    assertEquals(
+      decoded,
+      Right(value),
+      s"round trip lost information; encoded as ${encoded.noSpaces}"
+    )
+
+  property("a job reference round-trips") {
+    forAll(jobRef) { value =>
+      roundTrips(
+        value,
+        AgentDomainJson.encodeJobRef(value),
+        AgentDomainJson.decodeJobRef(AgentDomainJson.encodeJobRef(value))
+      )
+    }
+  }
+
+  property("a job reference collection round-trips, preserving order") {
+    forAll(Gen.zip(jobRef, Gen.listOf(jobRef))) { (head, rest) =>
+      val value = NonEmptyVector(head, rest.toVector)
+      val encoded = AgentDomainJson.encodeJobRefs(value)
+      roundTrips(value, encoded, AgentDomainJson.decodeJobRefs(encoded))
+    }
+  }
+
+  property("an evidence bundle round-trips, including its related captures") {
+    forAll(evidenceBundle) { value =>
+      val encoded = AgentDomainJson.encodeEvidence(value)
+      roundTrips(value, encoded, AgentDomainJson.decodeEvidence(encoded))
+    }
+  }
+
+  property("an observation query result round-trips every case, not only success") {
+    forAll(schedulerQueryResult(observationBatch)) { value =>
+      val encoded = AgentDomainJson.encodeObservation(value)
+      roundTrips(value, encoded, AgentDomainJson.decodeObservation(encoded))
+    }
+  }
+
+  property("an accounting query result round-trips, including the missing-job list") {
+    forAll(schedulerQueryResult(accountingBatch)) { value =>
+      val encoded = AgentDomainJson.encodeAccounting(value)
+      roundTrips(value, encoded, AgentDomainJson.decodeAccounting(encoded))
+    }
+  }
+
+  property("a submission attempt round-trips every acceptance and failure case") {
+    forAll(submissionAttempt) { value =>
+      val encoded = AgentDomainJson.encodeSubmission(value)
+      roundTrips(value, encoded, AgentDomainJson.decodeSubmission(encoded))
+    }
+  }
+
+  property("a cancellation attempt round-trips") {
+    forAll(cancellationAttempt) { value =>
+      val encoded = AgentDomainJson.encodeCancellation(value)
+      roundTrips(value, encoded, AgentDomainJson.decodeCancellation(encoded))
+    }
+  }
+
+  property("a capabilities query result round-trips its raw evidence") {
+    forAll(schedulerQueryResult(schedulerCapabilities)) { value =>
+      val encoded = AgentDomainJson.encodeCapabilities(value)
+      roundTrips(value, encoded, AgentDomainJson.decodeCapabilities(encoded))
+    }
+  }
+
+  property("a log read result round-trips, including high-bit bytes in a page") {
+    forAll(logReadResult) { value =>
+      val encoded = AgentDomainJson.encodeLogResult(value)
+      roundTrips(value, encoded, AgentDomainJson.decodeLogResult(encoded))
+    }
+  }
+
+  property("a log request round-trips its reference, cursor and limit") {
+    forAll(Gen.zip(logRef, logCursor, Gen.choose(1, 1 << 20))) { (ref, cursor, limit) =>
+      val bound = ByteLimit.from(limit).toOption.get
+      val encoded = AgentDomainJson.encodeLogRequest(ref, cursor, bound)
+      roundTrips((ref, cursor, bound), encoded, AgentDomainJson.decodeLogRequest(encoded))
+    }
+  }

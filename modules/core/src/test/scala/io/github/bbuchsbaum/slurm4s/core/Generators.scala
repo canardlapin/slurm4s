@@ -73,11 +73,46 @@ object Generators:
   val instant: Gen[Instant] =
     Gen.choose(0L, 4_000_000_000L).map(Instant.ofEpochSecond)
 
+  val evidenceSource: Gen[EvidenceSource] =
+    val command = Gen.oneOf("squeue", "sacct", "sbatch", "scancel")
+    Gen.oneOf(
+      command.map(EvidenceSource.CommandStdout.apply),
+      command.map(EvidenceSource.CommandStderr.apply),
+      command.map(EvidenceSource.CommandLaunch.apply),
+      command.flatMap(value =>
+        Gen.oneOf("json", "yaml").map(EvidenceSource.SchedulerJson(value, _))
+      ),
+      command.map(EvidenceSource.SchedulerText.apply),
+      Gen.const(EvidenceSource.AgentProtocol),
+      Gen.const(EvidenceSource.DurableJournal),
+      Gen.const(EvidenceSource.WorkerEvent),
+      Gen.const(EvidenceSource.ResultEnvelope)
+    )
+
+  /** Bytes spanning the whole signed range, including non-ASCII, so a codec that round-trips only
+    * printable text fails rather than passes by luck.
+    */
+  val evidenceBytes: Gen[ByteVector] =
+    Gen.listOf(Gen.choose(Byte.MinValue, Byte.MaxValue)).map(values => ByteVector(values*))
+
+  val boundedEvidence: Gen[BoundedEvidence] =
+    for
+      source <- evidenceSource
+      at <- instant
+      bytes <- evidenceBytes
+    yield BoundedEvidence.capture(source, at, bytes)
+
+  /** Populates `related`, which has a default.
+    *
+    * A generator that always leaves a defaulted field at its default cannot see a codec that drops
+    * it: that is exactly how JobObservation.reportedCluster stayed invisible (P8.A7). Every
+    * generator here is built to put a non-default value in every defaulted field.
+    */
   val evidenceBundle: Gen[EvidenceBundle] =
     for
-      at <- instant
-      bytes <- Gen.listOf(Gen.choose(Byte.MinValue, Byte.MaxValue)).map(v => ByteVector(v*))
-    yield EvidenceBundle(BoundedEvidence.capture(EvidenceSource.DurableJournal, at, bytes))
+      primary <- boundedEvidence
+      related <- Gen.choose(0, 2).flatMap(Gen.listOfN(_, boundedEvidence))
+    yield EvidenceBundle(primary, related.toVector)
 
   val acceptanceUncertainty: Gen[AcceptanceUncertainty] =
     Gen.oneOf(
