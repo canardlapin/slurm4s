@@ -189,7 +189,13 @@ lazy val ssh = project
 
 lazy val managed = project
   .in(file("modules/managed"))
-  .dependsOn(core, protocol, testkit % "test->compile")
+  // test->test on protocol reaches ProtocolGenerators, which the journal and control-command laws
+  // need to build the domain values a persisted command carries.
+  .dependsOn(
+    core % "compile->compile;test->test",
+    protocol % "compile->compile;test->test",
+    testkit % "test->compile"
+  )
   .settings(commonSettings)
   .settings(
     name := "slurm4s-managed",

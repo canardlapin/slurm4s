@@ -45,6 +45,32 @@ class CodecRoundTripLawSuite extends munit.ScalaCheckSuite:
     }
   }
 
+  /** The submit request carries three defaulted fields — environment, array and retrySafety — which
+    * is the most exposed instance of the hazard these laws exist for.
+    */
+  property("a submit request round-trips, including its three defaulted fields") {
+    forAll(exitOnlyLaunchSpec) { value =>
+      val encoded = AgentDomainJson.encodeSubmitRequest(value)
+      assertEquals(encoded.flatMap(AgentDomainJson.decodeSubmitRequest), Right(value))
+    }
+  }
+
+  /** The dangerous failure mode is not refusal but silent downgrade: a contract that promised
+    * declared outputs, encoded as exit-only, would let the job report success while its outputs
+    * were never collected.
+    */
+  property("a contract the submit protocol cannot express is refused, not downgraded") {
+    forAll(unsupportedContractLaunchSpec) { value =>
+      AgentDomainJson.encodeSubmitRequest(value) match
+        case Left(_)        => ()
+        case Right(encoded) =>
+          fail(
+            s"encoded a ${value.resultContract.mode} contract as ${encoded.noSpaces}, " +
+              "so the declared outputs silently became exit-only"
+          )
+    }
+  }
+
   property("a job reference collection round-trips, preserving order") {
     forAll(Gen.zip(jobRef, Gen.listOf(jobRef))) { (head, rest) =>
       val value = NonEmptyVector(head, rest.toVector)

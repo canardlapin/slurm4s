@@ -440,6 +440,126 @@ object ProtocolGenerators:
       .toOption
       .get
 
+  // --- The submitted request. ---
+
+  val jobName: Gen[JobName] =
+    Gen.oneOf("managed-test", "nightly", "fit-model").map(JobName.unsafeFrom)
+
+  val scriptSource: Gen[ScriptSource] =
+    Gen.oneOf(
+      Gen
+        .zip(Gen.oneOf("job.sh", "run.sh"), Generators.evidenceBytes)
+        .map(ScriptSource.Inline.apply),
+      Gen.oneOf("/local/job.sh", "/local/run.sh").map(ScriptSource.StagedLocal.apply),
+      Gen.oneOf("/remote/job.sh", "/remote/run.sh").map(ScriptSource.ExistingRemote.apply)
+    )
+
+  val resourceRequest: Gen[ResourceRequest] =
+    for
+      cpus <- Gen.choose(1, 8)
+      tasks <- Gen.choose(1, 4)
+      nodes <- Gen.option(Gen.choose(1, 4))
+      wallTime <- Gen.option(Gen.choose(1L, 1440L).map(WallTimeMinutes.unsafeFrom))
+    yield ResourceRequest
+      .validate(cpus, tasks, nodes, None, wallTime)
+      .toEither
+      .toOption
+      .get
+
+  /** Mode, schema and declared outputs are drawn together rather than independently, because `from`
+    * couples them: exit-only carries neither, declared-outputs requires at least one path and no
+    * schema, structured requires a schema. Drawing them separately produces combinations the type
+    * refuses, so the generator would fail construction instead of exercising a codec.
+    */
+  val resultContractDescriptor: Gen[ResultContractDescriptor] =
+    val outputs =
+      Gen
+        .choose(1, 3)
+        .flatMap(Gen.listOfN(_, relativeOutputPath))
+        .map(_.distinct.toVector)
+        .suchThat(_.nonEmpty)
+    Gen
+      .oneOf(
+        Gen.const(
+          ResultContractDescriptor
+            .from(ResultMode.ExitOnly, None, ByteLimit.defaultEvidence, Vector.empty)
+        ),
+        outputs.map(paths =>
+          ResultContractDescriptor
+            .from(ResultMode.DeclaredOutputs, None, ByteLimit.defaultEvidence, paths)
+        ),
+        Gen.zip(resultSchemaId, Gen.oneOf(Gen.const(Vector.empty), outputs)).map { (schema, paths) =>
+          ResultContractDescriptor
+            .from(ResultMode.Structured, Some(schema), ByteLimit.defaultEvidence, paths)
+        }
+      )
+      .map(_.toOption.get)
+
+  /** Concurrency is drawn from the deduplicated index count, since the type refuses a limit larger
+    * than the array it applies to.
+    */
+  val jobArrayRequest: Gen[JobArrayRequest] =
+    for
+      drawn <- Gen.choose(1, 4).flatMap(Gen.listOfN(_, arrayIndex)).map(_.distinct.toVector)
+      indices = if drawn.isEmpty then Vector(ArrayIndex.unsafeFrom(0)) else drawn
+      concurrent <- Gen.option(Gen.choose(1, indices.size).map(PositiveInt.unsafeFrom))
+    yield JobArrayRequest.from(indices, concurrent).toOption.get
+
+  val envName: Gen[EnvName] =
+    Gen.oneOf("SLURM4S_A", "PATH_EXTRA", "MODEL_DIR").map(EnvName.unsafeFrom)
+
+  /** Populates `environment`, `array` and `retrySafety`, all three of which have defaults. */
+  def launchSpec(environment: Gen[Map[EnvName, String]]): Gen[LaunchSpec] =
+    for
+      key <- submissionKey
+      name <- jobName
+      source <- scriptSource
+      arguments <- Gen.choose(0, 3).flatMap(Gen.listOfN(_, Gen.oneOf("-v", "--fast", "input.csv")))
+      contract <- resultContractDescriptor
+      resources <- resourceRequest
+      env <- environment
+      array <- Gen.option(jobArrayRequest)
+      safety <- retrySafety
+    yield LaunchSpec(
+      key,
+      name,
+      source,
+      arguments.toVector,
+      contract,
+      resources,
+      env,
+      array,
+      safety
+    )
+
+  val launchSpec: Gen[LaunchSpec] =
+    launchSpec(
+      Gen
+        .choose(0, 2)
+        .flatMap(Gen.mapOfN(_, Gen.zip(envName, Gen.oneOf("1", "/opt/models", ""))))
+    )
+
+  /** The opaque submit protocol carries only exit-only contracts, by design: it never learned to
+    * describe declared outputs or a structured schema. Round-trip laws over it therefore hold on
+    * exit-only specs, and the other modes get their own law asserting the encoder refuses them.
+    */
+  val exitOnlyLaunchSpec: Gen[LaunchSpec] =
+    launchSpec.map(_.copy(resultContract = ResultContract.ExitOnly.descriptor))
+
+  val unsupportedContractLaunchSpec: Gen[LaunchSpec] =
+    for
+      spec <- launchSpec
+      contract <- resultContractDescriptor.suchThat(_.mode != ResultMode.ExitOnly)
+    yield spec.copy(resultContract = contract)
+
+  /** A canonicalizable request. Two constraints narrow it: the managed store's default policy
+    * refuses to persist environment VALUES, and canonicalization goes through the submit encoder,
+    * so the contract must be one that encoder can express.
+    */
+  val managedLaunchSpec: Gen[LaunchSpec] =
+    launchSpec(Gen.const(Map.empty))
+      .map(_.copy(resultContract = ResultContract.ExitOnly.descriptor))
+
   private def nonEmpty[A](value: Gen[A]): Gen[NonEmptyVector[A]] =
     for
       head <- value

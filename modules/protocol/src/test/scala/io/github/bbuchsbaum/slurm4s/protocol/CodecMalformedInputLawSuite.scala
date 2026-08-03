@@ -23,6 +23,7 @@ import scala.util.Try
   */
 class CodecMalformedInputLawSuite extends munit.ScalaCheckSuite:
   import ProtocolGenerators.*
+  import JsonCorpus.*
 
   // SchedulerQueryResult is the one enum in this family that does not `derive CanEqual`, so a
   // comparison needs the instance supplied here. Test-local on purpose: widening the public type's
@@ -31,55 +32,6 @@ class CodecMalformedInputLawSuite extends munit.ScalaCheckSuite:
     SchedulerQueryResult[ObservationBatch],
     SchedulerQueryResult[ObservationBatch]
   ] = CanEqual.derived
-
-  /** Arbitrary JSON, bounded in depth so generation terminates. */
-  private val arbitraryJson: Gen[Json] =
-    def loop(depth: Int): Gen[Json] =
-      val leaf = Gen.oneOf(
-        Gen.const(Json.Null),
-        Gen.oneOf(true, false).map(Json.fromBoolean),
-        Gen.choose(-1_000_000L, 1_000_000L).map(Json.fromLong),
-        Gen
-          .oneOf("", "0", "-1", "kind", "unknown-discriminator", "\u00ff\u0000")
-          .map(Json.fromString)
-      )
-      if depth <= 0 then leaf
-      else
-        Gen.oneOf(
-          leaf,
-          Gen.choose(0, 3).flatMap(Gen.listOfN(_, loop(depth - 1))).map(Json.fromValues),
-          Gen
-            .choose(0, 3)
-            .flatMap(
-              Gen.listOfN(
-                _,
-                Gen.zip(
-                  Gen.oneOf("kind", "job", "state", "evidence", "value", "bytes"),
-                  loop(depth - 1)
-                )
-              )
-            )
-            .map(fields => Json.obj(fields*))
-        )
-    loop(3)
-
-  /** Structure-preserving corruptions of a valid encoding: these reach past the discriminator. */
-  private def mutations(json: Json): Gen[Json] =
-    json.asObject match
-      case None      => Gen.const(json)
-      case Some(obj) =>
-        val keys = obj.keys.toVector
-        if keys.isEmpty then Gen.const(json)
-        else
-          Gen.oneOf(keys).flatMap { key =>
-            Gen.oneOf(
-              Gen.const(Json.fromJsonObject(obj.remove(key))),
-              Gen.const(Json.fromJsonObject(obj.add(key, Json.Null))),
-              Gen.const(Json.fromJsonObject(obj.add(key, Json.fromString("not-a-structure")))),
-              Gen.const(Json.fromJsonObject(obj.add(key, Json.arr()))),
-              Gen.const(Json.fromJsonObject(obj.add(key, Json.fromLong(-1L))))
-            )
-          }
 
   private def neverThrows[A](name: String, json: Json, decode: Json => Either[Any, A])(using
       munit.Location
@@ -143,26 +95,6 @@ class CodecMalformedInputLawSuite extends munit.ScalaCheckSuite:
     }
   }
 
-  /** A field name no codec in this repository reads, as a newer peer would add. */
-  private val UnknownField = "fieldFromANewerPeer"
-
-  /** Inserts an unknown field at every depth of an object tree, leaving existing fields intact. */
-  private def withUnknownField(json: Json): Gen[Json] =
-    json.asObject match
-      case None      => Gen.const(json)
-      case Some(obj) =>
-        val here = Gen.const(Json.fromJsonObject(obj.add(UnknownField, Json.fromString("ignored"))))
-        val keys = obj.keys.toVector.filter(key => obj(key).exists(_.isObject))
-        if keys.isEmpty then here
-        else
-          Gen.oneOf(
-            here,
-            Gen.oneOf(keys).flatMap { key =>
-              withUnknownField(obj(key).getOrElse(Json.Null))
-                .map(nested => Json.fromJsonObject(obj.add(key, nested)))
-            }
-          )
-
   /** Forward compatibility, and the "unknown-field behavior" half of the bead's acceptance.
     *
     * An older reader must tolerate a field a newer writer added, and must decode to exactly what it
@@ -206,14 +138,7 @@ class CodecMalformedInputLawSuite extends munit.ScalaCheckSuite:
   }
 
   property("no decoder throws when a nested field is corrupted rather than a top-level one") {
-    val nested = validEncoding.flatMap { json =>
-      json.asObject.flatMap(obj => obj.keys.headOption.map(key => (obj, key))) match
-        case None             => Gen.const(json)
-        case Some((obj, key)) =>
-          mutations(obj(key).getOrElse(Json.Null))
-            .map(mutated => Json.fromJsonObject(obj.add(key, mutated)))
-    }
-    forAll(nested) { json =>
+    forAll(validEncoding.flatMap(nestedMutations)) { json =>
       decoders.forall((name, decode) => neverThrows(name, json, decode))
     }
   }
