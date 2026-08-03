@@ -183,7 +183,8 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
   private val request = LaunchSpec(
     SubmissionKey.from("submission-ssh-1").toOption.get,
     JobName.from("opaque-remote").toOption.get,
-    ScriptSource.Inline("job.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
+    ScriptSource
+      .unsafeInlineScript("job.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
     Vector("one", "two"),
     ResultContract.ExitOnly.descriptor,
     ResourceRequest.validate(2, 1, None, None, None).toEither.toOption.get,

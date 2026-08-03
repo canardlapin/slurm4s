@@ -196,7 +196,8 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
     SubmissionKey.from("submission-1").toOption.get,
     JobName.from("opaque-script").toOption.get,
     Payload.Script(
-      ScriptSource.Inline("job.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
+      ScriptSource
+        .unsafeInlineScript("job.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
       Vector.empty,
       ResultContract.ExitOnly
     ),

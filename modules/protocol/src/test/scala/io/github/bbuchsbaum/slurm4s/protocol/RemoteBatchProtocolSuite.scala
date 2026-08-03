@@ -100,7 +100,7 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
       base,
       JobName.from("wire-script-batch").toOption.get,
       ScriptProgram(
-        ScriptSource.Inline(
+        ScriptSource.unsafeInlineScript(
           "analysis.sh",
           ByteVector(0x00, 0x7f, 0x80, 0xff)
         ),

@@ -56,7 +56,7 @@ class ObservationScaleSuite extends munit.CatsEffectSuite:
     val request = LaunchSpec(
       key,
       JobName.from("scale-observer").toOption.get,
-      ScriptSource.Inline("scale.sh", ByteVector.view("true\n".getBytes("UTF-8"))),
+      ScriptSource.unsafeInlineScript("scale.sh", ByteVector.view("true\n".getBytes("UTF-8"))),
       Vector.empty,
       ResultContract.ExitOnly.descriptor,
       ResourceRequest.validate(1, 1, None, None, None).toOption.get

@@ -738,10 +738,19 @@ private[ssh] object RemoteScriptBatches:
                 )
                 .asLeft
             case Right(Right((name, bytes))) =>
-              ScriptProgram(
-                ScriptSource.Inline(name, bytes),
-                program.invocation
-              ).asRight
+              // The staged file was already read under `maximumBytes`, so this refusal is only
+              // reachable if that limit is configured above the shared inline bound. Reported as the
+              // same source-limit failure rather than assumed unreachable.
+              ScriptSource
+                .inlineScript(name, bytes)
+                .bimap(
+                  _ =>
+                    RemoteScriptBatchSubmitFailure.SourceLimitExceeded(
+                      RemoteScriptSourceLocation.StagedLocal(raw),
+                      ByteLimit.maximumInlineScript.value
+                    ),
+                  source => ScriptProgram(source, program.invocation)
+                )
           }
 
   private def readLocalScript(

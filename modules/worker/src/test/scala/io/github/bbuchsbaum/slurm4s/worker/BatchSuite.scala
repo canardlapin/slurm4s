@@ -201,7 +201,7 @@ class BatchSuite extends munit.CatsEffectSuite:
       base,
       JobName.from("worker-script-batch").toOption.get,
       ScriptProgram(
-        ScriptSource.Inline("argv.sh", script),
+        ScriptSource.unsafeInlineScript("argv.sh", script),
         ScriptInvocation.Direct
       ),
       topology,

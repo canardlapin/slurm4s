@@ -65,7 +65,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     val request = LaunchSpec(
       SubmissionKey.from("wire-inline").toOption.get,
       JobName.from("wire-inline").toOption.get,
-      ScriptSource.Inline("run.sh", script),
+      ScriptSource.unsafeInlineScript("run.sh", script),
       Vector.empty,
       ResultContract.ExitOnly.descriptor,
       ResourceRequest.validate(1, 1, None, None, None).toOption.get,

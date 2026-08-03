@@ -22,7 +22,7 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
   private val pageSize = ByteLimit.from(4).fold(problem => fail(problem.toString), identity)
 
   test("opaque and declared-output builders preserve distinct result contracts") {
-    val source = ScriptSource.Inline(
+    val source = ScriptSource.unsafeInlineScript(
       "analysis.sh",
       ByteVector.view("#!/bin/sh\ntrue\n".getBytes(StandardCharsets.UTF_8))
     )

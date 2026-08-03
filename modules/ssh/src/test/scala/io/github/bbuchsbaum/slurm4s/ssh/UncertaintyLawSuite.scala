@@ -99,7 +99,8 @@ class UncertaintyLawSuite extends munit.ScalaCheckSuite:
       SubmissionKey.from("uncertainty-law").toOption.get,
       JobName.from("uncertainty-law").toOption.get,
       Payload.Script(
-        ScriptSource.Inline("test.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
+        ScriptSource
+          .unsafeInlineScript("test.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
         Vector.empty,
         ResultContract.ExitOnly
       ),

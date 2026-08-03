@@ -1,6 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
 import io.circe.Json
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
 import org.scalacheck.Prop.forAll
@@ -96,6 +97,65 @@ class CodecBoundsLawSuite extends munit.ScalaCheckSuite:
       "decodeEvidence",
       AgentDomainJson.decodeEvidence(
         substituteBytes(real, oversizeBase64(ByteLimit.maximumCommandCapture))
+      )
+    )
+  }
+
+  /** The script-program decoder bounds an inline script against the shared limit (P7.4).
+    *
+    * It always bounded this field; what changed is that the number now comes from
+    * `ByteLimit.maximumInlineScript`, which `ScriptSource.inlineScript` also enforces, so the
+    * decoder and the domain type can no longer disagree about which scripts exist. The construction
+    * bound is covered exhaustively in core's InlineScriptBoundSuite; this checks the wiring at the
+    * boundary, where a peer chooses the size.
+    */
+  test("an inline script past the shared script limit is rejected before it is decoded") {
+    val key = SubmissionKey.from("bounds-script-batch").toOption.get
+    val topology = BatchPlanner
+      .compile(
+        Batch(
+          Grid.fromAxis(Axis.of(1, 2)),
+          BatchTask.Script(
+            ScriptProgram(ScriptSource.ExistingRemote("/work/batch.sh"), ScriptInvocation.Direct),
+            ScriptArguments.positional[Int]
+          )
+        ),
+        BatchExecutionPlan.Independent(),
+        TaskResources(
+          PositiveInt.from("cpus", 1).toOption.get,
+          None,
+          None
+        )
+      )
+      .toOption
+      .get
+      .topology
+    val request = RemoteScriptBatchRequest(
+      key,
+      JobName.from("bounds-script-batch").toOption.get,
+      ScriptProgram(
+        ScriptSource.unsafeInlineScript("run.sh", ByteVector(1, 2, 3)),
+        ScriptInvocation.Direct
+      ),
+      topology,
+      topology.elementIndices.map { index =>
+        RemoteScriptBatchElement(
+          index,
+          BatchElementKey.derive(key, index).toOption.get,
+          Vector.empty
+        )
+      },
+      Map.empty,
+      RetrySafety.NoAutomaticRetry
+    )
+    val real = AgentDomainJson
+      .encodeRemoteScriptBatchRequest(request)
+      .fold(problem => fail(s"a small script program did not encode: $problem"), identity)
+    accepts("decodeRemoteScriptBatchRequest", AgentDomainJson.decodeRemoteScriptBatchRequest(real))
+    rejects(
+      "decodeRemoteScriptBatchRequest",
+      AgentDomainJson.decodeRemoteScriptBatchRequest(
+        substituteBytes(real, oversizeBase64(ByteLimit.maximumInlineScript))
       )
     )
   }

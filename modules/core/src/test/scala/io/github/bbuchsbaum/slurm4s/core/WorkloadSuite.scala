@@ -5,7 +5,8 @@ import scodec.bits.ByteVector
 class WorkloadSuite extends munit.FunSuite:
   test("opaque scripts make exit-only meaning explicit") {
     val payload = Payload.Script(
-      source = ScriptSource.Inline("analysis.R", ByteVector.view("quit(status = 0)".getBytes)),
+      source =
+        ScriptSource.unsafeInlineScript("analysis.R", ByteVector.view("quit(status = 0)".getBytes)),
       arguments = Vector("--vanilla"),
       resultContract = ResultContract.ExitOnly
     )

@@ -87,7 +87,8 @@ class RemoteSchedulerSuite extends munit.CatsEffectSuite:
       SubmissionKey.from("ssh-scheduler-test").toOption.get,
       JobName.from("ssh-scheduler-test").toOption.get,
       Payload.Script(
-        ScriptSource.Inline("test.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
+        ScriptSource
+          .unsafeInlineScript("test.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
         Vector.empty,
         ResultContract.ExitOnly
       ),

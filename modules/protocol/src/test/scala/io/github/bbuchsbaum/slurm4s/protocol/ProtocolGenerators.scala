@@ -453,7 +453,7 @@ object ProtocolGenerators:
     Gen.oneOf(
       Gen
         .zip(Gen.oneOf("job.sh", "run.sh"), Generators.evidenceBytes)
-        .map(ScriptSource.Inline.apply),
+        .map(ScriptSource.unsafeInlineScript),
       Gen.oneOf("/local/job.sh", "/local/run.sh").map(ScriptSource.StagedLocal.apply),
       Gen.oneOf("/remote/job.sh", "/remote/run.sh").map(ScriptSource.ExistingRemote.apply)
     )

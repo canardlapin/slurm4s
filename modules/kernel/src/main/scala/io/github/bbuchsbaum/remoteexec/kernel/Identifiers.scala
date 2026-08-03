@@ -151,6 +151,14 @@ object ByteLimit:
   val defaultEvidence: Type = 64 * 1024
   val maximumCommandCapture: Type = 4 * 1024 * 1024
   val maximumLogPage: Type = 4 * 1024 * 1024
+
+  /** The largest script that may be carried inline in a request.
+    *
+    * Named separately from `maximumCommandCapture` despite sharing its value because it bounds
+    * something else: a script the caller supplies, not output a command produced. The two are free
+    * to diverge, and a reader should not have to infer that a script is bounded by a capture limit.
+    */
+  val maximumInlineScript: Type = 4 * 1024 * 1024
   def from(raw: Int): Either[ValidationFailure, Type] =
     Either.cond(raw > 0, raw, ValidationFailure("byteLimit", "must be positive"))
   def unsafeFrom(raw: Int): Type =

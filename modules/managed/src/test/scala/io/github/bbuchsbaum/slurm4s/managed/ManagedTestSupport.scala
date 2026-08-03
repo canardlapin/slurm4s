@@ -18,7 +18,7 @@ private[managed] object ManagedTestSupport:
     LaunchSpec(
       SubmissionKey.from(key).toOption.get,
       JobName.from("managed-test").toOption.get,
-      ScriptSource.Inline(
+      ScriptSource.unsafeInlineScript(
         "job.sh",
         ByteVector.view(s"#!/bin/sh\n$body\n".getBytes("UTF-8"))
       ),

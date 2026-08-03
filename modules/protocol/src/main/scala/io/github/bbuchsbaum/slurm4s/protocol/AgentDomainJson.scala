@@ -5,6 +5,7 @@ import cats.syntax.all.*
 import io.circe.Decoder
 import io.circe.DecodingFailure
 import io.circe.Encoder
+import io.circe.ACursor
 import io.circe.HCursor
 import io.circe.Json
 import io.circe.generic.semiauto.deriveDecoder
@@ -1005,10 +1006,11 @@ object AgentDomainJson:
             encoded <- field[String](sourceCursor, "bytesBase64")
             bytes <- decodeBase64Bounded(
               encoded,
-              ByteLimit.maximumCommandCapture,
+              ByteLimit.maximumInlineScript,
               "bytesBase64"
             )
-          yield ScriptSource.Inline(name, bytes)
+            source <- ScriptSource.inlineScript(name, bytes).left.map(_.reason)
+          yield source
         case "existing-remote" =>
           field[String](sourceCursor, "path").map(ScriptSource.ExistingRemote.apply)
         case other => Left(s"unknown script source kind: $other")
@@ -1806,7 +1808,38 @@ object AgentDomainJson:
   private given Encoder[ResourceRequest] = deriveEncoder
   private given Decoder[ResourceRequest] = deriveDecoder
   private given Encoder[ScriptSource] = deriveEncoder
-  private given Decoder[ScriptSource] = deriveDecoder
+
+  /** Mirrors circe's derived sum shape — `{"Inline":{"name":...,"bytes":[...]}}` and its siblings —
+    * so the submit request's bytes are unchanged, while routing construction through the validating
+    * factory that a derived decoder would bypass.
+    *
+    * The encoder above is still derived, which is what keeps the two from drifting: if the shape
+    * ever changes, the round-trip law and the pinned fixture fail rather than one side silently
+    * reading a format the other stopped writing.
+    */
+  private given Decoder[ScriptSource] = Decoder.instance { cursor =>
+    def decodeInline(nested: ACursor): Decoder.Result[ScriptSource] =
+      for
+        name <- nested.get[String]("name")
+        bytes <- nested.get[ByteVector]("bytes")
+        source <- ScriptSource
+          .inlineScript(name, bytes)
+          .left
+          .map(problem => DecodingFailure(problem.reason, nested.history))
+      yield source
+
+    cursor.keys.map(_.toVector) match
+      case Some(Vector("Inline"))      => decodeInline(cursor.downField("Inline"))
+      case Some(Vector("StagedLocal")) =>
+        cursor.downField("StagedLocal").get[String]("path").map(ScriptSource.StagedLocal.apply)
+      case Some(Vector("ExistingRemote")) =>
+        cursor
+          .downField("ExistingRemote")
+          .get[String]("path")
+          .map(ScriptSource.ExistingRemote.apply)
+      case _ =>
+        Left(DecodingFailure("script source must name exactly one known kind", cursor.history))
+  }
 
   private given Encoder[SpawnFailureKind] = deriveEncoder
   private given Decoder[SpawnFailureKind] = deriveDecoder

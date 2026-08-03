@@ -36,10 +36,51 @@ object RelativeOutputPath:
   given Show[Type] = Show.show(identity)
 type RelativeOutputPath = RelativeOutputPath.Type
 
-enum ScriptSource derives CanEqual:
-  case Inline(name: String, bytes: ByteVector)
-  case StagedLocal(path: String)
-  case ExistingRemote(path: String)
+/** A sealed hierarchy rather than an enum so that `Inline` can take a private constructor, which is
+  * what makes its bound unavoidable. The case names and match syntax are unchanged.
+  */
+sealed trait ScriptSource derives CanEqual
+
+/** How big an inline script may be is answered once, here, rather than at each boundary that
+  * happens to look.
+  *
+  * It used to be answered three times and differently: the remote script-program decoder bounded
+  * inline bytes at four mebibytes, the opaque submit decoder did not bound them at all and
+  * inherited whatever frame size a deployment configured, and the worker refused them against its
+  * own `maximumInvocationBytes`. So whether a given script was acceptable depended on which path
+  * carried it, and a caller could build one that some paths would take and others would refuse.
+  *
+  * Bounding at construction is what makes the answer inherited rather than repeated: `Inline`
+  * cannot be built without passing the check, so every decoder, planner and launcher downstream
+  * holds a value that already satisfies it. A deployment may still be stricter — the worker's
+  * configurable limit is a narrower operational bound, not a competing answer to what a valid
+  * script is.
+  */
+object ScriptSource:
+  /** The private constructor is the bound: an `Inline` in hand has already passed the check, and
+    * `copy` is private with it, so there is no way to widen one after the fact.
+    */
+  final case class Inline private[ScriptSource] (name: String, bytes: ByteVector)
+      extends ScriptSource
+  final case class StagedLocal(path: String) extends ScriptSource
+  final case class ExistingRemote(path: String) extends ScriptSource
+
+  def inlineScript(name: String, bytes: ByteVector): Either[ValidationFailure, ScriptSource] =
+    Either.cond(
+      bytes.size <= ByteLimit.maximumInlineScript.value.toLong,
+      new Inline(name, bytes),
+      ValidationFailure(
+        "inlineScript",
+        s"must contain at most ${ByteLimit.maximumInlineScript.value} bytes"
+      )
+    )
+
+  /** Construct a trusted library or test constant, failing immediately if its source is invalid. */
+  def unsafeInlineScript(name: String, bytes: ByteVector): ScriptSource =
+    inlineScript(name, bytes).fold(
+      problem => throw new IllegalArgumentException(problem.reason),
+      identity
+    )
 
 enum NoResult derives CanEqual:
   case Value
