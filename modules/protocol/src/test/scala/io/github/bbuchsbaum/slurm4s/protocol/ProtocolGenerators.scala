@@ -1,9 +1,13 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
 import cats.data.NonEmptyVector
+import io.circe.JsonObject
 import io.github.bbuchsbaum.slurm4s.core.*
+import io.github.bbuchsbaum.slurm4s.core.codec.VersionedJson
 
 import org.scalacheck.Gen
+
+import scodec.bits.ByteVector
 
 import java.time.LocalDateTime
 import java.time.ZoneOffset
@@ -559,6 +563,72 @@ object ProtocolGenerators:
   val managedLaunchSpec: Gen[LaunchSpec] =
     launchSpec(Gen.const(Map.empty))
       .map(_.copy(resultContract = ResultContract.ExitOnly.descriptor))
+
+  // --- The transport envelope and its framing. ---
+
+  val requestId: Gen[RequestId] =
+    Gen
+      .oneOf("req-1", "req-2", "handshake-0", "observe-42")
+      .map(raw => RequestId.from(raw).toOption.get)
+
+  /** Minor version varies, major does not: the envelope decoder refuses any major but its own, so a
+    * generator that moved it would be generating messages no peer should accept.
+    */
+  val protocolVersion: Gen[ProtocolVersion] =
+    Gen
+      .choose(0, 4)
+      .map(minor => ProtocolVersion.from(VersionedJson.supportedMajor, minor).toOption.get)
+
+  val agentMethod: Gen[AgentMethod] = Gen.oneOf(AgentMethod.values.toVector)
+
+  val agentResponseStatus: Gen[AgentResponseStatus] =
+    Gen.oneOf(AgentResponseStatus.values.toVector)
+
+  val agentBody: Gen[AgentBody] =
+    Gen.oneOf(
+      Gen.zip(agentMethod, JsonCorpus.arbitraryJson).map(AgentBody.Request.apply),
+      Gen.zip(agentResponseStatus, JsonCorpus.arbitraryJson).map(AgentBody.Response.apply)
+    )
+
+  /** Extension names avoid the reserved set, which `withExtensions` refuses by contract. */
+  val agentExtensions: Gen[JsonObject] =
+    Gen
+      .choose(0, 3)
+      .flatMap(
+        Gen.listOfN(
+          _,
+          Gen.zip(
+            Gen.oneOf("traceId", "deadlineMillis", "zzzLastAlphabetically", "aaaFirst"),
+            JsonCorpus.arbitraryJson
+          )
+        )
+      )
+      .map(fields => JsonObject.fromIterable(fields))
+
+  val agentEnvelope: Gen[AgentEnvelope] =
+    for
+      id <- requestId
+      protocol <- protocolVersion
+      body <- agentBody
+      extensions <- agentExtensions
+    yield AgentEnvelope
+      .withExtensions(id, protocol, body, extensions)
+      .fold(
+        failure => throw new AssertionError(s"generated a reserved extension: $failure"),
+        identity
+      )
+
+  /** Splits a byte stream into consecutive chunks of arbitrary size, including empty ones.
+    *
+    * This is the shape a stream decoder actually sees: a chunk boundary has nothing to do with a
+    * frame boundary, so a decoder tested only on whole frames has never been tested.
+    */
+  def chunkings(bytes: ByteVector): Gen[Vector[ByteVector]] =
+    if bytes.isEmpty then Gen.const(Vector.empty)
+    else
+      Gen.choose(1L, math.min(bytes.size, 8L)).flatMap { taken =>
+        chunkings(bytes.drop(taken)).map(rest => bytes.take(taken) +: rest)
+      }
 
   private def nonEmpty[A](value: Gen[A]): Gen[NonEmptyVector[A]] =
     for
