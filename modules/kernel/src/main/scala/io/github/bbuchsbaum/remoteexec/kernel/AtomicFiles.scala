@@ -10,6 +10,8 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
+import scodec.bits.ByteVector
+
 import java.security.MessageDigest
 import java.util.UUID
 import scala.util.control.NonFatal
@@ -70,7 +72,7 @@ object AtomicFiles:
 
   def writeNewBlocking(
       target: Path,
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       executable: Boolean = false
   ): Either[WriteFailure, Unit] =
     try
@@ -88,7 +90,7 @@ object AtomicFiles:
     */
   def writeStableBlocking(
       target: Path,
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       executable: Boolean = false
   ): Either[WriteFailure, Unit] =
     try
@@ -99,7 +101,7 @@ object AtomicFiles:
       }
     catch case NonFatal(error) => Left(writeFailureOf(error, target))
 
-  def replaceBlocking(target: Path, bytes: Vector[Byte]): Either[WriteFailure, Unit] =
+  def replaceBlocking(target: Path, bytes: ByteVector): Either[WriteFailure, Unit] =
     try stageAndMove(target, bytes, executable = false, replaceExisting = true)
     catch case NonFatal(error) => Left(writeFailureOf(error, target))
 
@@ -111,7 +113,7 @@ object AtomicFiles:
     */
   def publishOnceBlocking(
       target: Path,
-      bytes: Vector[Byte]
+      bytes: ByteVector
   ): Either[WriteFailure, ContentDigest] =
     try
       withTargetLock(target, WriteFailure.Io.apply) { normalized =>
@@ -163,7 +165,7 @@ object AtomicFiles:
       name.startsWith(".") && (name.endsWith(".atomic.lock") || name.contains(".tmp-"))
     }
 
-  def digestOf(bytes: Vector[Byte]): ContentDigest =
+  def digestOf(bytes: ByteVector): ContentDigest =
     val hex = MessageDigest
       .getInstance("SHA-256")
       .digest(bytes.toArray)
@@ -173,7 +175,7 @@ object AtomicFiles:
 
   private def validateExisting(
       target: Path,
-      expected: Vector[Byte]
+      expected: ByteVector
   ): Either[WriteFailure, Unit] =
     if !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS) then
       Left(WriteFailure.TargetConflict(target.toString, "existing entry is not a regular file"))
@@ -216,7 +218,7 @@ object AtomicFiles:
 
   private def stageAndMove(
       target: Path,
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       executable: Boolean,
       replaceExisting: Boolean
   ): Either[WriteFailure, Unit] =
@@ -229,7 +231,7 @@ object AtomicFiles:
       )
       setPrivate(temporary, executable)
       try
-        val buffer = java.nio.ByteBuffer.wrap(bytes.toArray)
+        val buffer = bytes.toByteBuffer
         while buffer.hasRemaining do
           val _ = channel.write(buffer)
         channel.force(true)
@@ -257,21 +259,24 @@ object AtomicFiles:
     finally
       val _ = Files.deleteIfExists(temporary)
 
-  private def readAtMost(path: Path, maximum: Int): Vector[Byte] =
+  /** `maximum` is a `Long` because a `ByteVector` size is one, so no caller has to narrow it. */
+  private def readAtMost(path: Path, maximum: Long): ByteVector =
     val input = Files.newInputStream(path, StandardOpenOption.READ)
     try
       val output = new java.io.ByteArrayOutputStream()
       val buffer = new Array[Byte](8192)
-      var total = 0
+      var total = 0L
       var done = false
       while !done && total < maximum do
-        val requested = math.min(buffer.length, maximum - total)
+        val requested = math.min(buffer.length.toLong, maximum - total).toInt
         val count = input.read(buffer, 0, requested)
         if count < 0 then done = true
         else
           output.write(buffer, 0, count)
-          total += count
-      output.toByteArray.toVector
+          total += count.toLong
+      // `view` rather than a copy: the array is freshly built here and escapes nowhere else, so
+      // wrapping it is safe and keeps the read off the boxing path entirely.
+      ByteVector.view(output.toByteArray)
     finally input.close()
 
   /** Best-effort directory force. Returns whether the platform allowed it.

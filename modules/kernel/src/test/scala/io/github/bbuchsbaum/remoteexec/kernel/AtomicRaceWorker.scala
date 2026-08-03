@@ -1,5 +1,7 @@
 package io.github.bbuchsbaum.remoteexec.kernel
 
+import scodec.bits.ByteVector
+
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -16,7 +18,7 @@ object AtomicRaceWorker:
   def main(args: Array[String]): Unit =
     val operation = args(0)
     val target: Path = Paths.get(args(1))
-    val payload = args(2).getBytes("UTF-8").toVector
+    val payload = ByteVector.view(args(2).getBytes("UTF-8"))
 
     val line = operation match
       case "publishOnce" =>

@@ -2,6 +2,7 @@ package io.github.bbuchsbaum.remoteexec.kernel
 
 import cats.effect.IO
 import cats.syntax.all.*
+import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -20,8 +21,11 @@ class AtomicFilesSuite extends munit.CatsEffectSuite:
       finally paths.close()
   )
 
-  private def bytes(text: String): Vector[Byte] =
-    text.getBytes(StandardCharsets.UTF_8).toVector
+  private def bytes(text: String): ByteVector =
+    ByteVector.view(text.getBytes(StandardCharsets.UTF_8))
+
+  private def published(path: Path): ByteVector =
+    ByteVector.view(Files.readAllBytes(path))
 
   temporaryRoot.test("concurrent identical stable writes are logically idempotent") { root =>
     val target = root.resolve("script.sh")
@@ -32,14 +36,14 @@ class AtomicFilesSuite extends munit.CatsEffectSuite:
       )
       .map { outcomes =>
         assert(outcomes.forall(_ == Right(())), outcomes.mkString(", "))
-        assertEquals(Files.readAllBytes(target).toVector, content)
+        assertEquals(published(target), content)
       }
   }
 
   temporaryRoot.test("concurrent different stable writes preserve exactly one value") { root =>
     val target = root.resolve("artifact.bin")
-    val first = Vector.fill(128 * 1024)('a'.toByte)
-    val second = Vector.fill(128 * 1024)('b'.toByte)
+    val first = ByteVector.fill(128L * 1024L)('a'.toByte)
+    val second = ByteVector.fill(128L * 1024L)('b'.toByte)
     Vector(first, second)
       .parTraverse(value => IO.blocking(AtomicFiles.writeStableBlocking(target, value)))
       .map { outcomes =>
@@ -51,15 +55,15 @@ class AtomicFilesSuite extends munit.CatsEffectSuite:
           }),
           1
         )
-        val observed = Files.readAllBytes(target).toVector
+        val observed = published(target)
         assert(observed == first || observed == second)
       }
   }
 
   temporaryRoot.test("atomic replacement readers observe only complete old or new values") { root =>
     val target = root.resolve("latest.bin")
-    val oldValue = Vector.fill(256 * 1024)('o'.toByte)
-    val newValue = Vector.fill(256 * 1024)('n'.toByte)
+    val oldValue = ByteVector.fill(256L * 1024L)('o'.toByte)
+    val newValue = ByteVector.fill(256L * 1024L)('n'.toByte)
     for
       initialized <- IO.blocking(AtomicFiles.writeStableBlocking(target, oldValue))
       _ = assertEquals(initialized, Right(()))
@@ -69,7 +73,7 @@ class AtomicFilesSuite extends munit.CatsEffectSuite:
           IO.blocking(AtomicFiles.replaceBlocking(target, value))
             .map(result => assertEquals(result, Right(())))
         },
-        (0 until 256).toVector.traverse(_ => IO.blocking(Files.readAllBytes(target).toVector))
+        (0 until 256).toVector.traverse(_ => IO.blocking(published(target)))
       ).parTupled.map(_._2)
     yield assert(
       observed.forall(value => value == oldValue || value == newValue),
@@ -128,7 +132,7 @@ class AtomicFilesSuite extends munit.CatsEffectSuite:
       val losers = outcomes.collect { case Left(AtomicFiles.ClaimFailure.SourceMissing(_)) => () }
       assertEquals(winners.size, 1)
       assertEquals(losers.size, 15)
-      assertEquals(Files.readAllBytes(winners.head).toVector, content)
+      assertEquals(published(winners.head), content)
   }
 
   temporaryRoot.test("completed writes leave no private temporary artifacts") { root =>
