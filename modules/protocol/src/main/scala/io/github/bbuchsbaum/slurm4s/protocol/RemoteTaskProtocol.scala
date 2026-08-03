@@ -53,6 +53,15 @@ object RemoteTaskWireLimits:
   val MaximumHandleBytes: ByteLimit = ByteLimit.defaultEvidence
   val MaximumDescriptorBytes: ByteLimit = ByteLimit.maximumCommandCapture
 
+  /** Cardinality ceiling for the per-element collections a batch request or response carries.
+    *
+    * A byte bound on each element says nothing about how many of them arrive, so a collection needs
+    * its own cap. This matches Slurm's own practical array ceiling and was already applied as a
+    * bare literal at the batch-element sites; naming it keeps those from drifting apart from the
+    * result-reference list, which had no cap at all.
+    */
+  val MaximumBatchEntries: Int = 100000
+
 enum RemoteTaskDescriptorCodecFailure derives CanEqual:
   case TooLarge(actualBytes: Long, maximumBytes: Int)
   case Envelope(failure: CodecFailure)

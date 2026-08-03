@@ -282,9 +282,9 @@ object AgentDomainJson:
       elementJson <- field[Vector[Json]](cursor, "elements")
       _ <- Either.cond(elementJson.nonEmpty, (), "batch elements must not be empty")
       _ <- Either.cond(
-        elementJson.size <= 100000,
+        elementJson.sizeIs <= RemoteTaskWireLimits.MaximumBatchEntries,
         (),
-        "batch elements exceed 100000 entries"
+        s"batch elements exceed ${RemoteTaskWireLimits.MaximumBatchEntries} entries"
       )
       elements <- elementJson.traverse(decodeRemoteBatchElement)
       nonEmptyElements <- NonEmptyVector
@@ -419,9 +419,10 @@ object AgentDomainJson:
       topology <- decodeBatchTopology(topologyJson)
       elementJson <- field[Vector[Json]](cursor, "elements")
       _ <- Either.cond(
-        elementJson.nonEmpty && elementJson.size <= 100000,
+        elementJson.nonEmpty && elementJson.sizeIs <= RemoteTaskWireLimits.MaximumBatchEntries,
         (),
-        "script batch elements must contain between 1 and 100000 entries"
+        "script batch elements must contain between 1 and " +
+          s"${RemoteTaskWireLimits.MaximumBatchEntries} entries"
       )
       elements <- elementJson.traverse(decodeRemoteScriptBatchElement)
       nonEmptyElements <- NonEmptyVector
@@ -601,6 +602,12 @@ object AgentDomainJson:
         .focus
         .flatMap(_.asArray)
         .toRight("missing resultRefs")
+      // Each reference is individually bounded, which says nothing about how many arrive.
+      _ <- Either.cond(
+        refsJson.sizeIs <= RemoteTaskWireLimits.MaximumBatchEntries,
+        (),
+        s"resultRefs exceed ${RemoteTaskWireLimits.MaximumBatchEntries} entries"
+      )
       refs <- refsJson.toVector.traverse(decodeRemoteResultRef)
       nonEmpty <- NonEmptyVector.fromVector(refs).toRight("resultRefs must not be empty")
       maximumRaw <- field[Int](cursor, "maximumBytes")
@@ -1218,15 +1225,24 @@ object AgentDomainJson:
       epoch <- AttemptEpoch.from(epochRaw).left.map(_.reason)
     yield RemoteResultRef(attempt, epoch)
 
+  /** The longest base64 text that can decode to within `maximumBytes`.
+    *
+    * The point of comparing against this rather than against the decoded size is ordering:
+    * `Base64.getDecoder.decode` allocates an array sized from its input, so a bound checked only
+    * afterwards has already permitted the allocation it exists to prevent. Every base64 field in
+    * this object is bounded before decoding for that reason.
+    */
+  private def maximumEncodedLength(maximumBytes: ByteLimit): Long =
+    ((maximumBytes.value.toLong + 2L) / 3L) * 4L
+
   private def decodeBase64Bounded(
       encoded: String,
       maximumBytes: ByteLimit,
       fieldName: String
   ): Either[String, ByteVector] =
-    val maximumEncoded = ((maximumBytes.value.toLong + 2L) / 3L) * 4L
     for
       _ <- Either.cond(
-        encoded.length.toLong <= maximumEncoded,
+        encoded.length.toLong <= maximumEncodedLength(maximumBytes),
         (),
         s"$fieldName exceeds its encoded size limit"
       )
@@ -1752,8 +1768,14 @@ object AgentDomainJson:
       source <- cursor.get[EvidenceSource]("source")
       observedAt <- cursor.get[Instant]("observedAt")
       encoded <- cursor.get[String]("bytesBase64")
-      bytes <- Try(ByteVector.view(Base64.getDecoder.decode(encoded))).toEither.left
-        .map(error => io.circe.DecodingFailure(error.getMessage, cursor.history))
+      // Same ceiling the remote path applies to this same field via decodeRemoteBoundedEvidence,
+      // so the agent and remote decoders no longer disagree about whether evidence is bounded.
+      bytes <- decodeBase64(
+        encoded,
+        cursor,
+        ByteLimit.maximumCommandCapture,
+        "evidence.bytesBase64"
+      )
       original <- cursor.get[Long]("originalByteCount")
       value <- Either
         .cond(
@@ -2066,7 +2088,7 @@ object AgentDomainJson:
   private given Decoder[LogPage] = Decoder.instance { cursor =>
     for
       encoded <- cursor.get[String]("bytesBase64")
-      bytes <- decodeBase64(encoded, cursor)
+      bytes <- decodeBase64(encoded, cursor, ByteLimit.maximumLogPage, "logPage.bytesBase64")
       next <- cursor.get[LogCursor]("next")
       endOfFile <- cursor.get[Boolean]("endOfFile")
       observedAt <- cursor.get[Instant]("observedAt")
@@ -2122,13 +2144,32 @@ object AgentDomainJson:
     }
   }
 
-  private def decodeBase64(encoded: String, cursor: HCursor): Decoder.Result[ByteVector] =
-    Try(ByteVector.view(Base64.getDecoder.decode(encoded))).toEither.left.map { error =>
-      DecodingFailure(
-        Option(error.getMessage).filter(_.nonEmpty).getOrElse("invalid base64"),
-        cursor.history
-      )
-    }
+  private def decodeBase64(
+      encoded: String,
+      cursor: HCursor,
+      maximumBytes: ByteLimit,
+      fieldName: String
+  ): Decoder.Result[ByteVector] =
+    if encoded.length.toLong > maximumEncodedLength(maximumBytes) then
+      Left(DecodingFailure(s"$fieldName exceeds its encoded size limit", cursor.history))
+    else
+      Try(ByteVector.view(Base64.getDecoder.decode(encoded))).toEither.left
+        .map { error =>
+          DecodingFailure(
+            Option(error.getMessage).filter(_.nonEmpty).getOrElse("invalid base64"),
+            cursor.history
+          )
+        }
+        .flatMap { bytes =>
+          Either.cond(
+            bytes.size <= maximumBytes.value.toLong,
+            bytes,
+            DecodingFailure(
+              s"$fieldName exceeds ${maximumBytes.value} decoded bytes",
+              cursor.history
+            )
+          )
+        }
 
   private def slurmStateCode(state: SlurmState): String = state match
     case SlurmState.Pending     => "pending"
