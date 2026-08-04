@@ -5,6 +5,7 @@ import io.github.bbuchsbaum.slurm4s.cli.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
 import java.time.Instant
+import scodec.bits.ByteVector
 
 class TestkitSuite extends munit.CatsEffectSuite:
   private val observedAt = Instant.parse("2026-07-30T12:00:00Z")
@@ -12,10 +13,10 @@ class TestkitSuite extends munit.CatsEffectSuite:
     BoundedEvidence.capture(
       EvidenceSource.CommandStdout("test"),
       observedAt,
-      Vector.empty
+      ByteVector.empty
     )
   )
-  private val job = JobRef(JobId.unsafeFrom("42"), None, None)
+  private val job = JobRef(JobId.unsafeFrom("42"), None)
   private val submissionKey = SubmissionKey.unsafeFrom("scripted-submit")
   private val request = JobRequest(
     submissionKey,
@@ -42,7 +43,7 @@ class TestkitSuite extends munit.CatsEffectSuite:
           SchedulerScriptStep.Cancel(job, cancellation)
         )
       )
-      submitted <- scheduler.submit(request)
+      submitted <- scheduler.submitLowered(request)
       cancelled <- scheduler.cancel(job)
       _ <- scheduler.assertDrained
       observed <- scheduler.observed

@@ -2,6 +2,7 @@ package io.github.bbuchsbaum.slurm4s.core
 
 import cats.Order
 import cats.Show
+import scodec.bits.ByteVector
 
 class IdentifiersSuite extends munit.FunSuite:
   test("opaque identifiers reject empty, whitespace, and invalid numeric values") {
@@ -35,11 +36,11 @@ class IdentifiersSuite extends munit.FunSuite:
     val evidence = BoundedEvidence.capture(
       EvidenceSource.CommandStdout("squeue"),
       java.time.Instant.EPOCH,
-      Vector[Byte](1, 2, 3, 4, 5),
+      ByteVector(1, 2, 3, 4, 5),
       limit
     )
 
-    assertEquals(evidence.bytes, Vector[Byte](1, 2, 3))
+    assertEquals(evidence.bytes, ByteVector(1, 2, 3))
     assertEquals(evidence.originalByteCount, 5L)
     assert(evidence.truncated)
   }

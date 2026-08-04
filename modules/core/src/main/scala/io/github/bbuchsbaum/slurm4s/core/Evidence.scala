@@ -1,5 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.core
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 enum EvidenceSource derives CanEqual:
@@ -16,7 +18,7 @@ enum EvidenceSource derives CanEqual:
 final case class BoundedEvidence private (
     source: EvidenceSource,
     observedAt: Instant,
-    bytes: Vector[Byte],
+    bytes: ByteVector,
     originalByteCount: Long,
     truncated: Boolean
 ) derives CanEqual:
@@ -34,7 +36,7 @@ object BoundedEvidence:
   def capture(
       source: EvidenceSource,
       observedAt: Instant,
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       limit: ByteLimit = ByteLimit.defaultEvidence
   ): BoundedEvidence =
     val retained = bytes.take(limit.value)
@@ -49,7 +51,7 @@ object BoundedEvidence:
   private[slurm4s] def fromCapture(
       source: EvidenceSource,
       observedAt: Instant,
-      retainedBytes: Vector[Byte],
+      retainedBytes: ByteVector,
       originalByteCount: Long
   ): BoundedEvidence =
     require(

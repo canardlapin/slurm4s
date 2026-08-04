@@ -1,11 +1,15 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
+import cats.syntax.all.*
+
 import io.circe.HCursor
 import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.core.codec.CodecFailure
 import io.github.bbuchsbaum.slurm4s.core.codec.VersionedJson
 import io.github.bbuchsbaum.slurm4s.core.codec.WireEnvelope
+
+import scodec.bits.ByteVector
 
 import java.time.Instant
 import java.util.Base64
@@ -16,408 +20,6 @@ enum StructuredCodecFailure derives CanEqual:
   case Envelope(failure: CodecFailure)
   case WrongSchema(received: String)
   case Invalid(message: String)
-
-import StructuredJson.*
-
-object ResultEnvelopeCodec:
-  private val schema = SchemaId.unsafeFrom("slurm4s.result-envelope")
-  private val MaximumOutputs = 1024
-
-  def encode(
-      value: ResultEnvelope,
-      maximumEnvelopeBytes: ByteLimit,
-      maximumValueBytes: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
-    for
-      _ <- bounded(value.value.fold(0L)(_.size.toLong), maximumValueBytes)
-      _ <- Either.cond(
-        value.outputs.entries.size <= MaximumOutputs,
-        (),
-        StructuredCodecFailure.Invalid(s"result envelope exceeds $MaximumOutputs outputs")
-      )
-      bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, encodePayload(value)))
-      _ <- bounded(bytes.size.toLong, maximumEnvelopeBytes)
-    yield bytes
-
-  def decode(
-      bytes: Vector[Byte],
-      maximumEnvelopeBytes: ByteLimit,
-      maximumValueBytes: ByteLimit
-  ): Either[StructuredCodecFailure, ResultEnvelope] =
-    for
-      _ <- bounded(bytes.size.toLong, maximumEnvelopeBytes)
-      envelope <- VersionedJson.decode(bytes).left.map(StructuredCodecFailure.Envelope.apply)
-      _ <- Either.cond(
-        envelope.schema == schema,
-        (),
-        StructuredCodecFailure.WrongSchema(envelope.schema.value)
-      )
-      value <- decodePayload(envelope.payload, maximumValueBytes)
-    yield value
-
-  private def encodePayload(value: ResultEnvelope): Json =
-    Json.obj(
-      "submissionKey" -> Json.fromString(value.submissionKey.value),
-      "attemptId" -> Json.fromString(value.attemptId.value),
-      "attemptEpoch" -> Json.fromLong(value.attemptEpoch.value),
-      "job" -> value.job.fold(Json.Null)(encodeJob),
-      "operation" -> encodeOperation(value.operation),
-      "resultSchema" -> Json.fromString(value.resultSchema.value),
-      "status" -> encodeStatus(value.status),
-      "valueBase64" -> value.value.fold(Json.Null)(bytes =>
-        Json.fromString(Base64.getEncoder.encodeToString(bytes.toArray))
-      ),
-      "outputs" -> Json.arr(value.outputs.entries.map(encodeOutput)*),
-      "workerRelease" -> encodeWorkerRelease(value.workerRelease),
-      "completedAt" -> Json.fromString(value.completedAt.toString)
-    )
-
-  private def decodePayload(
-      json: Json,
-      maximumValueBytes: ByteLimit
-  ): Either[StructuredCodecFailure, ResultEnvelope] =
-    for
-      cursor <- objectCursor(json, "result envelope")
-      submissionKey <- identifier(cursor, "submissionKey", SubmissionKey.from)
-      attemptId <- identifier(cursor, "attemptId", AttemptId.from)
-      epochValue <- field[Long](cursor, "attemptEpoch")
-      epoch <- AttemptEpoch.from(epochValue).left.map(problem => invalid(problem.reason))
-      job <- optionalObject(cursor, "job", decodeJob)
-      operationJson <- requiredJson(cursor, "operation")
-      operation <- decodeOperation(operationJson)
-      resultSchema <- identifier(cursor, "resultSchema", ResultSchemaId.from)
-      statusJson <- requiredJson(cursor, "status")
-      status <- decodeStatus(statusJson)
-      encodedValue <- optionalField[String](cursor, "valueBase64")
-      value <- encodedValue.traverse(decodeBase64(_, maximumValueBytes))
-      outputsJson <- field[Vector[Json]](cursor, "outputs")
-      _ <- Either.cond(
-        outputsJson.size <= MaximumOutputs,
-        (),
-        invalid(s"result envelope exceeds $MaximumOutputs outputs")
-      )
-      outputEntries <- outputsJson.traverse(decodeOutput)
-      outputs <- OutputManifest.from(outputEntries).left.map(problem => invalid(problem.reason))
-      releaseJson <- requiredJson(cursor, "workerRelease")
-      release <- decodeWorkerRelease(releaseJson)
-      completedText <- field[String](cursor, "completedAt")
-      completed <- parseInstant(completedText)
-      envelope <- ResultEnvelope
-        .decoded(
-          submissionKey,
-          attemptId,
-          epoch,
-          job,
-          operation,
-          resultSchema,
-          status,
-          value,
-          outputs,
-          release,
-          completed
-        )
-        .left
-        .map(invalid)
-    yield envelope
-
-  private def bounded(
-      actual: Long,
-      maximum: ByteLimit
-  ): Either[StructuredCodecFailure, Unit] =
-    Either.cond(
-      actual <= maximum.value.toLong,
-      (),
-      StructuredCodecFailure.TooLarge(actual, maximum.value)
-    )
-
-  private def decodeBase64(
-      value: String,
-      maximum: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
-    val maximumEncoded = ((maximum.value.toLong + 2L) / 3L) * 4L
-    for
-      _ <- Either.cond(
-        value.length.toLong <= maximumEncoded,
-        (),
-        StructuredCodecFailure.TooLarge(
-          value.length.toLong,
-          math.min(maximumEncoded, Int.MaxValue.toLong).toInt
-        )
-      )
-      bytes <- Try(Base64.getDecoder.decode(value).toVector).toEither.left.map(error =>
-        invalid(s"valueBase64 is invalid: ${error.getMessage}")
-      )
-      _ <- bounded(bytes.size.toLong, maximum)
-    yield bytes
-
-  private def invalid(message: String): StructuredCodecFailure =
-    StructuredCodecFailure.Invalid(message)
-
-object DurableResultHandleCodec:
-  private val schema = SchemaId.unsafeFrom("slurm4s.result-handle")
-  private val MaximumOutputs = 1024
-
-  def encode(
-      value: DurableResultHandle,
-      maximumBytes: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
-    for
-      _ <- Either.cond(
-        value.declaredOutputs.size <= MaximumOutputs &&
-          value.declaredOutputs.distinct.size == value.declaredOutputs.size,
-        (),
-        StructuredCodecFailure.Invalid("result handle outputs must be distinct and bounded")
-      )
-      fields = Vector(
-        "submissionKey" -> Json.fromString(value.submissionKey.value),
-        "attemptId" -> Json.fromString(value.attemptId.value),
-        "attemptEpoch" -> Json.fromLong(value.attemptEpoch.value),
-        "job" -> value.job.fold(Json.Null)(encodeJob),
-        "operation" -> encodeOperation(value.operation),
-        "resultSchema" -> Json.fromString(value.resultSchema.value),
-        "maximumResultBytes" -> Json.fromInt(value.maximumResultBytes.value),
-        "maximumEnvelopeBytes" -> Json.fromInt(value.maximumEnvelopeBytes.value),
-        "declaredOutputs" -> Json.arr(
-          value.declaredOutputs.map(path => Json.fromString(path.value))*
-        ),
-        "workerRelease" -> encodeWorkerRelease(value.workerRelease)
-      ) ++ encodeRetrySafetyField(value.retrySafety)
-      payload = Json.obj(fields*)
-      bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, payload))
-      _ <- Either.cond(
-        bytes.size <= maximumBytes.value,
-        (),
-        StructuredCodecFailure.TooLarge(bytes.size.toLong, maximumBytes.value)
-      )
-    yield bytes
-
-  def decode(
-      bytes: Vector[Byte],
-      maximumBytes: ByteLimit
-  ): Either[StructuredCodecFailure, DurableResultHandle] =
-    for
-      _ <- Either.cond(
-        bytes.size <= maximumBytes.value,
-        (),
-        StructuredCodecFailure.TooLarge(bytes.size.toLong, maximumBytes.value)
-      )
-      envelope <- VersionedJson.decode(bytes).left.map(StructuredCodecFailure.Envelope.apply)
-      _ <- Either.cond(
-        envelope.schema == schema,
-        (),
-        StructuredCodecFailure.WrongSchema(envelope.schema.value)
-      )
-      cursor <- objectCursor(envelope.payload, "result handle")
-      submissionKey <- identifier(cursor, "submissionKey", SubmissionKey.from)
-      attemptId <- identifier(cursor, "attemptId", AttemptId.from)
-      epochValue <- field[Long](cursor, "attemptEpoch")
-      epoch <- AttemptEpoch.from(epochValue).left.map(problem => invalid(problem.reason))
-      job <- optionalObject(cursor, "job", decodeJob)
-      operationJson <- requiredJson(cursor, "operation")
-      operation <- decodeOperation(operationJson)
-      resultSchema <- identifier(cursor, "resultSchema", ResultSchemaId.from)
-      resultMaximum <- field[Int](cursor, "maximumResultBytes")
-      maximumResultBytes <- ByteLimit
-        .from(resultMaximum)
-        .left
-        .map(problem => invalid(problem.reason))
-      envelopeMaximum <- field[Int](cursor, "maximumEnvelopeBytes")
-      maximumEnvelopeBytes <- ByteLimit
-        .from(envelopeMaximum)
-        .left
-        .map(problem => invalid(problem.reason))
-      outputTexts <- field[Vector[String]](cursor, "declaredOutputs")
-      _ <- Either.cond(
-        outputTexts.size <= MaximumOutputs,
-        (),
-        invalid(s"result handle exceeds $MaximumOutputs outputs")
-      )
-      outputs <- outputTexts.traverse(raw =>
-        RelativeOutputPath.from(raw).left.map(problem => invalid(problem.reason))
-      )
-      _ <- Either.cond(
-        outputs.distinct.size == outputs.size,
-        (),
-        invalid("result handle outputs must be distinct")
-      )
-      releaseJson <- requiredJson(cursor, "workerRelease")
-      release <- decodeWorkerRelease(releaseJson)
-      retrySafety <- decodeRetrySafetyField(cursor)
-    yield DurableResultHandle(
-      submissionKey,
-      attemptId,
-      epoch,
-      job,
-      operation,
-      resultSchema,
-      maximumResultBytes,
-      maximumEnvelopeBytes,
-      outputs,
-      release,
-      retrySafety
-    )
-
-object TaskInvocationCodec:
-  private val schema = SchemaId.unsafeFrom("slurm4s.task-invocation")
-  private val MaximumOutputs = 1024
-
-  def encode(
-      value: TaskInvocation,
-      maximumBytes: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
-    for
-      _ <- Either.cond(
-        value.inputBytes.size <= value.maximumInputBytes.value,
-        (),
-        StructuredCodecFailure.TooLarge(
-          value.inputBytes.size.toLong,
-          value.maximumInputBytes.value
-        )
-      )
-      _ <- Either.cond(
-        value.declaredOutputs.size <= MaximumOutputs &&
-          value.declaredOutputs.distinct.size == value.declaredOutputs.size,
-        (),
-        invalid("task invocation outputs must be distinct and bounded")
-      )
-      fields = Vector(
-        "submissionKey" -> Json.fromString(value.submissionKey.value),
-        "attemptId" -> Json.fromString(value.attemptId.value),
-        "attemptEpoch" -> Json.fromLong(value.attemptEpoch.value),
-        "job" -> value.job.fold(Json.Null)(encodeJob),
-        "operation" -> encodeRegisteredOperation(value.operation),
-        "inputBase64" -> Json.fromString(
-          Base64.getEncoder.encodeToString(value.inputBytes.toArray)
-        ),
-        "declaredOutputs" -> Json.arr(
-          value.declaredOutputs.map(path => Json.fromString(path.value))*
-        ),
-        "maximumInputBytes" -> Json.fromInt(value.maximumInputBytes.value),
-        "maximumResultBytes" -> Json.fromInt(value.maximumResultBytes.value),
-        "maximumEnvelopeBytes" -> Json.fromInt(value.maximumEnvelopeBytes.value),
-        "maximumOutputBytes" -> Json.fromInt(value.maximumOutputBytes.value),
-        "workerRelease" -> encodeWorkerRelease(value.workerRelease)
-      ) ++ encodeRetrySafetyField(value.retrySafety)
-      payload = Json.obj(fields*)
-      bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, payload))
-      _ <- Either.cond(
-        bytes.size <= maximumBytes.value,
-        (),
-        StructuredCodecFailure.TooLarge(bytes.size.toLong, maximumBytes.value)
-      )
-    yield bytes
-
-  def decode(
-      bytes: Vector[Byte],
-      maximumBytes: ByteLimit,
-      maximumAllowedInputBytes: ByteLimit
-  ): Either[StructuredCodecFailure, TaskInvocation] =
-    for
-      _ <- Either.cond(
-        bytes.size <= maximumBytes.value,
-        (),
-        StructuredCodecFailure.TooLarge(bytes.size.toLong, maximumBytes.value)
-      )
-      envelope <- VersionedJson.decode(bytes).left.map(StructuredCodecFailure.Envelope.apply)
-      _ <- Either.cond(
-        envelope.schema == schema,
-        (),
-        StructuredCodecFailure.WrongSchema(envelope.schema.value)
-      )
-      cursor <- objectCursor(envelope.payload, "task invocation")
-      submissionKey <- identifier(cursor, "submissionKey", SubmissionKey.from)
-      attemptId <- identifier(cursor, "attemptId", AttemptId.from)
-      epochValue <- field[Long](cursor, "attemptEpoch")
-      epoch <- AttemptEpoch.from(epochValue).left.map(problem => invalid(problem.reason))
-      job <- optionalObject(cursor, "job", decodeJob)
-      operationJson <- requiredJson(cursor, "operation")
-      operation <- decodeRegisteredOperation(operationJson)
-      inputMaximum <- field[Int](cursor, "maximumInputBytes")
-      maximumInputBytes <- ByteLimit
-        .from(inputMaximum)
-        .left
-        .map(problem => invalid(problem.reason))
-      _ <- Either.cond(
-        maximumInputBytes.value <= maximumAllowedInputBytes.value,
-        (),
-        StructuredCodecFailure.TooLarge(
-          maximumInputBytes.value.toLong,
-          maximumAllowedInputBytes.value
-        )
-      )
-      inputText <- field[String](cursor, "inputBase64")
-      input <- decodeBase64(inputText, maximumInputBytes)
-      outputTexts <- field[Vector[String]](cursor, "declaredOutputs")
-      _ <- Either.cond(
-        outputTexts.size <= MaximumOutputs,
-        (),
-        invalid(s"task invocation exceeds $MaximumOutputs outputs")
-      )
-      outputs <- outputTexts.traverse(raw =>
-        RelativeOutputPath.from(raw).left.map(problem => invalid(problem.reason))
-      )
-      _ <- Either.cond(
-        outputs.distinct.size == outputs.size,
-        (),
-        invalid("task invocation outputs must be distinct")
-      )
-      resultMaximum <- field[Int](cursor, "maximumResultBytes")
-      maximumResultBytes <- ByteLimit
-        .from(resultMaximum)
-        .left
-        .map(problem => invalid(problem.reason))
-      envelopeMaximum <- field[Int](cursor, "maximumEnvelopeBytes")
-      maximumEnvelopeBytes <- ByteLimit
-        .from(envelopeMaximum)
-        .left
-        .map(problem => invalid(problem.reason))
-      outputMaximum <- field[Int](cursor, "maximumOutputBytes")
-      maximumOutputBytes <- ByteLimit
-        .from(outputMaximum)
-        .left
-        .map(problem => invalid(problem.reason))
-      releaseJson <- requiredJson(cursor, "workerRelease")
-      release <- decodeWorkerRelease(releaseJson)
-      retrySafety <- decodeRetrySafetyField(cursor)
-    yield TaskInvocation(
-      submissionKey,
-      attemptId,
-      epoch,
-      job,
-      operation,
-      input,
-      outputs,
-      maximumInputBytes,
-      maximumResultBytes,
-      maximumEnvelopeBytes,
-      maximumOutputBytes,
-      release,
-      retrySafety
-    )
-
-  private def decodeBase64(
-      value: String,
-      maximum: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
-    val maximumEncoded = ((maximum.value.toLong + 2L) / 3L) * 4L
-    for
-      _ <- Either.cond(
-        value.length.toLong <= maximumEncoded,
-        (),
-        StructuredCodecFailure.TooLarge(
-          value.length.toLong,
-          math.min(maximumEncoded, Int.MaxValue.toLong).toInt
-        )
-      )
-      decoded <- Try(Base64.getDecoder.decode(value).toVector).toEither.left.map(error =>
-        invalid(s"inputBase64 is invalid: ${error.getMessage}")
-      )
-      _ <- Either.cond(
-        decoded.size <= maximum.value,
-        (),
-        StructuredCodecFailure.TooLarge(decoded.size.toLong, maximum.value)
-      )
-    yield decoded
 
 private[protocol] object StructuredJson:
   def encodeRetrySafetyField(value: RetrySafety): Vector[(String, Json)] =
@@ -503,7 +105,6 @@ private[protocol] object StructuredJson:
   def encodeJob(value: JobRef): Json =
     Json.obj(
       "jobId" -> Json.fromString(value.jobId.value),
-      "cluster" -> value.cluster.fold(Json.Null)(item => Json.fromString(item.value)),
       "arrayIndex" -> value.arrayIndex.fold(Json.Null)(item => Json.fromInt(item.value))
     )
 
@@ -511,15 +112,14 @@ private[protocol] object StructuredJson:
     for
       cursor <- objectCursor(json, "job")
       id <- identifier(cursor, "jobId", JobId.from)
-      clusterText <- optionalField[String](cursor, "cluster")
-      cluster <- clusterText.traverse(raw =>
-        ClusterName.from(raw).left.map(problem => invalid(problem.reason))
-      )
+      // A legacy record may still carry `cluster`. `JobRef` no longer models it, so it is ignored
+      // outright: validating a value this decoder discards can only reject a record it would
+      // otherwise read correctly.
       indexValue <- optionalField[Int](cursor, "arrayIndex")
       index <- indexValue.traverse(raw =>
         ArrayIndex.from(raw).left.map(problem => invalid(problem.reason))
       )
-    yield JobRef(id, cluster, index)
+    yield JobRef(id, index)
 
   def encodeOutput(value: OutputEntry): Json =
     Json.obj(
@@ -600,27 +200,400 @@ private[protocol] object StructuredJson:
 
   def invalid(message: String): StructuredCodecFailure = StructuredCodecFailure.Invalid(message)
 
-  extension [A](values: Vector[A])
-    def traverse[B](
-        f: A => Either[StructuredCodecFailure, B]
-    ): Either[StructuredCodecFailure, Vector[B]] =
-      values.foldLeft[Either[StructuredCodecFailure, Vector[B]]](Right(Vector.empty)) {
-        case (result, value) => result.flatMap(items => f(value).map(items :+ _))
-      }
+  /** The cap on how many output paths any structured message may carry.
+    *
+    * One definition because it is one wire contract: the envelope, the handle and the invocation
+    * all describe the same manifest, so a writer bounded at one number and a reader bounded at
+    * another would reject each other's legitimate messages.
+    */
+  val MaximumOutputs: Int = 1024
 
-  extension [A](value: Option[A])
-    def traverse[B](
-        f: A => Either[StructuredCodecFailure, B]
-    ): Either[StructuredCodecFailure, Option[B]] =
-      value match
-        case Some(item) => f(item).map(Some(_))
-        case None       => Right(None)
+  def bounded(actual: Long, maximum: ByteLimit): Either[StructuredCodecFailure, Unit] =
+    Either.cond(
+      actual <= maximum.value.toLong,
+      (),
+      StructuredCodecFailure.TooLarge(actual, maximum.value)
+    )
 
-  extension [A, B](values: (Either[StructuredCodecFailure, A], Either[StructuredCodecFailure, B]))
-    def mapN[C](f: (A, B) => C): Either[StructuredCodecFailure, C] =
-      values._1.flatMap(left => values._2.map(right => f(left, right)))
+  /** Decodes base64, refusing anything that would decode past `maximum` from the encoded length
+    * first.
+    *
+    * The ordering is the point: `Base64.getDecoder.decode` sizes its array from its input, so a
+    * bound checked only afterwards has already permitted the allocation it exists to prevent.
+    * `fieldName` carries the caller's field into the failure so a shared helper does not cost a
+    * diagnostic.
+    */
+  def decodeBase64(
+      value: String,
+      maximum: ByteLimit,
+      fieldName: String
+  ): Either[StructuredCodecFailure, ByteVector] =
+    val maximumEncoded = ((maximum.value.toLong + 2L) / 3L) * 4L
+    for
+      _ <- Either.cond(
+        value.length.toLong <= maximumEncoded,
+        (),
+        StructuredCodecFailure.TooLarge(
+          value.length.toLong,
+          math.min(maximumEncoded, Int.MaxValue.toLong).toInt
+        )
+      )
+      bytes <- Try(ByteVector.view(Base64.getDecoder.decode(value))).toEither.left.map(error =>
+        invalid(s"$fieldName is invalid: ${error.getMessage}")
+      )
+      _ <- bounded(bytes.size.toLong, maximum)
+    yield bytes
 
 import StructuredJson.*
+
+object ResultEnvelopeCodec:
+  private val schema = SchemaId.unsafeFrom("slurm4s.result-envelope")
+
+  def encode(
+      value: ResultEnvelope,
+      maximumEnvelopeBytes: ByteLimit,
+      maximumValueBytes: ByteLimit
+  ): Either[StructuredCodecFailure, ByteVector] =
+    for
+      _ <- bounded(value.value.fold(0L)(_.size.toLong), maximumValueBytes)
+      _ <- Either.cond(
+        value.outputs.entries.size <= MaximumOutputs,
+        (),
+        StructuredCodecFailure.Invalid(s"result envelope exceeds $MaximumOutputs outputs")
+      )
+      bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, encodePayload(value)))
+      _ <- bounded(bytes.size.toLong, maximumEnvelopeBytes)
+    yield bytes
+
+  def decode(
+      bytes: ByteVector,
+      maximumEnvelopeBytes: ByteLimit,
+      maximumValueBytes: ByteLimit
+  ): Either[StructuredCodecFailure, ResultEnvelope] =
+    for
+      _ <- bounded(bytes.size.toLong, maximumEnvelopeBytes)
+      envelope <- VersionedJson.decode(bytes).left.map(StructuredCodecFailure.Envelope.apply)
+      _ <- Either.cond(
+        envelope.schema == schema,
+        (),
+        StructuredCodecFailure.WrongSchema(envelope.schema.value)
+      )
+      value <- decodePayload(envelope.payload, maximumValueBytes)
+    yield value
+
+  private def encodePayload(value: ResultEnvelope): Json =
+    Json.obj(
+      "submissionKey" -> Json.fromString(value.submissionKey.value),
+      "attemptId" -> Json.fromString(value.attemptId.value),
+      "attemptEpoch" -> Json.fromLong(value.attemptEpoch.value),
+      "job" -> value.job.fold(Json.Null)(encodeJob),
+      "operation" -> encodeOperation(value.operation),
+      "resultSchema" -> Json.fromString(value.resultSchema.value),
+      "status" -> encodeStatus(value.status),
+      "valueBase64" -> value.value.fold(Json.Null)(bytes =>
+        Json.fromString(Base64.getEncoder.encodeToString(bytes.toArray))
+      ),
+      "outputs" -> Json.arr(value.outputs.entries.map(encodeOutput)*),
+      "workerRelease" -> encodeWorkerRelease(value.workerRelease),
+      "completedAt" -> Json.fromString(value.completedAt.toString)
+    )
+
+  private def decodePayload(
+      json: Json,
+      maximumValueBytes: ByteLimit
+  ): Either[StructuredCodecFailure, ResultEnvelope] =
+    for
+      cursor <- objectCursor(json, "result envelope")
+      submissionKey <- identifier(cursor, "submissionKey", SubmissionKey.from)
+      attemptId <- identifier(cursor, "attemptId", AttemptId.from)
+      epochValue <- field[Long](cursor, "attemptEpoch")
+      epoch <- AttemptEpoch.from(epochValue).left.map(problem => invalid(problem.reason))
+      job <- optionalObject(cursor, "job", decodeJob)
+      operationJson <- requiredJson(cursor, "operation")
+      operation <- decodeOperation(operationJson)
+      resultSchema <- identifier(cursor, "resultSchema", ResultSchemaId.from)
+      statusJson <- requiredJson(cursor, "status")
+      status <- decodeStatus(statusJson)
+      encodedValue <- optionalField[String](cursor, "valueBase64")
+      value <- encodedValue.traverse(decodeBase64(_, maximumValueBytes, "valueBase64"))
+      outputsJson <- field[Vector[Json]](cursor, "outputs")
+      _ <- Either.cond(
+        outputsJson.size <= MaximumOutputs,
+        (),
+        invalid(s"result envelope exceeds $MaximumOutputs outputs")
+      )
+      outputEntries <- outputsJson.traverse(decodeOutput)
+      outputs <- OutputManifest.from(outputEntries).left.map(problem => invalid(problem.reason))
+      releaseJson <- requiredJson(cursor, "workerRelease")
+      release <- decodeWorkerRelease(releaseJson)
+      completedText <- field[String](cursor, "completedAt")
+      completed <- parseInstant(completedText)
+      envelope <- ResultEnvelope
+        .decoded(
+          submissionKey,
+          attemptId,
+          epoch,
+          job,
+          operation,
+          resultSchema,
+          status,
+          value,
+          outputs,
+          release,
+          completed
+        )
+        .left
+        .map(invalid)
+    yield envelope
+
+object DurableResultHandleCodec:
+  private val schema = SchemaId.unsafeFrom("slurm4s.result-handle")
+
+  def encode(
+      value: DurableResultHandle,
+      maximumBytes: ByteLimit
+  ): Either[StructuredCodecFailure, ByteVector] =
+    for
+      _ <- Either.cond(
+        value.declaredOutputs.size <= MaximumOutputs &&
+          value.declaredOutputs.distinct.size == value.declaredOutputs.size,
+        (),
+        StructuredCodecFailure.Invalid("result handle outputs must be distinct and bounded")
+      )
+      fields = Vector(
+        "submissionKey" -> Json.fromString(value.submissionKey.value),
+        "attemptId" -> Json.fromString(value.attemptId.value),
+        "attemptEpoch" -> Json.fromLong(value.attemptEpoch.value),
+        "job" -> value.job.fold(Json.Null)(encodeJob),
+        "operation" -> encodeOperation(value.operation),
+        "resultSchema" -> Json.fromString(value.resultSchema.value),
+        "maximumResultBytes" -> Json.fromInt(value.maximumResultBytes.value),
+        "maximumEnvelopeBytes" -> Json.fromInt(value.maximumEnvelopeBytes.value),
+        "declaredOutputs" -> Json.arr(
+          value.declaredOutputs.map(path => Json.fromString(path.value))*
+        ),
+        "workerRelease" -> encodeWorkerRelease(value.workerRelease)
+      ) ++ encodeRetrySafetyField(value.retrySafety)
+      payload = Json.obj(fields*)
+      bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, payload))
+      _ <- Either.cond(
+        bytes.size <= maximumBytes.value,
+        (),
+        StructuredCodecFailure.TooLarge(bytes.size.toLong, maximumBytes.value)
+      )
+    yield bytes
+
+  def decode(
+      bytes: ByteVector,
+      maximumBytes: ByteLimit
+  ): Either[StructuredCodecFailure, DurableResultHandle] =
+    for
+      _ <- Either.cond(
+        bytes.size <= maximumBytes.value,
+        (),
+        StructuredCodecFailure.TooLarge(bytes.size.toLong, maximumBytes.value)
+      )
+      envelope <- VersionedJson.decode(bytes).left.map(StructuredCodecFailure.Envelope.apply)
+      _ <- Either.cond(
+        envelope.schema == schema,
+        (),
+        StructuredCodecFailure.WrongSchema(envelope.schema.value)
+      )
+      cursor <- objectCursor(envelope.payload, "result handle")
+      submissionKey <- identifier(cursor, "submissionKey", SubmissionKey.from)
+      attemptId <- identifier(cursor, "attemptId", AttemptId.from)
+      epochValue <- field[Long](cursor, "attemptEpoch")
+      epoch <- AttemptEpoch.from(epochValue).left.map(problem => invalid(problem.reason))
+      job <- optionalObject(cursor, "job", decodeJob)
+      operationJson <- requiredJson(cursor, "operation")
+      operation <- decodeOperation(operationJson)
+      resultSchema <- identifier(cursor, "resultSchema", ResultSchemaId.from)
+      resultMaximum <- field[Int](cursor, "maximumResultBytes")
+      maximumResultBytes <- ByteLimit
+        .from(resultMaximum)
+        .left
+        .map(problem => invalid(problem.reason))
+      envelopeMaximum <- field[Int](cursor, "maximumEnvelopeBytes")
+      maximumEnvelopeBytes <- ByteLimit
+        .from(envelopeMaximum)
+        .left
+        .map(problem => invalid(problem.reason))
+      outputTexts <- field[Vector[String]](cursor, "declaredOutputs")
+      _ <- Either.cond(
+        outputTexts.size <= MaximumOutputs,
+        (),
+        invalid(s"result handle exceeds $MaximumOutputs outputs")
+      )
+      outputs <- outputTexts.traverse(raw =>
+        RelativeOutputPath.from(raw).left.map(problem => invalid(problem.reason))
+      )
+      _ <- Either.cond(
+        outputs.distinct.size == outputs.size,
+        (),
+        invalid("result handle outputs must be distinct")
+      )
+      releaseJson <- requiredJson(cursor, "workerRelease")
+      release <- decodeWorkerRelease(releaseJson)
+      retrySafety <- decodeRetrySafetyField(cursor)
+      // Decode is where the bounds are checked, not where they are assumed.
+      handle <- DurableResultHandle
+        .from(
+          submissionKey,
+          attemptId,
+          epoch,
+          job,
+          operation,
+          resultSchema,
+          maximumResultBytes,
+          maximumEnvelopeBytes,
+          outputs,
+          release,
+          retrySafety
+        )
+        .left
+        .map(problem => invalid(problem.reason))
+    yield handle
+
+object TaskInvocationCodec:
+  private val schema = SchemaId.unsafeFrom("slurm4s.task-invocation")
+
+  def encode(
+      value: TaskInvocation,
+      maximumBytes: ByteLimit
+  ): Either[StructuredCodecFailure, ByteVector] =
+    for
+      _ <- Either.cond(
+        value.inputBytes.size <= value.maximumInputBytes.value,
+        (),
+        StructuredCodecFailure.TooLarge(
+          value.inputBytes.size.toLong,
+          value.maximumInputBytes.value
+        )
+      )
+      _ <- Either.cond(
+        value.declaredOutputs.size <= MaximumOutputs &&
+          value.declaredOutputs.distinct.size == value.declaredOutputs.size,
+        (),
+        invalid("task invocation outputs must be distinct and bounded")
+      )
+      fields = Vector(
+        "submissionKey" -> Json.fromString(value.submissionKey.value),
+        "attemptId" -> Json.fromString(value.attemptId.value),
+        "attemptEpoch" -> Json.fromLong(value.attemptEpoch.value),
+        "job" -> value.job.fold(Json.Null)(encodeJob),
+        "operation" -> encodeRegisteredOperation(value.operation),
+        "inputBase64" -> Json.fromString(
+          Base64.getEncoder.encodeToString(value.inputBytes.toArray)
+        ),
+        "declaredOutputs" -> Json.arr(
+          value.declaredOutputs.map(path => Json.fromString(path.value))*
+        ),
+        "maximumInputBytes" -> Json.fromInt(value.maximumInputBytes.value),
+        "maximumResultBytes" -> Json.fromInt(value.maximumResultBytes.value),
+        "maximumEnvelopeBytes" -> Json.fromInt(value.maximumEnvelopeBytes.value),
+        "maximumOutputBytes" -> Json.fromInt(value.maximumOutputBytes.value),
+        "workerRelease" -> encodeWorkerRelease(value.workerRelease)
+      ) ++ encodeRetrySafetyField(value.retrySafety)
+      payload = Json.obj(fields*)
+      bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, payload))
+      _ <- Either.cond(
+        bytes.size <= maximumBytes.value,
+        (),
+        StructuredCodecFailure.TooLarge(bytes.size.toLong, maximumBytes.value)
+      )
+    yield bytes
+
+  def decode(
+      bytes: ByteVector,
+      maximumBytes: ByteLimit,
+      maximumAllowedInputBytes: ByteLimit
+  ): Either[StructuredCodecFailure, TaskInvocation] =
+    for
+      _ <- Either.cond(
+        bytes.size <= maximumBytes.value,
+        (),
+        StructuredCodecFailure.TooLarge(bytes.size.toLong, maximumBytes.value)
+      )
+      envelope <- VersionedJson.decode(bytes).left.map(StructuredCodecFailure.Envelope.apply)
+      _ <- Either.cond(
+        envelope.schema == schema,
+        (),
+        StructuredCodecFailure.WrongSchema(envelope.schema.value)
+      )
+      cursor <- objectCursor(envelope.payload, "task invocation")
+      submissionKey <- identifier(cursor, "submissionKey", SubmissionKey.from)
+      attemptId <- identifier(cursor, "attemptId", AttemptId.from)
+      epochValue <- field[Long](cursor, "attemptEpoch")
+      epoch <- AttemptEpoch.from(epochValue).left.map(problem => invalid(problem.reason))
+      job <- optionalObject(cursor, "job", decodeJob)
+      operationJson <- requiredJson(cursor, "operation")
+      operation <- decodeRegisteredOperation(operationJson)
+      inputMaximum <- field[Int](cursor, "maximumInputBytes")
+      maximumInputBytes <- ByteLimit
+        .from(inputMaximum)
+        .left
+        .map(problem => invalid(problem.reason))
+      _ <- Either.cond(
+        maximumInputBytes.value <= maximumAllowedInputBytes.value,
+        (),
+        StructuredCodecFailure.TooLarge(
+          maximumInputBytes.value.toLong,
+          maximumAllowedInputBytes.value
+        )
+      )
+      inputText <- field[String](cursor, "inputBase64")
+      input <- decodeBase64(inputText, maximumInputBytes, "inputBase64")
+      outputTexts <- field[Vector[String]](cursor, "declaredOutputs")
+      _ <- Either.cond(
+        outputTexts.size <= MaximumOutputs,
+        (),
+        invalid(s"task invocation exceeds $MaximumOutputs outputs")
+      )
+      outputs <- outputTexts.traverse(raw =>
+        RelativeOutputPath.from(raw).left.map(problem => invalid(problem.reason))
+      )
+      _ <- Either.cond(
+        outputs.distinct.size == outputs.size,
+        (),
+        invalid("task invocation outputs must be distinct")
+      )
+      resultMaximum <- field[Int](cursor, "maximumResultBytes")
+      maximumResultBytes <- ByteLimit
+        .from(resultMaximum)
+        .left
+        .map(problem => invalid(problem.reason))
+      envelopeMaximum <- field[Int](cursor, "maximumEnvelopeBytes")
+      maximumEnvelopeBytes <- ByteLimit
+        .from(envelopeMaximum)
+        .left
+        .map(problem => invalid(problem.reason))
+      outputMaximum <- field[Int](cursor, "maximumOutputBytes")
+      maximumOutputBytes <- ByteLimit
+        .from(outputMaximum)
+        .left
+        .map(problem => invalid(problem.reason))
+      releaseJson <- requiredJson(cursor, "workerRelease")
+      release <- decodeWorkerRelease(releaseJson)
+      retrySafety <- decodeRetrySafetyField(cursor)
+      invocation <- TaskInvocation
+        .from(
+          submissionKey,
+          attemptId,
+          epoch,
+          job,
+          operation,
+          input,
+          outputs,
+          maximumInputBytes,
+          maximumResultBytes,
+          maximumEnvelopeBytes,
+          maximumOutputBytes,
+          release,
+          retrySafety
+        )
+        .left
+        .map(problem => invalid(problem.reason))
+    yield invocation
 
 object WorkerEventCodec:
   private val schema = SchemaId.unsafeFrom("slurm4s.worker-event")
@@ -628,7 +601,7 @@ object WorkerEventCodec:
   def encode(
       value: WorkerEvent,
       maximumBytes: ByteLimit
-  ): Either[StructuredCodecFailure, Vector[Byte]] =
+  ): Either[StructuredCodecFailure, ByteVector] =
     val bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, encodePayload(value)))
     Either.cond(
       bytes.size <= maximumBytes.value,
@@ -637,7 +610,7 @@ object WorkerEventCodec:
     )
 
   def decode(
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       maximumBytes: ByteLimit
   ): Either[StructuredCodecFailure, WorkerEvent] =
     for

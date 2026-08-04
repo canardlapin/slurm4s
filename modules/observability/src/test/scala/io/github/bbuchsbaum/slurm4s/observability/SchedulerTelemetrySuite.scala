@@ -7,15 +7,15 @@ import io.github.bbuchsbaum.slurm4s.testkit.SchedulerProgram
 
 import java.time.Instant
 import scala.concurrent.duration.*
+import scodec.bits.ByteVector
 
 class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
   private val observedAt = Instant.parse("2026-07-22T12:00:00Z")
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.SchedulerText("test"), observedAt, Vector(1, 2, 3))
+    BoundedEvidence.capture(EvidenceSource.SchedulerText("test"), observedAt, ByteVector(1, 2, 3))
   )
   private val job = JobRef(
     JobId.from("42").fold(problem => fail(problem.toString), identity),
-    None,
     None
   )
   private val request = JobRequest(
@@ -55,7 +55,7 @@ class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
         collecting(events),
         shortPolicy
       )
-      result <- wrapper.submit(request)
+      result <- wrapper.submitLowered(request)
       recorded <- events.get
     yield
       assertEquals(result, rejected)
@@ -97,7 +97,7 @@ class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
       fixedScheduler(submission = IO.pure(accepted)),
       sink,
       shortPolicy
-    ).submit(request).map(result => assertEquals(result, accepted))
+    ).submitLowered(request).map(result => assertEquals(result, accepted))
   }
 
   test("a nonresponsive telemetry sink is bounded by policy") {
@@ -109,7 +109,7 @@ class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
       fixedScheduler(submission = IO.pure(accepted)),
       sink,
       shortPolicy
-    ).submit(request).timeout(1.second).map(result => assertEquals(result, accepted))
+    ).submitLowered(request).timeout(1.second).map(result => assertEquals(result, accepted))
   }
 
   test("scheduler effect failure is recorded by class and then re-raised") {
@@ -122,7 +122,7 @@ class SchedulerTelemetrySuite extends munit.CatsEffectSuite:
         collecting(events),
         shortPolicy
       )
-      result <- wrapper.submit(request).attempt
+      result <- wrapper.submitLowered(request).attempt
       recorded <- events.get
     yield
       assertEquals(result, Left(failure))

@@ -32,8 +32,8 @@ class Fs2CommandExecutorSuite extends munit.CatsEffectSuite:
       )
       .map {
         case InvocationResult.Exited(0, stdout, stderr) =>
-          assertEquals(stdout.bytes.size, 128)
-          assertEquals(stderr.bytes.size, 128)
+          assertEquals(stdout.bytes.size, 128L)
+          assertEquals(stderr.bytes.size, 128L)
           assertEquals(stdout.originalByteCount, 2000L)
           assertEquals(stderr.originalByteCount, 2000L)
           assert(stdout.truncated && stderr.truncated)

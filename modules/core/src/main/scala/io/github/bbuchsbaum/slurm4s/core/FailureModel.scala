@@ -5,8 +5,19 @@ enum InvocationResult derives CanEqual:
   case SpawnFailed(kind: SpawnFailureKind, diagnostics: Diagnostics, evidence: EvidenceBundle)
   case TimedOut(after: DurationMillis, stdout: BoundedEvidence, stderr: BoundedEvidence)
 
-final case class JobRef(jobId: JobId, cluster: Option[ClusterName], arrayIndex: Option[ArrayIndex])
-    derives CanEqual
+/** A job as this library identifies it: base id plus optional array element.
+  *
+  * Deliberately single-cluster. A cluster name used to sit here, in equality and in persistence,
+  * while observation, accounting, cancellation and parser attribution all ignored it — so a bound
+  * attempt carrying no cluster never matched a report carrying one, and every managed observation
+  * was silently discarded (P8.A1).
+  *
+  * Federation and cross-cluster routing are UNSUPPORTED for v0.1. Genuine scoped identity requires
+  * grouping, CLI routing (`-M`/`--clusters`), parser attribution, persistence and cancellation to
+  * land together; carrying a decorative field until then bought nothing and cost correctness. A
+  * cluster the scheduler reports is preserved as evidence on the observation, not as identity.
+  */
+final case class JobRef(jobId: JobId, arrayIndex: Option[ArrayIndex]) derives CanEqual
 
 enum AcceptanceUncertainty derives CanEqual:
   case ResponseLost

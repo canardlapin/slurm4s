@@ -169,7 +169,14 @@ private[managed] object ControlCommandJson:
       attempt <- AttemptId.from(attemptText).left.map(_.reason)
       epoch <- epoch(cursor)
       encoded <- string(cursor, "requestBase64")
-      bytes <- Try(Base64.getDecoder.decode(encoded).toVector).toEither.left.map(_.getMessage)
+      // Bounded before decoding, not after. A journal frame may be far larger than a canonical
+      // request is allowed to be, so a record could otherwise make the reader allocate several times
+      // the permitted size before `CanonicalRequest.validated` got to refuse it.
+      bytes <- AgentDomainJson.decodeBase64Bounded(
+        encoded,
+        ByteLimit.maximumCommandCapture,
+        "requestBase64"
+      )
       digestText <- string(cursor, "requestDigest")
       digest <- ContentDigest.from(digestText).left.map(_.reason)
       request <- CanonicalRequest.validated(bytes, digest)
@@ -229,7 +236,7 @@ private[managed] object ControlCommandJson:
       case Some(other)                      => Left(s"unknown retrySafety: $other")
     }
 
-  private def encodeRetryAuthorization(value: RetryAuthorization): Json = value match
+  private[managed] def encodeRetryAuthorization(value: RetryAuthorization): Json = value match
     case RetryAuthorization.Manual(reason) =>
       Json.obj(
         "kind" -> Json.fromString("manual"),
@@ -241,7 +248,9 @@ private[managed] object ControlCommandJson:
         "reason" -> Json.fromString(reason.value)
       )
 
-  private def decodeRetryAuthorization(json: Json): Either[String, RetryAuthorization] =
+  private[managed] def decodeRetryAuthorization(
+      json: Json
+  ): Either[String, RetryAuthorization] =
     for
       cursor <- Either.cond(json.isObject, json.hcursor, "retry authorization must be an object")
       kind <- string(cursor, "kind")

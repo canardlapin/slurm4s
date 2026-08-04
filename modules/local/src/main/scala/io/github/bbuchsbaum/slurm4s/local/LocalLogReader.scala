@@ -6,6 +6,8 @@ import cats.syntax.all.*
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Files
@@ -133,18 +135,18 @@ final class LocalLogReader[F[_]: Async](
         )
       )
 
-  private def readPage(path: Path, offset: Long, maxBytes: Int): Vector[Byte] =
+  private def readPage(path: Path, offset: Long, maxBytes: Int): ByteVector =
     val channel = FileChannel.open(path, StandardOpenOption.READ)
     try
       channel.position(offset)
       val buffer = ByteBuffer.allocate(maxBytes)
       val count = channel.read(buffer)
-      if count <= 0 then Vector.empty
+      if count <= 0 then ByteVector.empty
       else
         buffer.flip()
         val result = new Array[Byte](count)
         buffer.get(result)
-        result.toVector
+        ByteVector.view(result)
     finally channel.close()
 
   /** Identity of the open log file, stable for as long as the same file keeps growing.

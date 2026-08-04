@@ -2,6 +2,8 @@ package io.github.bbuchsbaum.slurm4s.core
 
 import io.github.bbuchsbaum.remoteexec.kernel.TextIdentifier
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 enum LogStream derives CanEqual:
@@ -24,7 +26,7 @@ object LogCursor:
   val start: LogCursor = LogCursor(LogOffset.start, None)
 
 final case class LogPage(
-    bytes: Vector[Byte],
+    bytes: ByteVector,
     next: LogCursor,
     endOfFile: Boolean,
     observedAt: Instant

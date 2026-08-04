@@ -27,6 +27,11 @@ trailing-LF policy.
 standard-library Python reference producer. The Scala decoder re-encodes it byte-for-byte and
 checks the language-neutral result bindings.
 
+`modules/protocol/src/test/resources/fixtures/agent-methods-v1.json` is the language-neutral v1
+registry of every request method name. The envelope test exercises every entry with non-ASCII JSON
+content and fails if the Scala method set adds, removes, reorders, or renames a wire method without
+an explicit compatibility update.
+
 `modules/cli/src/test/resources/fixtures/slurm-v0.0.43/` is the first Slurm-shaped parser fixture.
 Its provenance explicitly sets `supportClaim` to false: it verifies unknown-state preservation and
 version routing before real-site evidence is available, but cannot establish Slurm compatibility
@@ -37,6 +42,11 @@ They include stdout, stderr, expected normalization, byte counts, SHA-256 digest
 upstream lifecycle provenance. Both deliberately retain `supportClaim: false`. They prove that the
 registered v0.0.43 codec handles the selected shapes consistently across labeled major families;
 they do not prove that those bytes came from a running Slurm binary or that a site is supported.
+
+`squeue-state-truncation-v1/` is a provenance-pinned synthetic pair of otherwise identical
+`CANCELLED` observations. One state expression ends in `+`; the other is complete. It proves the
+parser and public observation preserve that distinction without pretending to identify omitted
+flags.
 
 `slurm-25.05.6-v0.0.43-actual/` is an exact capture from an actual Slurm 25.05.6 binary in a
 disposable single-node controller. The controller accepted a two-element serial array and emitted

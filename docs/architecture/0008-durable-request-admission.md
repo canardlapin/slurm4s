@@ -7,8 +7,9 @@
 ## Decision
 
 Raw `Scheduler[F]` submission may supply process environment values to a local interpreter.
-Durable managed submission is stricter because it canonicalizes the request into an append-only
-journal. `ManagedController` therefore uses `ManagedRequestPolicy.rejectEnvironmentValues` by
+Durable managed submission is stricter because it canonicalizes the request into a checksummed
+journal projection. `ManagedController` therefore uses
+`ManagedRequestPolicy.rejectEnvironmentValues` by
 default. A nonempty environment is rejected before canonical bytes, intent, outbox, or journal
 state exist.
 

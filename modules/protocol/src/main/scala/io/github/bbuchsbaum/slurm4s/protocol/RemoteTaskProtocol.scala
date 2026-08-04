@@ -5,6 +5,8 @@ import io.github.bbuchsbaum.slurm4s.core.codec.CodecFailure
 import io.github.bbuchsbaum.slurm4s.core.codec.VersionedJson
 import io.github.bbuchsbaum.slurm4s.core.codec.WireEnvelope
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 /** Transport form of a registered task. It contains an operation descriptor and already-encoded
@@ -14,12 +16,13 @@ final case class RemoteRegisteredTaskRequest(
     submissionKey: SubmissionKey,
     name: JobName,
     operation: RegisteredOperation,
-    inputBytes: Vector[Byte],
+    inputBytes: ByteVector,
     resources: ResourceRequest,
     environment: Map[EnvName, String],
     maximumResultBytes: ByteLimit,
     declaredOutputs: Vector[RelativeOutputPath],
-    retrySafety: RetrySafety
+    retrySafety: RetrySafety,
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 /** Durable, path-free locator interpreted relative to the agent's private worker workspace. */
@@ -38,7 +41,7 @@ enum RemoteResultRead derives CanEqual:
   case Pending(observedAt: Instant)
   case Available(
       storedHandle: DurableResultHandle,
-      envelopeBytes: Vector[Byte],
+      envelopeBytes: ByteVector,
       observedAt: Instant
   )
   case Failed(
@@ -50,6 +53,15 @@ enum RemoteResultRead derives CanEqual:
 object RemoteTaskWireLimits:
   val MaximumHandleBytes: ByteLimit = ByteLimit.defaultEvidence
   val MaximumDescriptorBytes: ByteLimit = ByteLimit.maximumCommandCapture
+
+  /** Cardinality ceiling for the per-element collections a batch request or response carries.
+    *
+    * A byte bound on each element says nothing about how many of them arrive, so a collection needs
+    * its own cap. This matches Slurm's own practical array ceiling and was already applied as a
+    * bare literal at the batch-element sites; naming it keeps those from drifting apart from the
+    * result-reference list, which had no cap at all.
+    */
+  val MaximumBatchEntries: Int = 100000
 
 enum RemoteTaskDescriptorCodecFailure derives CanEqual:
   case TooLarge(actualBytes: Long, maximumBytes: Int)
@@ -63,7 +75,7 @@ object RemoteRegisteredSubmissionCodec:
   def encode(
       value: RemoteRegisteredSubmission,
       maximumBytes: ByteLimit = RemoteTaskWireLimits.MaximumDescriptorBytes
-  ): Either[RemoteTaskDescriptorCodecFailure, Vector[Byte]] =
+  ): Either[RemoteTaskDescriptorCodecFailure, ByteVector] =
     for
       schema <- SchemaId
         .from(SchemaName)
@@ -78,7 +90,7 @@ object RemoteRegisteredSubmissionCodec:
     yield bytes
 
   def decode(
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       maximumBytes: ByteLimit = RemoteTaskWireLimits.MaximumDescriptorBytes
   ): Either[RemoteTaskDescriptorCodecFailure, RemoteRegisteredSubmission] =
     for

@@ -2,8 +2,11 @@ package io.github.bbuchsbaum.slurm4s.worker
 
 import cats.effect.IO
 import cats.effect.kernel.Clock
+import io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.ResultEnvelopeCodec
+
+import scodec.bits.ByteVector
 
 import java.nio.file.Path
 import java.time.Instant
@@ -16,7 +19,7 @@ enum ResultPublicationFailure derives CanEqual:
 
 final case class ResultPublication(
     path: Path,
-    envelopeBytes: Vector[Byte],
+    envelopeBytes: ByteVector,
     digest: ContentDigest,
     publishedAt: Instant
 )

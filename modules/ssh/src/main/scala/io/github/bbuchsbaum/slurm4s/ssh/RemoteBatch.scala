@@ -3,11 +3,15 @@ package io.github.bbuchsbaum.slurm4s.ssh
 import cats.data.NonEmptyChain
 import cats.data.NonEmptyVector
 import cats.effect.Async
+import cats.effect.Ref
 import cats.effect.implicits.*
 import cats.syntax.all.*
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
-import io.github.bbuchsbaum.slurm4s.worker.SlurmBatch
+import io.github.bbuchsbaum.slurm4s.task.SlurmBatch
+
+import scodec.bits.ByteVector
 
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
@@ -22,7 +26,11 @@ final case class RemoteBatchOptions(
     maximumResultBytes: ByteLimit,
     declaredOutputs: Vector[RelativeOutputPath] = Vector.empty,
     environment: Map[EnvName, String] = Map.empty,
-    awaitPolicy: RemoteAwaitPolicy = RemoteAwaitPolicy.default
+    awaitPolicy: RemoteAwaitPolicy = RemoteAwaitPolicy.default,
+    // Elements await in parallel, so without a ceiling a large batch opens one SSH process per
+    // element per tick against a shared login node.
+    maximumConcurrentExchanges: PositiveInt = PositiveInt.unsafeFrom(8),
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 enum RemoteBatchSubmitFailure derives CanEqual:
@@ -48,21 +56,21 @@ final case class RemoteBatchElementException(
 ) extends RuntimeException(s"remote Slurm batch element ${index.value} did not produce a value")
 
 final class RemoteBatchElementHandle[F[_]: Async, I, A] private[ssh] (
-    remote: RemoteSlurm[F],
+    private[ssh] val remote: RemoteSlurm[F],
     val index: ArrayIndex,
     val shardIndex: ArrayIndex,
     val input: I,
     val stdout: LogRef,
     val stderr: LogRef,
-    task: RemoteTaskHandle[F, A]
+    private[ssh] val taskHandle: RemoteTaskHandle[F, A]
 ):
-  def descriptor: RemoteTaskDescriptor = task.descriptor
+  def descriptor: RemoteTaskDescriptor = taskHandle.descriptor
 
   def await: F[RemoteBatchElementResult[I, A]] =
-    task.await.map(RemoteBatchElementResult(index, input, _))
+    taskHandle.await.map(RemoteBatchElementResult(index, input, _))
 
   def awaitValue: F[A] =
-    task.await.flatMap {
+    taskHandle.await.flatMap {
       case RemoteExecutionResult.Completed(ExecutionResult.Succeeded(value, _, _)) =>
         value.pure[F]
       case result =>
@@ -86,8 +94,67 @@ final class RemoteBatchHandle[F[_]: Async, I, A] private[ssh] (
     val submission: SubmissionAttempt,
     val elements: NonEmptyVector[RemoteBatchElementHandle[F, I, A]]
 ):
+  /** Await every element, reading all still-pending results in ONE exchange per tick.
+    *
+    * The per-element path opens one SSH process per element per tick, because ADR 0003 gives every
+    * request its own process. Here the whole batch costs one, and the awaiting policy — backoff,
+    * accounting cadence, tolerance, deadline — comes from the same [[RemoteAwaitDriver]] the single
+    * handle uses, so the two cannot drift.
+    *
+    * Falls back to the per-element path when the group does not fit the negotiated frame, since a
+    * refusal to batch must never become a refusal to await.
+    */
   def await: F[NonEmptyVector[RemoteBatchElementResult[I, A]]] =
-    elements.parTraverse(_.await)
+    val first = elements.head
+    val bound = first.taskHandle.envelopeBytes
+    val policy = first.taskHandle.awaitPolicy
+    Ref.of[F, Map[ArrayIndex, RemoteExecutionResult[A]]](Map.empty).flatMap { completed =>
+      RemoteAwaitDriver
+        .run(policy, timedOutBatch)(_ => tick(completed, bound))
+        .flatMap {
+          case Some(results) => results.pure[F]
+          // The batch could not be read as a group; awaiting each element still works.
+          case None => elements.parTraverse(_.await)
+        }
+    }
+
+  private def timedOutBatch: Option[NonEmptyVector[RemoteBatchElementResult[I, A]]] = None
+
+  private def tick(
+      completed: Ref[F, Map[ArrayIndex, RemoteExecutionResult[A]]],
+      bound: ByteLimit
+  ): F[AwaitTick[Option[NonEmptyVector[RemoteBatchElementResult[I, A]]]]] =
+    completed.get.flatMap { done =>
+      val pending = elements.toVector.filterNot(element => done.contains(element.index))
+      NonEmptyVector.fromVector(pending.map(_.taskHandle.batchResultRef)) match
+        case None =>
+          AwaitTick
+            .Done(
+              Some(
+                elements.map(element =>
+                  RemoteBatchElementResult(element.index, element.input, done(element.index))
+                )
+              )
+            )
+            .pure[F]
+        case Some(refs) =>
+          elements.head.remote.readResults(refs, bound).flatMap {
+            case AgentCall.Failed(_) =>
+              // One lost round trip says nothing about the work; the driver rides it out and
+              // surrenders to the per-element path only if blindness persists.
+              AwaitTick
+                .Blind(None: Option[NonEmptyVector[RemoteBatchElementResult[I, A]]])
+                .pure[F]
+            case AgentCall.Succeeded(reads) =>
+              val settled = pending.zip(reads.toVector).flatMap { case (element, read) =>
+                element.taskHandle.interpret(read).map(element.index -> _)
+              }
+              completed.update(_ ++ settled.toMap) *>
+                AwaitTick.Waiting
+                  .pure[F]
+                  .widen[AwaitTick[Option[NonEmptyVector[RemoteBatchElementResult[I, A]]]]]
+          }
+    }
 
   def awaitValues: F[NonEmptyVector[A]] =
     elements.parTraverse(_.awaitValue)
@@ -110,12 +177,16 @@ private[ssh] object RemoteBatches:
     prepare(batch, execution, options) match
       case Left(failure)   => failure.asLeft[RemoteBatchHandle[F, I, A]].pure[F]
       case Right(prepared) =>
-        remote.submitRegisteredBatch(prepared.request).map {
-          case AgentCall.Failed(failure) =>
-            RemoteBatchSubmitFailure.Agent(failure).asLeft
-          case AgentCall.Succeeded(submission) =>
-            buildHandle(remote, prepared, submission, options.awaitPolicy)
-        }
+        for
+          // One budget for the whole batch: every element handle queues behind it.
+          budget <- RemoteExchangeBudget.of[F](options.maximumConcurrentExchanges)
+          result <- remote.submitRegisteredBatch(prepared.request).map {
+            case AgentCall.Failed(failure) =>
+              RemoteBatchSubmitFailure.Agent(failure).asLeft
+            case AgentCall.Succeeded(submission) =>
+              buildHandle(remote, prepared, submission, options.awaitPolicy, budget)
+          }
+        yield result
 
   final private case class Prepared[I, A](
       plan: BatchPlan[I, A],
@@ -176,7 +247,8 @@ private[ssh] object RemoteBatches:
         options.environment,
         options.maximumResultBytes,
         options.declaredOutputs,
-        batch.task.retrySafety
+        batch.task.retrySafety,
+        options.terminationNotice
       )
     yield Prepared(plan, request, contract)
 
@@ -184,7 +256,8 @@ private[ssh] object RemoteBatches:
       remote: RemoteSlurm[F],
       prepared: Prepared[I, A],
       submission: RemoteRegisteredBatchSubmission,
-      policy: RemoteAwaitPolicy
+      policy: RemoteAwaitPolicy,
+      budget: RemoteExchangeBudget[F]
   ): Either[RemoteBatchSubmitFailure, RemoteBatchHandle[F, I, A]] =
     for
       _ <- Either.cond(
@@ -236,7 +309,8 @@ private[ssh] object RemoteBatches:
             descriptor,
             prepared.contract,
             policy,
-            accountingIndex
+            accountingIndex,
+            budget
           )
         yield RemoteBatchElementHandle(
           remote,
@@ -328,7 +402,10 @@ final case class RemoteScriptBatchOptions(
     maximumLocalScriptBytes: ByteLimit = ByteLimit.defaultEvidence,
     environment: Map[EnvName, String] = Map.empty,
     retrySafety: RetrySafety = RetrySafety.Unknown,
-    awaitPolicy: RemoteAwaitPolicy = RemoteAwaitPolicy.default
+    awaitPolicy: RemoteAwaitPolicy = RemoteAwaitPolicy.default,
+    // See RemoteBatchOptions: elements await in parallel, so the ceiling applies here too.
+    maximumConcurrentExchanges: PositiveInt = PositiveInt.unsafeFrom(8),
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 enum RemoteScriptSourceLocation derives CanEqual:
@@ -375,6 +452,7 @@ final case class RemoteScriptBatchElementResult[I](
 )
 
 final class RemoteScriptBatchElementHandle[F[_]: Async, I] private[ssh] (
+    budget: RemoteExchangeBudget[F],
     remote: RemoteSlurm[F],
     submission: SubmissionAttempt,
     policy: RemoteAwaitPolicy,
@@ -425,7 +503,7 @@ final class RemoteScriptBatchElementHandle[F[_]: Async, I] private[ssh] (
       attempt: Long,
       failures: Int
   ): F[RemoteScriptExecutionResult] =
-    remote.readScriptExit(exitRef).flatMap {
+    budget.use(remote.readScriptExit(exitRef)).flatMap {
       case AgentCall.Failed(failure) =>
         // The element keeps running and will still publish its exit artifact; one lost round trip
         // is no reason to discard a wait that may have hours left.
@@ -493,7 +571,7 @@ final class RemoteScriptBatchElementHandle[F[_]: Async, I] private[ssh] (
     job match
       case None        => AccountingProbe.Inconclusive.pure[F]
       case Some(value) =>
-        remote.accounting(NonEmptyVector.one(value)).map {
+        budget.use(remote.accounting(NonEmptyVector.one(value))).map {
           case AgentCall.Failed(failure) =>
             AccountingProbe.Unavailable(RemoteScriptExecutionResult.AgentUnavailable(failure))
           case AgentCall.Succeeded(result @ SchedulerQueryResult.InvocationFailed(_)) =>
@@ -502,9 +580,7 @@ final class RemoteScriptBatchElementHandle[F[_]: Async, I] private[ssh] (
             AccountingProbe.Unavailable(RemoteScriptExecutionResult.SchedulerUnavailable(result))
           case AgentCall.Succeeded(SchedulerQueryResult.Succeeded(batch)) =>
             batch.records.toVector
-              .find(record =>
-                record.job.jobId == value.jobId && record.job.arrayIndex == value.arrayIndex
-              )
+              .find(record => record.job == value)
               .flatMap(record =>
                 record.outcome.map(
                   RemoteScriptExecutionResult.WorkloadTerminated(_, record.evidence)
@@ -544,12 +620,16 @@ private[ssh] object RemoteScriptBatches:
     prepare(batch, execution, options).flatMap {
       case Left(failure)   => failure.asLeft[RemoteScriptBatchHandle[F, I]].pure[F]
       case Right(prepared) =>
-        remote.submitScriptBatch(prepared.request).map {
-          case AgentCall.Failed(failure) =>
-            RemoteScriptBatchSubmitFailure.Agent(failure).asLeft
-          case AgentCall.Succeeded(submission) =>
-            buildHandle(remote, prepared, submission, options.awaitPolicy)
-        }
+        for
+          // One budget for the whole batch, as for registered batches.
+          budget <- RemoteExchangeBudget.of[F](options.maximumConcurrentExchanges)
+          result <- remote.submitScriptBatch(prepared.request).map {
+            case AgentCall.Failed(failure) =>
+              RemoteScriptBatchSubmitFailure.Agent(failure).asLeft
+            case AgentCall.Succeeded(submission) =>
+              buildHandle(remote, prepared, submission, options.awaitPolicy, budget)
+          }
+        yield result
     }
 
   private def prepare[F[_]: Async, I](
@@ -571,7 +651,8 @@ private[ssh] object RemoteScriptBatches:
                 plan.topology,
                 elements,
                 options.environment,
-                options.retrySafety
+                options.retrySafety,
+                options.terminationNotice
               )
             )
           }
@@ -661,16 +742,25 @@ private[ssh] object RemoteScriptBatches:
                 )
                 .asLeft
             case Right(Right((name, bytes))) =>
-              ScriptProgram(
-                ScriptSource.Inline(name, bytes),
-                program.invocation
-              ).asRight
+              // The staged file was already read under `maximumBytes`, so this refusal is only
+              // reachable if that limit is configured above the shared inline bound. Reported as the
+              // same source-limit failure rather than assumed unreachable.
+              ScriptSource
+                .inlineScript(name, bytes)
+                .bimap(
+                  _ =>
+                    RemoteScriptBatchSubmitFailure.SourceLimitExceeded(
+                      RemoteScriptSourceLocation.StagedLocal(raw),
+                      ByteLimit.maximumInlineScript.value
+                    ),
+                  source => ScriptProgram(source, program.invocation)
+                )
           }
 
   private def readLocalScript(
       path: Path,
       maximumBytes: ByteLimit
-  ): Either[LocalSourceFailure, Vector[Byte]] =
+  ): Either[LocalSourceFailure, ByteVector] =
     if !Files.isRegularFile(path) then Left(LocalSourceFailure.NotRegular)
     else
       val input = Files.newInputStream(path, StandardOpenOption.READ)
@@ -683,7 +773,7 @@ private[ssh] object RemoteScriptBatches:
           if count < 0 then done = true
           else output.write(buffer, 0, count)
         if output.size() > maximumBytes.value then Left(LocalSourceFailure.LimitExceeded)
-        else Right(output.toByteArray.toVector)
+        else Right(ByteVector.view(output.toByteArray))
       finally
         input.close()
         output.close()
@@ -692,7 +782,8 @@ private[ssh] object RemoteScriptBatches:
       remote: RemoteSlurm[F],
       prepared: Prepared[I],
       submission: RemoteScriptBatchSubmission,
-      policy: RemoteAwaitPolicy
+      policy: RemoteAwaitPolicy,
+      budget: RemoteExchangeBudget[F]
   ): Either[RemoteScriptBatchSubmitFailure, RemoteScriptBatchHandle[F, I]] =
     for
       _ <- Either.cond(
@@ -725,6 +816,7 @@ private[ssh] object RemoteScriptBatches:
           _ <- validateElement(returned)
           accountingIndex = prepared.plan.topology.array.map(_ => shardIndex)
         yield RemoteScriptBatchElementHandle(
+          budget,
           remote,
           submission.submission,
           policy,

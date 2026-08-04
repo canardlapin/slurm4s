@@ -1,7 +1,7 @@
 # Compile-checked public API examples
 
 The `slurm4s-examples` module is executable documentation. Its main sources compile against
-the published modules on Scala 3.7.4, but the examples module itself is not published. This makes
+the published modules on Scala 3.3.8 LTS, but the examples module itself is not published. This makes
 API drift a build failure without adding an examples artifact to the library surface.
 
 The complete source is
@@ -59,8 +59,8 @@ missing log produces `Assessment.Undetermined`, not workload failure.
 
 ## Managed restart recovery
 
-`ManagedRecovery.durableController` holds an exclusive, append-only journal for the resource
-lifetime. On process restart, `ManagedRecovery.afterRestart`:
+`ManagedRecovery.durableController` holds an exclusive, bounded snapshot-plus-suffix journal for
+the resource lifetime. On process restart, `ManagedRecovery.afterRestart`:
 
 1. converts persisted in-flight submission or cancellation claims to explicit uncertainty;
 2. runs the injected evidence-backed acceptance search for unknown submissions; and
@@ -68,6 +68,10 @@ lifetime. On process restart, `ManagedRecovery.afterRestart`:
 
 An uncertain in-flight submission is never blindly issued again. No match, ambiguous candidates,
 or unavailable accounting leaves it unknown.
+
+Compaction retains the configured recent event window. Resuming an event stream from an older
+cursor fails with `EventHistoryUnavailable`, whose gap names the minimum cursor from which the
+caller can explicitly restart.
 
 ## Typed Scala tasks and results
 

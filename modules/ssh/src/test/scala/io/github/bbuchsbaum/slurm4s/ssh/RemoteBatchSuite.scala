@@ -4,11 +4,16 @@ import cats.data.NonEmptyVector
 import cats.effect.IO
 import cats.effect.Ref
 import cats.syntax.all.*
+import fs2.Chunk
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.agent.*
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
+import io.github.bbuchsbaum.slurm4s.task.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 import io.github.bbuchsbaum.slurm4s.worker.*
+
+import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -27,19 +32,27 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
   given ScriptArguments[FitParams] = ScriptArguments.derived
 
   private val observedAt = Instant.parse("2026-07-24T12:00:00Z")
-  private val parentJob = JobRef(JobId.from("9100").toOption.get, None, None)
+  private val parentJob = JobRef(JobId.from("9100").toOption.get, None)
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
   )
   private val resultLimit = ByteLimit.from(128).toOption.get
   private val envelopeLimit = ByteLimit.from(4096).toOption.get
   private val release = WorkerRelease(
     WorkerReleaseId.from("remote-batch-suite").toOption.get,
-    ContentDigest.from("sha256:remote-batch-suite").toOption.get
+    ContentDigest
+      .from("sha256:d62cda998641da37d50d2c72f39a8959870099488717535d5eed51b10d2e35f2")
+      .toOption
+      .get
   )
   private val awaitPolicy = RemoteAwaitPolicy(
     DurationMillis.from(1L).toOption.get,
     DurationMillis.from(1000L).toOption.get
+  )
+  private val terminationNotice = TerminationNotice(
+    TerminationNoticeSignal.Usr2,
+    TerminationNoticeScope.JobSteps,
+    SignalLeadSeconds.unsafeFrom(90)
   )
 
   private val temporaryRoot = FunFixture[Path](
@@ -59,7 +72,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
     "a 27-row typed grid runs through remote sharding and returns ordered values and logs"
   ) { root =>
     for
-      submittedRequest <- Ref.of[IO, Option[JobRequest[?]]](None)
+      submittedRequest <- Ref.of[IO, Option[LaunchSpec]](None)
       scheduler = BatchScheduler(submittedRequest)
       runtime = createRuntime(root, scheduler)
       remote <- connect(runtime.runner)
@@ -109,12 +122,13 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
             request.resources.memory,
             Some(MemoryRequest.PerNode(Mebibytes.from(5L * 1024L).toOption.get))
           )
+          assertEquals(request.terminationNotice, Some(terminationNotice))
         case None => fail("the target scheduler did not receive the batch")
   }
 
   temporaryRoot.test("independent and gang plans preserve their distinct Slurm shapes") { root =>
     for
-      submittedRequest <- Ref.of[IO, Option[JobRequest[?]]](None)
+      submittedRequest <- Ref.of[IO, Option[LaunchSpec]](None)
       runtime = createRuntime(root, BatchScheduler(submittedRequest))
       remote <- connect(runtime.runner)
       independent <- remote.submitBatch(
@@ -157,14 +171,16 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
       localScript,
       "#!/bin/sh\nprintf '%s\\n' \"$@\"\n"
     )
-    val grid = Grid.cross(
-      Axis.of(0.1, 0.5, 1.0),
-      Axis.of(Method.Ridge, Method.Lasso, Method.ElasticNet),
-      Axis.of(1, 2, 3)
-    )(FitParams.apply)
+    val grid = Grid
+      .cross(
+        Axis.of(0.1, 0.5, 1.0),
+        Axis.of(Method.Ridge, Method.Lasso, Method.ElasticNet),
+        Axis.of(1, 2, 3)
+      )(FitParams.apply)
+      .fold(failure => fail(failure.toString), identity)
 
     for
-      submittedRequest <- Ref.of[IO, Option[JobRequest[?]]](None)
+      submittedRequest <- Ref.of[IO, Option[LaunchSpec]](None)
       runtime = createRuntime(root.resolve("remote"), BatchScheduler(submittedRequest))
       remote <- connect(runtime.runner)
       batch = SlurmBatch.script(
@@ -185,7 +201,8 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
           SubmissionKey.from("remote-script-grid-27").toOption.get,
           JobName.from("remote-script-grid").toOption.get,
           options.perTask,
-          awaitPolicy = awaitPolicy
+          awaitPolicy = awaitPolicy,
+          terminationNotice = Some(terminationNotice)
         )
       )
       exitCodes <- handle.elements.traverse { element =>
@@ -199,8 +216,9 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
         LogCursor.start,
         ByteLimit.from(1024).toOption.get
       )
+      schedulerRequest <- submittedRequest.get
     yield
-      assertEquals(grid.size, 27)
+      assertEquals(grid.size, 27L)
       assert(exitCodes.forall(_ == 0))
       assert(
         results.forall(_.result == RemoteScriptExecutionResult.Exited(0))
@@ -214,6 +232,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
             "--alpha\n0.1\n--method\nridge\n--seed\n1\n"
           )
         case other => fail(s"expected a remote script stdout page, received $other")
+      assertEquals(schedulerRequest.flatMap(_.terminationNotice), Some(terminationNotice))
   }
 
   private def createRuntime(
@@ -242,7 +261,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
         IO.pure(
           LogReadResult.Page(
             LogPage(
-              ref.locator.getBytes(StandardCharsets.UTF_8).toVector,
+              ByteVector.view(ref.locator.getBytes(StandardCharsets.UTF_8)),
               cursor,
               endOfFile = true,
               observedAt
@@ -277,7 +296,8 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
       Some(WallTimeMinutes.from(30).toOption.get)
     ),
     resultLimit,
-    awaitPolicy = awaitPolicy
+    awaitPolicy = awaitPolicy,
+    terminationNotice = Some(terminationNotice)
   )
 
   private def publishSuccess(
@@ -317,19 +337,19 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
     )
     val inputCodec: InputCodec[Int] = new InputCodec[Int]:
       val schemaId: SchemaId = operation.inputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] = encodeInt(value)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] = decodeInt(bytes)
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] = encodeInt(value)
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] = decodeInt(bytes)
     val outputCodec: ResultCodec[Int] = new ResultCodec[Int]:
       val schemaId: ResultSchemaId = operation.outputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] = encodeInt(value)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] = decodeInt(bytes)
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] = encodeInt(value)
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] = decodeInt(bytes)
     override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
     def run(input: Int, context: TaskContext[IO]): IO[Int] = IO.pure(input + 1)
 
-  private def encodeInt(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-    Right(value.toString.getBytes(StandardCharsets.UTF_8).toVector)
+  private def encodeInt(value: Int): Either[ResultCodecFailure, ByteVector] =
+    Right(ByteVector.view(value.toString.getBytes(StandardCharsets.UTF_8)))
 
-  private def decodeInt(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+  private def decodeInt(bytes: ByteVector): Either[ResultCodecFailure, Int] =
     Try(new String(bytes.toArray, StandardCharsets.UTF_8).toInt).toEither.left.map(error =>
       ResultCodecFailure("invalid-int", Option(error.getMessage).getOrElse("invalid integer"))
     )
@@ -340,7 +360,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
   )
 
   final private case class BatchScheduler(
-      submitted: Ref[IO, Option[JobRequest[?]]]
+      submitted: Ref[IO, Option[LaunchSpec]]
   ) extends Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
       IO.pure(
@@ -357,8 +377,8 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
         )
       )
 
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
-      submitted.set(Some(request)) *>
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+      submitted.set(Some(spec)) *>
         IO.pure(
           SubmissionAttempt.Completed(Submission.Accepted(parentJob, evidence))
         )
@@ -383,17 +403,17 @@ final private class BatchLoopbackRunner(
 ) extends SshProcessRunner[IO]:
   def exchange(
       launch: SshLaunch,
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy
   ): IO[SshProcessOutcome] =
     Stream
-      .emits(request)
+      .chunk(Chunk.byteVector(request))
       .covary[IO]
       .chunkN(5)
       .flatMap(Stream.chunk)
       .through(server.pipe)
       .compile
-      .toVector
+      .to(ByteVector)
       .map { response =>
         val now = Instant.parse("2026-07-24T12:00:00Z")
         SshProcessOutcome.Exited(
@@ -403,7 +423,7 @@ final private class BatchLoopbackRunner(
           BoundedEvidence.capture(
             EvidenceSource.CommandStderr("ssh"),
             now,
-            Vector.empty
+            ByteVector.empty
           )
         )
       }

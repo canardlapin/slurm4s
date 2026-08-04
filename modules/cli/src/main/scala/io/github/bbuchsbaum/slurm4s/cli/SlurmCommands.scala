@@ -6,31 +6,36 @@ import io.github.bbuchsbaum.slurm4s.core.JobRef
 import io.github.bbuchsbaum.slurm4s.core.EnvironmentExportPolicy
 import io.github.bbuchsbaum.slurm4s.core.MemoryRequest
 import io.github.bbuchsbaum.slurm4s.core.NativeOption
-import io.github.bbuchsbaum.slurm4s.core.Payload
 import io.github.bbuchsbaum.slurm4s.core.ResourceRequest
+import io.github.bbuchsbaum.slurm4s.core.TerminationNotice
+import io.github.bbuchsbaum.slurm4s.core.TerminationNoticeScope
 
 object SlurmCommands:
-  def submit[A](prepared: PreparedSubmission[A]): SlurmCommand =
-    val request = prepared.request
+  def submit(prepared: PreparedSubmission): SlurmCommand =
+    val spec = prepared.spec
     val effective = prepared.siteResolution.map(_.effective)
-    val resourceArguments = resources(effective.map(_.resources).getOrElse(request.resources))
-    val siteArguments = effective.toVector.flatMap(siteOptions(_, request.environment.keySet))
-    val arrayArguments = request.array.toVector.map(arrayOption)
-    val scriptArguments = request.payload match
-      case script: Payload.Script[A]       => script.arguments
-      case _: Payload.RegisteredTask[?, ?] => Vector.empty
+    val resourceArguments = resources(effective.map(_.resources).getOrElse(spec.resources))
+    val noticeArguments =
+      effective
+        .flatMap(_.terminationNotice)
+        .orElse(spec.terminationNotice)
+        .toVector
+        .map(signalOption)
+    val siteArguments = effective.toVector.flatMap(siteOptions(_, spec.environment.keySet))
+    val arrayArguments = spec.array.toVector.map(arrayOption)
+    val scriptArguments = spec.arguments
 
     SlurmCommand(
       executable = SlurmExecutable.Sbatch,
       arguments = Vector(
         "--parsable",
-        s"--job-name=${request.name.value}",
+        s"--job-name=${spec.name.value}",
         s"--output=${prepared.stdoutPath}",
         s"--error=${prepared.stderrPath}"
-      ) ++ resourceArguments ++ siteArguments ++ arrayArguments ++ Vector(
+      ) ++ resourceArguments ++ noticeArguments ++ siteArguments ++ arrayArguments ++ Vector(
         prepared.scriptPath
       ) ++ scriptArguments,
-      environment = request.environment.iterator.map { case (name, value) =>
+      environment = spec.environment.iterator.map { case (name, value) =>
         name.value -> value
       }.toMap
     )
@@ -89,6 +94,12 @@ object SlurmCommands:
         case MemoryRequest.PerCpu(amount)  => s"--mem-per-cpu=${amount.toLong}M"
         case MemoryRequest.AllNodeMemory   => "--mem=0"
       } ++ request.wallTime.toVector.map(value => s"--time=${value.toLong}")
+
+  private def signalOption(notice: TerminationNotice): String =
+    val scope = notice.scope match
+      case TerminationNoticeScope.BatchShell => "B:"
+      case TerminationNoticeScope.JobSteps   => ""
+    s"--signal=$scope${notice.signal.slurmName}@${notice.leadSeconds.toInt}"
 
   private def siteOptions(
       spec: io.github.bbuchsbaum.slurm4s.core.EffectiveSiteSpec,

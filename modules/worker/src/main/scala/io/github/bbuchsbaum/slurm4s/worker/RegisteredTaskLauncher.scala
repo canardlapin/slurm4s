@@ -5,8 +5,12 @@ import cats.data.NonEmptyVector
 import cats.effect.Clock
 import cats.effect.IO
 import cats.syntax.all.*
+import io.github.bbuchsbaum.slurm4s.batch.*
+import io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
+
+import scodec.bits.ByteVector
 
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
@@ -87,7 +91,8 @@ final case class RegisteredTaskArrayRequest[I, O](
     environment: Map[EnvName, String],
     elements: NonEmptyVector[RegisteredTaskArrayElement[I]],
     maximumConcurrent: Option[PositiveInt],
-    retrySafety: RetrySafety = RetrySafety.Unknown
+    retrySafety: RetrySafety = RetrySafety.Unknown,
+    terminationNotice: Option[TerminationNotice] = None
 )
 
 final case class PreparedRegisteredArraySubmission[O](
@@ -166,7 +171,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
           "remote-result-read-failed",
           error.getClass.getSimpleName,
           observedAt,
-          Vector.empty,
+          ByteVector.empty,
           0L
         )
       }
@@ -181,7 +186,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
           "remote-script-exit-read-failed",
           error.getClass.getSimpleName,
           observedAt,
-          Vector.empty,
+          ByteVector.empty,
           0L
         )
       }
@@ -272,7 +277,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         request.resources,
         request.environment,
         Some(arrayRequest),
-        request.retrySafety
+        request.retrySafety,
+        request.terminationNotice
       )
     yield PreparedRegisteredArraySubmission(
       schedulerRequest,
@@ -300,7 +306,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
             request.environment,
             request.maximumResultBytes,
             request.declaredOutputs,
-            request.retrySafety
+            request.retrySafety,
+            request.terminationNotice
           ),
           attemptEpoch
         ).map(element.index -> _)
@@ -323,7 +330,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         request.topology.resources,
         request.environment,
         request.topology.array,
-        request.retrySafety
+        request.retrySafety,
+        request.terminationNotice
       )
     yield PreparedRemoteRegisteredBatchSubmission(
       schedulerRequest,
@@ -370,7 +378,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         request.topology.resources,
         request.environment,
         request.topology.array,
-        request.retrySafety
+        request.retrySafety,
+        request.terminationNotice
       )
     yield PreparedRemoteScriptBatchSubmission(
       schedulerRequest,
@@ -423,19 +432,28 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
           task.resultContract
         )
       )
-      handle = DurableResultHandle(
-        request.submissionKey,
+      // The handle is DERIVED from the prepared attempt rather than built beside it, so the
+      // schema, limits and declared outputs it advertises cannot drift from the plan that reads
+      // the result.
+      launchSpec <- LaunchSpec.fromRequest(schedulerRequest)
+      prepared = PreparedAttempt(
+        PreparedJob(
+          launchSpec,
+          ResultPlan(
+            task.operation.outputSchema,
+            task.resultContract,
+            invocation.maximumResultBytes,
+            settings.maximumEnvelopeBytes,
+            invocation.declaredOutputs
+          ),
+          io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles.digestOf(scriptBytes)
+        ),
         attemptId,
         attemptEpoch,
-        None,
         WorkloadOperation.Registered(task.operation.id, task.operation.version),
-        task.operation.outputSchema,
-        invocation.maximumResultBytes,
-        settings.maximumEnvelopeBytes,
-        invocation.declaredOutputs,
-        settings.workerRelease,
-        request.retrySafety
+        settings.workerRelease
       )
+      handle = prepared.durableHandle(None)
     yield PreparedRegisteredSubmission(
       schedulerRequest,
       invocation,
@@ -478,39 +496,45 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       )
       directory = epochDirectory(attemptId, attemptEpoch)
       _ <- createPrivateDirectory(directory)
-      invocation = TaskInvocation(
-        request.submissionKey,
-        attemptId,
-        attemptEpoch,
-        None,
-        request.operation,
-        request.inputBytes,
-        request.declaredOutputs,
-        settings.maximumInputBytes,
-        request.maximumResultBytes,
-        settings.maximumEnvelopeBytes,
-        settings.maximumOutputBytes,
-        settings.workerRelease,
-        request.retrySafety
-      )
+      invocation <- TaskInvocation
+        .from(
+          request.submissionKey,
+          attemptId,
+          attemptEpoch,
+          None,
+          request.operation,
+          request.inputBytes,
+          request.declaredOutputs,
+          settings.maximumInputBytes,
+          request.maximumResultBytes,
+          settings.maximumEnvelopeBytes,
+          settings.maximumOutputBytes,
+          settings.workerRelease,
+          request.retrySafety
+        )
+        .left
+        .map(problem => Diagnostics.one(Diagnostic("invalid-task-invocation", problem.reason)))
       invocationBytes <- TaskInvocationCodec
         .encode(invocation, settings.maximumInvocationBytes)
         .left
         .map(failure => Diagnostics.one(Diagnostic("task-invocation-codec", failure.toString)))
       resultRef = RemoteResultRef(attemptId, attemptEpoch)
-      handle = DurableResultHandle(
-        request.submissionKey,
-        attemptId,
-        attemptEpoch,
-        None,
-        WorkloadOperation.Registered(request.operation.id, request.operation.version),
-        request.operation.outputSchema,
-        request.maximumResultBytes,
-        settings.maximumEnvelopeBytes,
-        request.declaredOutputs,
-        settings.workerRelease,
-        request.retrySafety
-      )
+      handle <- DurableResultHandle
+        .from(
+          request.submissionKey,
+          attemptId,
+          attemptEpoch,
+          None,
+          WorkloadOperation.Registered(request.operation.id, request.operation.version),
+          request.operation.outputSchema,
+          request.maximumResultBytes,
+          settings.maximumEnvelopeBytes,
+          request.declaredOutputs,
+          settings.workerRelease,
+          request.retrySafety
+        )
+        .left
+        .map(problem => Diagnostics.one(Diagnostic("invalid-result-handle", problem.reason)))
       handleBytes <- DurableResultHandleCodec
         .encode(handle, RemoteTaskWireLimits.MaximumHandleBytes)
         .left
@@ -537,7 +561,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         ),
         request.resources,
         request.environment,
-        retrySafety = request.retrySafety
+        retrySafety = request.retrySafety,
+        terminationNotice = request.terminationNotice
       )
     yield PreparedRemoteRegisteredSubmission(
       schedulerRequest,
@@ -561,7 +586,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         "remote-result-limit-rejected",
         "requested read limit exceeds the target envelope limit",
         observedAt,
-        Vector.empty,
+        ByteVector.empty,
         0L
       )
     else
@@ -572,7 +597,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
           "remote-result-reference-unknown",
           "no durable result metadata exists for the reference",
           observedAt,
-          Vector.empty,
+          ByteVector.empty,
           0L
         )
       else
@@ -633,7 +658,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
             capture._2
           )
 
-  private def readBounded(path: Path, maximum: ByteLimit): (Vector[Byte], Long) =
+  private def readBounded(path: Path, maximum: ByteLimit): (ByteVector, Long) =
     val sizeBefore = Files.size(path)
     val input = Files.newInputStream(path, StandardOpenOption.READ)
     val output = ByteArrayOutputStream()
@@ -645,7 +670,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         val count = input.read(buffer, 0, requested)
         if count < 0 then done = true
         else output.write(buffer, 0, count)
-      val retained = output.toByteArray.toVector
+      val retained = ByteVector.view(output.toByteArray)
       val sizeAfter = Files.size(path)
       retained -> math.max(math.max(sizeBefore, sizeAfter), retained.size.toLong)
     finally
@@ -656,7 +681,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       code: String,
       detail: String,
       observedAt: java.time.Instant,
-      retained: Vector[Byte],
+      retained: ByteVector,
       originalBytes: Long
   ): RemoteResultRead =
     val evidence = BoundedEvidence.fromCapture(
@@ -681,7 +706,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       code: String,
       detail: String,
       observedAt: java.time.Instant,
-      retained: Vector[Byte],
+      retained: ByteVector,
       originalBytes: Long
   ): RemoteScriptExitRead =
     val evidence = BoundedEvidence.fromCapture(
@@ -898,7 +923,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
     val identity =
       s"${key.value}\u0000$sourceIdentity\u0000$invocationIdentity"
     AttemptId.from(
-      s"script-${sha256(identity.getBytes(StandardCharsets.UTF_8).toVector).take(32)}"
+      s"script-${sha256(ByteVector.view(identity.getBytes(StandardCharsets.UTF_8))).take(32)}"
     )
 
   private def deterministicAttempt[I, O](
@@ -906,21 +931,28 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       operation: OperationRef[I, O]
   ): Either[ValidationFailure, AttemptId] =
     val identity = s"${key.value}\u0000${operation.id.value}\u0000${operation.version.value}"
-    AttemptId.from(s"worker-${sha256(identity.getBytes(StandardCharsets.UTF_8).toVector).take(32)}")
+    AttemptId.from(
+      s"worker-${sha256(ByteVector.view(identity.getBytes(StandardCharsets.UTF_8))).take(32)}"
+    )
 
   private def deterministicAttempt(
       key: SubmissionKey,
       operation: RegisteredOperation
   ): Either[ValidationFailure, AttemptId] =
     val identity = s"${key.value}\u0000${operation.id.value}\u0000${operation.version.value}"
-    AttemptId.from(s"worker-${sha256(identity.getBytes(StandardCharsets.UTF_8).toVector).take(32)}")
+    AttemptId.from(
+      s"worker-${sha256(ByteVector.view(identity.getBytes(StandardCharsets.UTF_8))).take(32)}"
+    )
 
-  private def launchScriptBytes(
-      invocation: Path,
-      result: Path,
-      events: Path
-  ): Vector[Byte] =
-    val command = Vector(
+  /** The worker `run` invocation for one task, quoted for `sh`.
+    *
+    * One definition because it is one contract with the worker's own `run` subcommand: the
+    * single-task script, the local array script and the remote array script must name the same
+    * three paths under the same flags, or a task the worker can run under one launch path fails
+    * under another.
+    */
+  private def runCommand(invocation: Path, result: Path, events: Path): String =
+    Vector(
       settings.executable.toAbsolutePath.normalize().toString,
       "run",
       "--invocation",
@@ -930,38 +962,32 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       "--events",
       events.toString
     ).map(shellQuote).mkString(" ")
-    s"#!/bin/sh\nexec $command\n".getBytes(StandardCharsets.UTF_8).toVector
+
+  /** The same invocation with its logs redirected beside the invocation, for an array element. */
+  private def elementCommand(invocation: Path, result: Path, events: Path): String =
+    val directory = invocation.getParent
+    val stdout = shellQuote(directory.resolve("stdout.log").toString)
+    val stderr = shellQuote(directory.resolve("stderr.log").toString)
+    s"${runCommand(invocation, result, events)} >$stdout 2>$stderr"
+
+  private def launchScriptBytes(
+      invocation: Path,
+      result: Path,
+      events: Path
+  ): ByteVector =
+    val command = runCommand(invocation, result, events)
+    ByteVector.view(s"#!/bin/sh\nexec $command\n".getBytes(StandardCharsets.UTF_8))
 
   private def arrayLaunchScriptBytes[O](
       elements: Vector[(PreparedRegisteredSubmission[O], RegisteredTaskArrayElement[?])]
-  ): Vector[Byte] =
-    val cases = elements
-      .map { case (prepared, element) =>
-        val directory = prepared.invocationPath.getParent
-        val command = Vector(
-          settings.executable.toAbsolutePath.normalize().toString,
-          "run",
-          "--invocation",
-          prepared.invocationPath.toString,
-          "--result",
-          prepared.resultPath.toString,
-          "--events",
-          prepared.eventPath.toString
-        ).map(shellQuote).mkString(" ")
-        val stdout = shellQuote(directory.resolve("stdout.log").toString)
-        val stderr = shellQuote(directory.resolve("stderr.log").toString)
-        s"  '${element.index.value}') exec $command >$stdout 2>$stderr ;;"
-      }
-      .mkString("\n")
-    val script =
-      s"""#!/bin/sh
-         |set -eu
-         |case "${'$'}{SLURM_ARRAY_TASK_ID-}" in
-         |$cases
-         |  *) exit 64 ;;
-         |esac
-         |""".stripMargin
-    script.getBytes(StandardCharsets.UTF_8).toVector
+  ): ByteVector =
+    arrayDispatchScript(elements.map { case (prepared, element) =>
+      element.index -> elementCommand(
+        prepared.invocationPath,
+        prepared.resultPath,
+        prepared.eventPath
+      )
+    })
 
   private def writeRemoteBatchScripts(
       directory: Path,
@@ -1117,22 +1143,9 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         yield ()
 
   private def remoteElementCommand(element: PreparedRemoteRegisteredSubmission): String =
-    val command = Vector(
-      settings.executable.toAbsolutePath.normalize().toString,
-      "run",
-      "--invocation",
-      element.invocationPath.toString,
-      "--result",
-      element.resultPath.toString,
-      "--events",
-      element.eventPath.toString
-    ).map(shellQuote).mkString(" ")
-    val directory = element.invocationPath.getParent
-    val stdout = shellQuote(directory.resolve("stdout.log").toString)
-    val stderr = shellQuote(directory.resolve("stderr.log").toString)
-    s"$command >$stdout 2>$stderr"
+    elementCommand(element.invocationPath, element.resultPath, element.eventPath)
 
-  private def arrayDispatchScript(branches: Vector[(ArrayIndex, String)]): Vector[Byte] =
+  private def arrayDispatchScript(branches: Vector[(ArrayIndex, String)]): ByteVector =
     val cases = branches
       .sortBy(_._1)
       .map { case (index, command) =>
@@ -1141,24 +1154,25 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       .mkString("\n")
     val script =
       s"""#!/bin/sh
+         |umask 077
          |set -eu
          |case "${'$'}{SLURM_ARRAY_TASK_ID-}" in
          |$cases
          |  *) exit 64 ;;
          |esac
          |""".stripMargin
-    script.getBytes(StandardCharsets.UTF_8).toVector
+    ByteVector.view(script.getBytes(StandardCharsets.UTF_8))
 
   private def boundedShardScript(
       elements: Vector[PreparedRemoteRegisteredSubmission],
       slotsPerShard: PositiveInt
-  ): Vector[Byte] =
+  ): ByteVector =
     boundedCommandScript(elements.map(remoteElementCommand), slotsPerShard)
 
   private def boundedCommandScript(
       commands: Vector[String],
       slotsPerShard: PositiveInt
-  ): Vector[Byte] =
+  ): ByteVector =
     val launches = commands.map { command =>
       s"""($command) &
          |active=${'$'}((active + 1))
@@ -1167,7 +1181,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
          |fi
          |""".stripMargin
     }.mkString
-    s"""#!/bin/bash
+    ByteVector.view(s"""#!/bin/bash
+       |umask 077
        |set -u
        |if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
        |  echo 'slurm4s: bounded shards require Bash 4.3 or newer' >&2
@@ -1186,11 +1201,11 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
        |  wait_one
        |done
        |exit "${'$'}status"
-       |""".stripMargin.getBytes(StandardCharsets.UTF_8).toVector
+       |""".stripMargin.getBytes(StandardCharsets.UTF_8))
 
   private def gangRankScript(
       elements: Vector[PreparedRemoteRegisteredSubmission]
-  ): Vector[Byte] =
+  ): ByteVector =
     val cases = elements.zipWithIndex
       .map { case (element, rank) =>
         s"  '$rank') exec ${remoteElementCommand(element)} ;;"
@@ -1198,33 +1213,34 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       .mkString("\n")
     val script =
       s"""#!/bin/sh
+         |umask 077
          |set -eu
          |case "${'$'}{SLURM_PROCID-}" in
          |$cases
          |  *) exit 64 ;;
          |esac
          |""".stripMargin
-    script.getBytes(StandardCharsets.UTF_8).toVector
+    ByteVector.view(script.getBytes(StandardCharsets.UTF_8))
 
-  private def gangCommandScript(commands: Vector[String]): Vector[Byte] =
+  private def gangCommandScript(commands: Vector[String]): ByteVector =
     val cases = commands.zipWithIndex
       .map { case (command, rank) =>
         s"  '$rank') exec $command ;;"
       }
       .mkString("\n")
-    s"""#!/bin/sh
+    ByteVector.view(s"""#!/bin/sh
        |set -eu
        |case "${'$'}{SLURM_PROCID-}" in
        |$cases
        |  *) exit 64 ;;
        |esac
-       |""".stripMargin.getBytes(StandardCharsets.UTF_8).toVector
+       |""".stripMargin.getBytes(StandardCharsets.UTF_8))
 
   private def gangLaunchScript(
       dispatch: Path,
       nodes: PositiveInt,
       tasksPerNode: PositiveInt
-  ): Vector[Byte] =
+  ): ByteVector =
     val tasks = nodes.toInt.toLong * tasksPerNode.toInt.toLong
     val command = Vector(
       "srun",
@@ -1234,7 +1250,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       "--exact",
       dispatch.toString
     ).map(shellQuote).mkString(" ")
-    s"#!/bin/sh\nset -eu\nexec $command\n".getBytes(StandardCharsets.UTF_8).toVector
+    ByteVector.view(s"#!/bin/sh\nset -eu\nexec $command\n".getBytes(StandardCharsets.UTF_8))
 
   private def remoteScriptLaunchBytes(
       invocation: ScriptInvocation,
@@ -1243,7 +1259,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       stdout: String,
       stderr: String,
       exitStatus: Path
-  ): Vector[Byte] =
+  ): ByteVector =
     val prefix = invocation match
       case ScriptInvocation.Direct     => Vector(program.toString)
       case ScriptInvocation.Via(value) =>
@@ -1262,7 +1278,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
     // remaining window. `umask` is set before anything opens a file so stdout and stderr are
     // created private too, rather than inheriting the site default.
     val temporaryName = shellQuote(s"${exitStatus.toString}.tmp.") + "\"$$\""
-    s"""#!/bin/sh
+    ByteVector.view(s"""#!/bin/sh
        |umask 077
        |set +e
        |$command >$stdoutPath 2>$stderrPath
@@ -1277,14 +1293,14 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
        |  mv -f "${'$'}temporary" $exitPath
        |fi
        |exit "${'$'}status"
-       |""".stripMargin.getBytes(StandardCharsets.UTF_8).toVector
+       |""".stripMargin.getBytes(StandardCharsets.UTF_8))
 
   private def shellQuote(value: String): String =
     s"'${value.replace("'", "'\"'\"'")}'"
 
   private def writeStable(
       target: Path,
-      bytes: Vector[Byte],
+      bytes: ByteVector,
       executable: Boolean
   ): Either[Diagnostics, Unit] =
     AtomicFiles.writeStableBlocking(target, bytes, executable).left.map {
@@ -1323,7 +1339,7 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
       val _ = Files.setPosixFilePermissions(path, PosixFilePermissions.fromString(value))
     catch case _: UnsupportedOperationException => ()
 
-  private def sha256(bytes: Vector[Byte]): String =
+  private def sha256(bytes: ByteVector): String =
     MessageDigest
       .getInstance("SHA-256")
       .digest(bytes.toArray)
@@ -1353,7 +1369,7 @@ final class RegisteredTaskSubmitter(
         IO.pure(RegisteredSubmissionResult.PreparationFailed(diagnostics))
       case Right(prepared) =>
         scheduler
-          .submit(prepared.schedulerRequest)
+          .submitLowered(prepared.schedulerRequest)
           .map(result => RegisteredSubmissionResult.Submitted(prepared, result))
     }
 
@@ -1369,6 +1385,6 @@ final class RegisteredTaskArraySubmitter(
         IO.pure(RegisteredArraySubmissionResult.PreparationFailed(diagnostics))
       case Right(prepared) =>
         scheduler
-          .submit(prepared.schedulerRequest)
+          .submitLowered(prepared.schedulerRequest)
           .map(result => RegisteredArraySubmissionResult.Submitted(prepared, result))
     }

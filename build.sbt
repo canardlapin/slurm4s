@@ -6,13 +6,39 @@ ThisBuild / organizationName := "Bradley Buchsbaum"
 ThisBuild / startYear := Some(2026)
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers := List(tlGitHubDev("bbuchsbaum", "Bradley Buchsbaum"))
+ThisBuild / homepage := Some(url("https://github.com/canardlapin/slurm4s"))
+ThisBuild / scmInfo := Some(
+  ScmInfo(
+    url("https://github.com/canardlapin/slurm4s"),
+    "scm:git:git@github.com:canardlapin/slurm4s.git"
+  )
+)
 ThisBuild / scalaVersion := Versions.scala3
-ThisBuild / crossScalaVersions := Seq(Versions.scala3)
+ThisBuild / crossScalaVersions := Seq(Versions.scala3, Versions.scala3Next)
+// Scala 3 versions share `_3` artifact coordinates, so cross-publishing both lines would try to
+// publish the same artifact twice. 3.8.4 is a verification lane only; publication comes from the
+// LTS baseline alone.
+ThisBuild / publish / skip := scalaVersion.value != Versions.scala3
 ThisBuild / tlJdkRelease := Some(17)
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"), JavaSpec.temurin("21"))
 ThisBuild / tlCiScalafmtCheck := true
 ThisBuild / tlCiHeaderCheck := false
+// GitHub rejected the generated dependency-submission job with 403 because that API requires a
+// write-capable token. Granting contents:write to the whole generated workflow would give every
+// build and test job repository write access for an optional inventory feature. Keep CI
+// least-privileged; ordinary dependency updates remain visible through the checked-in build and
+// Dependabot can be enabled independently at repository scope.
+ThisBuild / tlCiDependencyGraphJob := false
+// No artifact has been released and no compatibility baseline exists yet. A step named "Check
+// binary compatibility" with mimaPreviousArtifacts = Set() checks nothing and creates false
+// assurance. P7.6 owns the first 0.1 baseline and will enable this gate when it can actually bite.
+ThisBuild / tlCiMimaBinaryIssueCheck := false
 ThisBuild / scalacOptions ++= Seq("-Xmax-inlines:64", "-language:strictEquality")
+// sbt-typelevel defaults this to false. Two plan documents claimed -Werror was already in CI; it
+// was not, and enabling it immediately exposed two non-exhaustive matches over SlurmState that the
+// green test suite had missed. Exhaustivity is load-bearing here: the scheduler state model is
+// matched in several places that deliberately carry no catch-all.
+ThisBuild / tlFatalWarnings := true
 ThisBuild / Test / fork := true
 
 lazy val commonSettings = Seq(
@@ -20,7 +46,9 @@ lazy val commonSettings = Seq(
     Libraries.munit % Test,
     Libraries.munitCatsEffect % Test,
     Libraries.munitScalaCheck % Test,
-    Libraries.scalaCheck % Test
+    Libraries.scalaCheck % Test,
+    Libraries.catsLaws % Test,
+    Libraries.disciplineMunit % Test
   )
 )
 
@@ -30,6 +58,8 @@ lazy val root = project
   .aggregate(
     kernel,
     core,
+    batch,
+    task,
     cli,
     protocol,
     testkit,
@@ -48,9 +78,11 @@ lazy val kernel = project
   .settings(commonSettings)
   .settings(
     name := "remote-exec-kernel",
+    // No Cats Effect: ADR 0001 confines it to interpreter and application modules, and the only
+    // reason this artifact carried it was a set of Sync-shaped convenience wrappers over blocking
+    // calls that every production caller already bypassed.
     libraryDependencies ++= Seq(
       Libraries.catsCore,
-      Libraries.catsEffect,
       Libraries.scodecBits
     )
   )
@@ -75,9 +107,30 @@ lazy val cli = project
   .settings(commonSettings)
   .settings(name := "slurm4s-cli")
 
+lazy val batch = project
+  .in(file("modules/batch"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(
+    name := "slurm4s-batch",
+    libraryDependencies += Libraries.catsCore
+  )
+
+lazy val task = project
+  .in(file("modules/task"))
+  .dependsOn(core, batch)
+  .settings(commonSettings)
+  .settings(
+    name := "slurm4s-task",
+    libraryDependencies += Libraries.catsCore
+  )
+
 lazy val protocol = project
   .in(file("modules/protocol"))
-  .dependsOn(core)
+  // test->test so the codec laws generate domain values from core's Generators instead of
+  // duplicating them. It stays out of testkit because that artifact is published and would
+  // then carry ScalaCheck as a compile dependency.
+  .dependsOn(core % "compile->compile;test->test", batch)
   .settings(commonSettings)
   .settings(
     name := "slurm4s-protocol",
@@ -127,7 +180,20 @@ lazy val agent = project
 
 lazy val ssh = project
   .in(file("modules/ssh"))
-  .dependsOn(core, protocol, agent, worker, testkit % "test->compile")
+  // The SSH client depends on neither the agent (server) nor the worker (execution) module.
+  // AgentApi moved to protocol, where the wire contract belongs, and the submittable half of a task
+  // moved to `task` as TaskDefinition — a client sends an operation and encoded input, it never
+  // executes anything, so it has no business naming `run`.
+  .dependsOn(
+    core,
+    batch,
+    task,
+    protocol,
+    // Test-only: the conformance suites drive a real in-process agent. A client may TEST against a
+    // server; it may not COMPILE against one.
+    agent % "test->compile",
+    testkit % "test->compile"
+  )
   .settings(commonSettings)
   .settings(
     name := "slurm4s-ssh",
@@ -140,7 +206,13 @@ lazy val ssh = project
 
 lazy val managed = project
   .in(file("modules/managed"))
-  .dependsOn(core, protocol, testkit % "test->compile")
+  // test->test on protocol reaches ProtocolGenerators, which the journal and control-command laws
+  // need to build the domain values a persisted command carries.
+  .dependsOn(
+    core % "compile->compile;test->test",
+    protocol % "compile->compile;test->test",
+    testkit % "test->compile"
+  )
   .settings(commonSettings)
   .settings(
     name := "slurm4s-managed",
@@ -155,7 +227,7 @@ lazy val managed = project
 
 lazy val worker = project
   .in(file("modules/worker"))
-  .dependsOn(kernel, core, protocol)
+  .dependsOn(kernel, core, batch, task, protocol)
   .settings(commonSettings)
   .settings(
     name := "slurm4s-worker",
@@ -178,7 +250,19 @@ lazy val observability = project
 lazy val examples = project
   .in(file("modules/examples"))
   .enablePlugins(NoPublishPlugin)
-  .dependsOn(core, cli, protocol, local, agent, ssh, managed, worker, observability)
+  .dependsOn(
+    core,
+    batch,
+    task,
+    cli,
+    protocol,
+    local,
+    agent,
+    ssh,
+    managed,
+    worker,
+    observability
+  )
   .settings(commonSettings)
   .settings(
     name := "slurm4s-examples"
@@ -186,5 +270,5 @@ lazy val examples = project
 
 addCommandAlias(
   "checkFormatting",
-  ";kernel/scalafmtCheckAll;core/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
+  ";kernel/scalafmtCheckAll;core/scalafmtCheckAll;batch/scalafmtCheckAll;task/scalafmtCheckAll;cli/scalafmtCheckAll;protocol/scalafmtCheckAll;local/scalafmtCheckAll;agent/scalafmtCheckAll;ssh/scalafmtCheckAll;managed/scalafmtCheckAll;worker/scalafmtCheckAll;observability/scalafmtCheckAll;examples/scalafmtCheckAll;testkit/scalafmtCheckAll;scalafmtSbtCheck"
 )

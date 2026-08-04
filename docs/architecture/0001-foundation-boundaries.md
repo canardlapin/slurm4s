@@ -7,9 +7,16 @@
 ## Decision
 
 slurm4s is published under `io.github.bbuchsbaum` with package root
-`io.github.bbuchsbaum.slurm4s`. The build uses sbt 1.11.7, Scala 3.7.4 as its sole publication
-and verification baseline, and JDK 17 as the minimum runtime. Changing the Scala minor line is an
+`io.github.bbuchsbaum.slurm4s`. The build uses sbt 1.11.7 and JDK 17 as the minimum runtime. Changing the Scala minor line is an
 explicit compatibility decision rather than an incidental current-release refresh.
+
+**Amended 2026-07-30 (P8.B4).** Scala 3.3.8 LTS is the publication baseline; 3.8.4 is a
+verification-only lane. The original 3.7.4 baseline was a compatibility mistake rather than a
+choice: a compiler consumes TASTy from its own or an earlier minor line, so publishing from 3.7
+excluded every 3.3 LTS consumer, and Scala's own guidance is to publish libraries from the LTS line.
+Because Scala 3 versions share `_3` artifact coordinates, cross-publishing both lines would attempt
+to publish one artifact twice, so `publish / skip` is bound to the non-baseline version and release
+tooling publishes only from 3.3.8. Both lines are tested in CI.
 sbt 2 is deliberately deferred until its plugin ecosystem has accumulated more production use;
 this is a build-only choice and does not affect library semantics.
 
@@ -24,7 +31,7 @@ raised its minimum sbt version beyond this build baseline; that migration must b
 | Concern | Authority | Non-authoritative convenience |
 | --- | --- | --- |
 | Allocation and scheduler facts | Bounded Slurm evidence with source and observation time | A cache, inferred log message, or lost connection |
-| Managed submission intent | Durable control store and append-only journal | A fiber, SSH channel, `Ref`, `Queue`, or live stream |
+| Managed submission intent | Durable control store and checksummed snapshot-plus-suffix journal | A fiber, SSH channel, `Ref`, `Queue`, or live stream |
 | Workload meaning | Payload descriptor, launch bundle, operation identity, result contract | Generated shell text or Slurm job name |
 | Typed result | Validated, bounded envelope bound to attempt epoch and schema | Exit zero, stdout, or the Scala type expected by a caller |
 | Live delivery | Cursor-backed durable pages exposed as bounded FS2 streams | An unbounded topic or process pipe after disconnect |

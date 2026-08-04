@@ -8,12 +8,9 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
 import scala.concurrent.duration.*
+import scodec.bits.ByteVector
 
-trait ScalaTask[I, O]:
-  def operation: OperationRef[I, O]
-  def inputCodec: InputCodec[I]
-  def outputCodec: ResultCodec[O]
-  def retrySafety: RetrySafety = RetrySafety.Unknown
+trait ScalaTask[I, O] extends io.github.bbuchsbaum.slurm4s.task.TaskDefinition[I, O]:
   def run(input: I, context: TaskContext[IO]): IO[O]
 
 object TaskInvocations:
@@ -116,26 +113,27 @@ object TaskInvocations:
         (),
         TaskFailure.InputTooLarge(bytes.size.toLong, maximumInputBytes.value)
       )
-      _ <- Either.cond(
-        declaredOutputs.distinct.size == declaredOutputs.size,
-        (),
-        TaskFailure.InvalidInvocation("declared outputs must be distinct")
-      )
-    yield TaskInvocation(
-      submissionKey,
-      attemptId,
-      attemptEpoch,
-      job,
-      operation.descriptor,
-      bytes,
-      declaredOutputs,
-      maximumInputBytes,
-      maximumResultBytes,
-      maximumEnvelopeBytes,
-      maximumOutputBytes,
-      workerRelease,
-      retrySafety
-    )
+      // Distinctness and the byte bounds are now the type's own invariant, checked once in
+      // TaskInvocation.from rather than restated at each construction site.
+      invocation <- TaskInvocation
+        .from(
+          submissionKey,
+          attemptId,
+          attemptEpoch,
+          job,
+          operation.descriptor,
+          bytes,
+          declaredOutputs,
+          maximumInputBytes,
+          maximumResultBytes,
+          maximumEnvelopeBytes,
+          maximumOutputBytes,
+          workerRelease,
+          retrySafety
+        )
+        .left
+        .map(problem => TaskFailure.InvalidInvocation(problem.reason))
+    yield invocation
 
 enum TaskFailure derives CanEqual:
   case UnknownOperation(operation: RegisteredOperation)
@@ -170,7 +168,7 @@ sealed trait TaskRegistration:
   private[worker] def execute(
       invocation: TaskInvocation,
       context: TaskContext[IO]
-  ): IO[Either[TaskFailure, Vector[Byte]]]
+  ): IO[Either[TaskFailure, ByteVector]]
 
 object TaskRegistration:
   def apply[I, O](task: ScalaTask[I, O]): TaskRegistration = new TaskRegistration:
@@ -179,7 +177,7 @@ object TaskRegistration:
     def execute(
         invocation: TaskInvocation,
         context: TaskContext[IO]
-    ): IO[Either[TaskFailure, Vector[Byte]]] =
+    ): IO[Either[TaskFailure, ByteVector]] =
       if invocation.operation.inputSchema != task.inputCodec.schemaId then
         IO.pure(
           Left(
@@ -237,7 +235,7 @@ final class TaskRegistry private (entries: Map[(OperationId, OperationVersion), 
   private[worker] def execute(
       invocation: TaskInvocation,
       context: TaskContext[IO]
-  ): IO[Either[TaskFailure, Vector[Byte]]] =
+  ): IO[Either[TaskFailure, ByteVector]] =
     entries.get(invocation.operation.id -> invocation.operation.version) match
       case None               => IO.pure(Left(TaskFailure.UnknownOperation(invocation.operation)))
       case Some(registration) => registration.execute(invocation, context)

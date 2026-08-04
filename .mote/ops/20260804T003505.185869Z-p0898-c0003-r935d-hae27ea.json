@@ -1,0 +1,1 @@
+{"actor":"codex-scala-slurm","entity":"bd-01KZ533X9HKV4VCGY7G78CQT1W","kind":"note","note_kind":"progress","op":"20260804T003505.185869Z-p0898-c0003-r935d-hae27ea","text":"Restore the enum with private[ScriptSource], preserve derived sum decoding semantics, and add complete wire compatibility fixtures.","ts":"2026-08-04T00:35:05.185869Z","v":1}

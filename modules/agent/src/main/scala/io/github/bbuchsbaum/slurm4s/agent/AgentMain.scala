@@ -1,6 +1,5 @@
 package io.github.bbuchsbaum.slurm4s.agent
 
-import cats.effect.ExitCode
 import cats.effect.IO
 import cats.effect.IOApp
 import fs2.io.process.Processes
@@ -29,13 +28,14 @@ import java.nio.file.Path
 object AgentMain extends IOApp:
   given Processes[IO] = Processes.forIO
 
-  def run(arguments: List[String]): IO[ExitCode] =
+  /** Parse the agent command and run it to its process exit status. */
+  override def run(arguments: List[String]): IO[cats.effect.ExitCode] =
     AgentCommand.parse(arguments) match
       case Left(problem)                  => fail(problem)
       case Right(AgentCommand.ServeStdio) =>
         AgentRuntimeConfig.fromEnvironment(sys.env) match
           case Left(problem) => fail(problem)
-          case Right(config) => serve(config).as(ExitCode.Success)
+          case Right(config) => serve(config).as(cats.effect.ExitCode.Success)
 
   private def serve(config: AgentRuntimeConfig): IO[Unit] =
     val commandExecutor = Fs2CommandExecutor[IO](
@@ -81,8 +81,8 @@ object AgentMain extends IOApp:
       .compile
       .drain
 
-  private def fail(problem: String): IO[ExitCode] =
-    IO.blocking(System.err.println(s"slurm4s-agent: $problem")).as(ExitCode.Error)
+  private def fail(problem: String): IO[cats.effect.ExitCode] =
+    IO.blocking(System.err.println(s"slurm4s-agent: $problem")).as(cats.effect.ExitCode.Error)
 
 final case class AgentRuntimeConfig(
     workspace: Path,

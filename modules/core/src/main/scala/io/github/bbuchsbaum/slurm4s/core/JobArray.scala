@@ -54,7 +54,7 @@ final case class ArrayElementIdentity(
 final case class ArrayElementBinding(identity: ArrayElementIdentity, job: JobRef) derives CanEqual:
   def stdout: LogRef = resolve(identity.stdout)
   def stderr: LogRef = resolve(identity.stderr)
-  def resultHandle: Option[DurableResultHandle] = identity.resultHandle.map(_.copy(job = Some(job)))
+  def resultHandle: Option[DurableResultHandle] = identity.resultHandle.map(_.boundTo(job))
 
   private def resolve(ref: LogRef): LogRef =
     ref.copy(
@@ -73,7 +73,7 @@ final case class JobArrayPlan private (
       elements.map { element =>
         ArrayElementBinding(
           element,
-          JobRef(parent.jobId, parent.cluster, Some(element.index))
+          JobRef(parent.jobId, Some(element.index))
         )
       },
       ArrayPlanFailure("array-parent-is-element", "an array parent binding cannot have an index")

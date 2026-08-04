@@ -1270,7 +1270,7 @@ enum MemoryRequest:
               <tr><td>Arbitrary <code>IO[A]</code> and closures are not serialized.</td><td><span class="status decided">Decided</span></td><td>Deployment, code identity, effects, and retry behavior must remain explicit.</td></tr>
               <tr><td><code>slurmrestd</code> is optional after CLI parity.</td><td><span class="status decided">Decided</span></td><td>Useful for throughput and site integration but not universally deployed.</td></tr>
               <tr><td>Native <code>libslurm</code> binding is excluded absent measured need.</td><td><span class="status decided">Decided</span></td><td>High platform and version cost with little initial semantic benefit.</td></tr>
-              <tr><td>Scala 3.7.4 and JDK 17 define the v1 build baseline.</td><td><span class="status decided">Decided</span></td><td>3.7.4 is the final Scala 3.7 patch selected for publication and verification; compiler minor-line changes require an explicit compatibility decision.</td></tr>
+              <tr><td>Scala 3.3.8 LTS and JDK 17 define the v1 build baseline.</td><td><span class="status decided">Decided</span></td><td>A compiler reads TASTy from its own or an earlier minor line, so publishing from the LTS line keeps 3.3 consumers. 3.8.4 is a verification-only lane; publication-line changes require an explicit compatibility decision.</td></tr>
             </tbody>
           </table>
         </div>

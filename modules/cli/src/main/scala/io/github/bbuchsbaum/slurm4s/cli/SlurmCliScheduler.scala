@@ -21,21 +21,21 @@ final class SlurmCliScheduler[F[_]: Monad](
       config <- executor.execute(SlurmCommands.configProbe, settings.commandPolicy)
     yield CapabilityParser.parse(version, parsers, accounting, config, settings.dataParser)
 
-  def submit[A](request: JobRequest[A]): F[SubmissionAttempt] =
-    planner.prepare(request).flatMap {
+  def submit(spec: LaunchSpec): F[SubmissionAttempt] =
+    planner.prepare(spec).flatMap {
       case Left(diagnostics) => SubmissionAttempt.PreparationFailed(diagnostics).pure[F]
       case Right(prepared)   => submitPrepared(prepared)
     }
 
-  def submitAt[A](
-      request: JobRequest[A],
+  def submitAt(
+      spec: LaunchSpec,
       profile: SiteProfile,
       intent: SiteIntent
   ): F[SiteSubmissionResult] =
-    profile.resolve(request, intent) match
+    profile.resolve(spec, intent) match
       case Left(failures)    => SiteSubmissionResult.PreflightRejected(failures).pure[F]
       case Right(resolution) =>
-        planner.prepare(request).flatMap {
+        planner.prepare(spec).flatMap {
           case Left(diagnostics) =>
             SiteSubmissionResult
               .Attempted(resolution, SubmissionAttempt.PreparationFailed(diagnostics))
@@ -45,7 +45,7 @@ final class SlurmCliScheduler[F[_]: Monad](
               .map(result => SiteSubmissionResult.Attempted(resolution, result))
         }
 
-  def submitPrepared[A](prepared: PreparedSubmission[A]): F[SubmissionAttempt] =
+  def submitPrepared(prepared: PreparedSubmission): F[SubmissionAttempt] =
     executor.execute(SlurmCommands.submit(prepared), settings.commandPolicy).map {
       case InvocationResult.Exited(0, stdout, stderr) =>
         val evidence = retainedBundle(stdout, stderr)
@@ -239,8 +239,7 @@ final class SlurmCliScheduler[F[_]: Monad](
       case failed: InvocationResult.SpawnFailed => CancellationAttempt.InvocationFailed(failed)
     }
 
-  private def identity(job: JobRef): (JobId, Option[ArrayIndex]) =
-    job.jobId -> job.arrayIndex
+  private def identity(job: JobRef): JobRef = job
 
   /** Bundle command streams for retention.
     *

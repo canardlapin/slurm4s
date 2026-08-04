@@ -61,7 +61,7 @@ appear in the dispatch script.
 `JobArrayPlan` rejects duplicate indices, submission keys, or attempt IDs; incompatible result
 contracts; mismatched log identities; and result handles bound to another attempt. Binding a
 parent Slurm job derives exact `jobId_index` element references. `squeue` JSON parsing prefers
-`array_job_id` and `array_task_id`; `sacct` parses `JobIDRaw` array suffixes; `scontrol` and
+`array_job_id` and `array_task_id`; `sacct` parses `JobID` array suffixes; `scontrol` and
 `scancel` target the element suffix. Missing-result detection compares base ID plus array index,
 not base ID alone.
 
@@ -115,3 +115,17 @@ unprivileged-site campaign is still required. The first Trillium probe reached t
 non-interactive environment could not complete keyboard-interactive authentication. See
 `docs/acceptance/p5-site-scale.md`; P5 must not close until a sanitized successful capture is
 reviewed.
+
+## Amendment 2026-07-30 (P8.D3)
+
+This ADR previously said `sacct` parses `JobIDRaw` array suffixes. It does not, and never did:
+`docs/compatibility.md` states the opposite — `JobIDRaw` is deliberately not requested, because it
+reports the underlying sequential id rather than the array identity the caller submitted — and
+`SlurmParsersSuite` asserts the rendered command never contains it. The ADR described behaviour the
+code forbids and a test guards against. Corrected to `JobID`.
+
+Reported state is also no longer a single flat vocabulary. `SlurmState` now carries SchedMD base
+states only; `COMPLETING`, `REQUEUED`, `REQUEUE_HOLD`, `REQUEUE_FED` and `SPECIAL_EXIT` are
+`SlurmStateFlag` values, and `ReportedState` pairs an optional base state with its flags. A surface
+that reports only a flag yields an unknown base state rather than a fabricated one, so terminality
+is `Indeterminate` instead of a guess.

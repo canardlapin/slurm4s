@@ -5,10 +5,13 @@ import cats.effect.IO
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.local.LocalLogReader
 import io.github.bbuchsbaum.slurm4s.managed.*
+import io.github.bbuchsbaum.slurm4s.protocol.AgentApi
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
 import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
 import io.github.bbuchsbaum.slurm4s.ssh.*
+
+import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -19,9 +22,9 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
   private val pageSize = ByteLimit.from(4).fold(problem => fail(problem.toString), identity)
 
   test("opaque and declared-output builders preserve distinct result contracts") {
-    val source = ScriptSource.Inline(
+    val source = ScriptSource.unsafeInlineScript(
       "analysis.sh",
-      "#!/bin/sh\ntrue\n".getBytes(StandardCharsets.UTF_8).toVector
+      ByteVector.view("#!/bin/sh\ntrue\n".getBytes(StandardCharsets.UTF_8))
     )
     val exitOnly = JobRequests
       .exitOnly("opaque-1", "opaque", source, Vector.empty, resources)
@@ -33,7 +36,6 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
         source,
         Vector("--seed", "1"),
         Vector("results/model.rds"),
-        4096,
         resources
       )
       .toEither
@@ -55,12 +57,11 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
       ScriptSource.ExistingRemote("/cluster/jobs/model.R"),
       Vector.empty,
       Vector("../escape", "also//invalid"),
-      0,
       resources
     )
 
     assert(invalid.isInvalid)
-    assert(invalid.fold(_.toChain.toList.size >= 5, _ => false))
+    assert(invalid.fold(_.toChain.toList.size >= 4, _ => false))
   }
 
   test("local log pages resume from the returned cursor") {
@@ -97,7 +98,7 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
     val runner = new SshProcessRunner[IO]:
       def exchange(
           launch: SshLaunch,
-          request: Vector[Byte],
+          request: ByteVector,
           policy: SshExchangePolicy
       ): IO[SshProcessOutcome] =
         IO.raiseError(new AssertionError(s"unexpected exchange: $launch $request $policy"))
@@ -160,8 +161,8 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
   private val inertScheduler: Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
       IO.raiseError(new AssertionError("unexpected capabilities call"))
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
-      IO.raiseError(new AssertionError(s"unexpected submit: $request"))
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+      IO.raiseError(new AssertionError(s"unexpected submit: $spec"))
     def observe(
         jobs: NonEmptyVector[JobRef]
     ): IO[SchedulerQueryResult[ObservationBatch]] =
@@ -175,11 +176,11 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
 
   private def failingAgent(
       failure: AgentFailure
-  ): io.github.bbuchsbaum.slurm4s.agent.AgentApi[IO] =
-    new io.github.bbuchsbaum.slurm4s.agent.AgentApi[IO]:
+  ): AgentApi[IO] =
+    new AgentApi[IO]:
       def capabilities: IO[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
         IO.pure(AgentCall.Failed(failure))
-      def submitOpaque(request: JobRequest[NoResult]): IO[AgentCall[SubmissionAttempt]] =
+      def submitOpaque(spec: LaunchSpec): IO[AgentCall[SubmissionAttempt]] =
         IO.pure(AgentCall.Failed(failure))
       def submitRegistered(
           request: io.github.bbuchsbaum.slurm4s.protocol.RemoteRegisteredTaskRequest

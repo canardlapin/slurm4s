@@ -5,6 +5,8 @@ import cats.effect.IO
 import cats.effect.Ref
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 import scala.concurrent.duration.*
 
@@ -13,7 +15,7 @@ class ObservationScaleSuite extends munit.CatsEffectSuite:
   private val batchSize = 256
   private val observedAt = Instant.parse("2026-07-22T12:00:00Z")
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.DurableJournal, observedAt, Vector.empty)
+    BoundedEvidence.capture(EvidenceSource.DurableJournal, observedAt, ByteVector.empty)
   )
 
   test("4096 active jobs use bounded coalesced controller calls with complete fair coverage") {
@@ -51,18 +53,16 @@ class ObservationScaleSuite extends munit.CatsEffectSuite:
 
   private def attempt(index: Int): ManagedAttempt =
     val key = SubmissionKey.from(f"scale-$index%05d").toOption.get
-    val request = JobRequest(
+    val request = LaunchSpec(
       key,
       JobName.from("scale-observer").toOption.get,
-      Payload.Script(
-        ScriptSource.Inline("scale.sh", "true\n".getBytes("UTF-8").toVector),
-        Vector.empty,
-        ResultContract.ExitOnly
-      ),
+      ScriptSource.unsafeInlineScript("scale.sh", ByteVector.view("true\n".getBytes("UTF-8"))),
+      Vector.empty,
+      ResultContract.ExitOnly.descriptor,
       ResourceRequest.validate(1, 1, None, None, None).toOption.get
     )
     val intent = ManagedIntent.from(request, observedAt.minusSeconds(1)).toOption.get
-    val job = JobRef(JobId.from((100000 + index).toString).toOption.get, None, None)
+    val job = JobRef(JobId.from((100000 + index).toString).toOption.get, None)
     ManagedAttempt(
       intent,
       ManagedPhase.Bound(job),
@@ -78,7 +78,7 @@ class ObservationScaleSuite extends munit.CatsEffectSuite:
       accountingCalls: Ref[IO, Int]
   ): Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unexpected
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = unexpected
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] = unexpected
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] =
       observedCalls.update(_ :+ jobs.toVector) *> IO.pure(
         SchedulerQueryResult.Succeeded(

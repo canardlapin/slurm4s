@@ -9,6 +9,8 @@ import cats.syntax.all.*
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import scala.concurrent.duration.*
 
@@ -42,7 +44,7 @@ final class ManagedController[F[_]: Async](
   def inspect(submissionKey: SubmissionKey): F[Option[ManagedAttempt]] =
     store.attempt(submissionKey)
 
-  def submit(request: JobRequest[NoResult]): F[ManagedSubmitResult] =
+  def submit(request: LaunchSpec): F[ManagedSubmitResult] =
     Clock[F].realTimeInstant.flatMap { now =>
       ManagedIntent.from(request, now, requestPolicy) match
         case Left(problem) =>
@@ -285,9 +287,13 @@ final class ManagedController[F[_]: Async](
   ): Stream[F, CommittedEvent] =
     def loop(cursor: EventCursor): Stream[F, CommittedEvent] =
       Stream.eval(store.events(cursor, math.max(1, pageSize))).flatMap { page =>
-        val values = Stream.emits(page.events).covary[F]
-        if page.events.nonEmpty then values ++ loop(page.next)
-        else values ++ Stream.eval(Async[F].sleep(pollInterval)).drain ++ loop(page.next)
+        page match
+          case EventPage.HistoryUnavailable(gap) =>
+            Stream.raiseError[F](EventHistoryUnavailable(gap))
+          case EventPage.Available(events, next, _) =>
+            val values = Stream.emits(events).covary[F]
+            if events.nonEmpty then values ++ loop(next)
+            else values ++ Stream.eval(Async[F].sleep(pollInterval)).drain ++ loop(next)
       }
     loop(after)
 
@@ -313,10 +319,18 @@ final class ManagedController[F[_]: Async](
               .map(commitAttempt)
           }
         }
-        operation.guaranteeCase {
-          case Outcome.Succeeded(_) => Async[F].unit
-          case _                    => recoverSubmissionClaim(attempt)
-        }
+        operation
+          .guaranteeCase {
+            case Outcome.Succeeded(_) => Async[F].unit
+            case _                    => recoverSubmissionClaim(attempt)
+          }
+          // A typed rejection is also an effect that ended without a persisted result: `sbatch` may
+          // already have run, so the claim must not stay in `Submitting`. The guarantee above sees
+          // `Succeeded` for a `Left` and has already completed here, so no path recovers twice.
+          .flatTap {
+            case Left(_)  => recoverSubmissionClaim(attempt)
+            case Right(_) => Async[F].unit
+          }
 
   private def invokeCancellation(
       submissionKey: SubmissionKey,
@@ -330,14 +344,21 @@ final class ManagedController[F[_]: Async](
           .map(commitAttempt)
       }
     }
-    operation.guaranteeCase {
-      case Outcome.Succeeded(_) => Async[F].unit
-      case _                    =>
-        recoverCancellationClaim(
-          submissionKey,
-          "cancellation effect ended without a persisted result"
-        )
-    }
+    val recover = recoverCancellationClaim(
+      submissionKey,
+      "cancellation effect ended without a persisted result"
+    )
+    operation
+      .guaranteeCase {
+        case Outcome.Succeeded(_) => Async[F].unit
+        case _                    => recover
+      }
+      // As on the submission path, a typed rejection leaves `scancel` possibly already run with
+      // nothing persisted, so the claim must not stay in `Cancelling`.
+      .flatTap {
+        case Left(_)  => recover
+        case Right(_) => Async[F].unit
+      }
 
   private def recoverSubmissionClaim(attempt: ManagedAttempt): F[Unit] =
     Clock[F].realTimeInstant.flatMap { now =>
@@ -392,6 +413,6 @@ final class ManagedController[F[_]: Async](
       BoundedEvidence.capture(
         EvidenceSource.DurableJournal,
         at,
-        message.getBytes(StandardCharsets.UTF_8).toVector
+        ByteVector.view(message.getBytes(StandardCharsets.UTF_8))
       )
     )

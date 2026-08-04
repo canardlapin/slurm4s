@@ -9,6 +9,8 @@ import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.ResultEnvelopeCodec
 import io.github.bbuchsbaum.slurm4s.protocol.TaskInvocationCodec
 
+import scodec.bits.ByteVector
+
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
@@ -19,12 +21,20 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
   private val extraPath = RelativeOutputPath.from("results/debug.txt").toOption.get
   private val release = WorkerRelease(
     WorkerReleaseId.from("test-worker-1").toOption.get,
-    ContentDigest.from("sha256:test-worker-release").toOption.get
+    ContentDigest
+      .from("sha256:655bbec80c848cb7f5a6c0393c6490459beec02f8526a7c855c4f1f8b6c38410")
+      .toOption
+      .get
   )
   private val inputLimit = ByteLimit.from(1024).toOption.get
   private val resultLimit = ByteLimit.from(1024).toOption.get
   private val envelopeLimit = ByteLimit.from(65536).toOption.get
   private val outputLimit = ByteLimit.from(4096).toOption.get
+  private val terminationNotice = TerminationNotice(
+    TerminationNoticeSignal.Usr1,
+    TerminationNoticeScope.BatchShell,
+    SignalLeadSeconds.unsafeFrom(120)
+  )
 
   test("task failure persistence codes are stable") {
     val operation = ExampleTask(Vector.empty).operation.descriptor
@@ -168,9 +178,14 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           IO.raiseError(new UnsupportedOperationException("sink detail"))
         case _ => IO.unit
       }
-      val invocation = invocationFor(task, "41", Vector.empty).copy(
-        operation = task.operation.descriptor.copy(
-          inputSchema = SchemaId.from("wrong.input.v1").toOption.get
+      val invocation = invocationFor(
+        task,
+        "41",
+        Vector.empty,
+        operation = Some(
+          task.operation.descriptor.copy(
+            inputSchema = SchemaId.from("wrong.input.v1").toOption.get
+          )
         )
       )
 
@@ -322,9 +337,14 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       val registry = TaskRegistry.from(Vector(TaskRegistration(task))).toOption.get
       for
         runtime <- WorkerRuntime.create(release, registry)
-        wrongSchema = invocationFor(task, "1", Vector.empty).copy(
-          operation = task.operation.descriptor.copy(
-            inputSchema = SchemaId.from("wrong.input.v1").toOption.get
+        wrongSchema = invocationFor(
+          task,
+          "1",
+          Vector.empty,
+          operation = Some(
+            task.operation.descriptor.copy(
+              inputSchema = SchemaId.from("wrong.input.v1").toOption.get
+            )
           )
         )
         mismatch <- FileTaskContext
@@ -336,8 +356,11 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
               FileResultPublisher(root.resolve("wrong-result.json"), envelopeLimit, resultLimit)
             )
           }
-        tiny = invocationFor(task, "100", Vector.empty).copy(
-          maximumResultBytes = ByteLimit.from(1).toOption.get
+        tiny = invocationFor(
+          task,
+          "100",
+          Vector.empty,
+          maximumResultBytes = ByteLimit.from(1).toOption
         )
         oversized <- FileTaskContext
           .managed(FileTaskWorkspace(root.resolve("large")), Map.empty)
@@ -396,7 +419,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       yield
         assertEquals(
           result._1,
-          Right("input".getBytes("UTF-8").toVector)
+          Right(ByteVector.view("input".getBytes("UTF-8")))
         )
         assertEquals(result._2, Left(TaskIoFailure.InputNotDeclared(missingName)))
         assert(result._3.startsWith(root.resolve("workspace").resolve("scratch")))
@@ -414,7 +437,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         None,
         WorkloadOperation.Registered(task.operation.id, task.operation.version),
         task.operation.outputSchema,
-        "1".getBytes("UTF-8").toVector,
+        ByteVector.view("1".getBytes("UTF-8")),
         OutputManifest.empty,
         release,
         java.time.Instant.parse("2026-07-22T12:00:00Z")
@@ -458,7 +481,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         assertEquals(lines.size, events.size)
         val decoded = lines.map(line =>
           io.github.bbuchsbaum.slurm4s.protocol.WorkerEventCodec
-            .decode(s"$line\n".getBytes("UTF-8").toVector, envelopeLimit)
+            .decode(ByteVector.view(s"$line\n".getBytes("UTF-8")), envelopeLimit)
         )
         assert(decoded.forall(_.isRight))
         assertEquals(decoded.flatMap(_.toOption.map(_.sequence)).sorted, events.map(_.sequence))
@@ -482,7 +505,8 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         JobName.from("typed-scheduler-submit").toOption.get,
         payload,
         ResourceRequest.validate(1, 1, None, None, None).toEither.toOption.get,
-        retrySafety = RetrySafety.SafeForAutomaticRetry
+        retrySafety = RetrySafety.SafeForAutomaticRetry,
+        terminationNotice = Some(terminationNotice)
       )
       val executable = root.resolve("worker-distribution")
       for
@@ -512,7 +536,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       yield result match
         case RegisteredSubmissionResult.Submitted(prepared, SubmissionAttempt.Completed(_)) =>
           val retried = retryPrepared.toOption.get
-          val invocationBytes = Files.readAllBytes(prepared.invocationPath).toVector
+          val invocationBytes = ByteVector.view(Files.readAllBytes(prepared.invocationPath))
           assertEquals(
             TaskInvocationCodec.decode(invocationBytes, envelopeLimit, inputLimit),
             Right(prepared.invocation)
@@ -524,6 +548,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
             prepared.schedulerRequest.retrySafety,
             RetrySafety.SafeForAutomaticRetry
           )
+          assertEquals(prepared.schedulerRequest.terminationNotice, Some(terminationNotice))
           assertEquals(retried.invocation.attemptEpoch.value, 2L)
           assertEquals(retried.resultHandle.attemptEpoch.value, 2L)
           assertNotEquals(retried.invocationPath, prepared.invocationPath)
@@ -565,7 +590,8 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           )
         ),
         maximumConcurrent = Some(PositiveInt.from("maximumConcurrent", 1).toOption.get),
-        retrySafety = RetrySafety.NoAutomaticRetry
+        retrySafety = RetrySafety.NoAutomaticRetry,
+        terminationNotice = Some(terminationNotice)
       )
       val executable = root.resolve("worker-distribution")
       for
@@ -595,6 +621,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         case RegisteredArraySubmissionResult.Submitted(prepared, SubmissionAttempt.Completed(_)) =>
           assertEquals(prepared.schedulerRequest.array, Some(prepared.arrayRequest))
           assertEquals(prepared.schedulerRequest.retrySafety, RetrySafety.NoAutomaticRetry)
+          assertEquals(prepared.schedulerRequest.terminationNotice, Some(terminationNotice))
           assert(
             prepared.elements.toVector.forall(
               _.invocation.retrySafety == RetrySafety.NoAutomaticRetry
@@ -607,12 +634,12 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           )
           assertEquals(
             prepared.elements.toVector.map(_.invocation.inputBytes),
-            Vector("41", "99").map(_.getBytes("UTF-8").toVector)
+            Vector("41", "99").map(text => ByteVector.view(text.getBytes("UTF-8")))
           )
           assertEquals(prepared.elements.toVector.map(_.resultPath).distinct.size, 2)
           assertEquals(prepared.plan.elements.toVector.map(_.stdout.locator).distinct.size, 2)
           assertEquals(prepared.plan.elements.toVector.map(_.stderr.locator).distinct.size, 2)
-          val parent = JobRef(JobId.from("8100").toOption.get, None, None)
+          val parent = JobRef(JobId.from("8100").toOption.get, None)
           val bindings = prepared.plan.bind(parent).toOption.get.toVector
           assertEquals(
             bindings.map(_.job.arrayIndex),
@@ -624,6 +651,10 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           )
           val script = Files.readString(prepared.launchScript)
           assert(script.contains("SLURM_ARRAY_TASK_ID"))
+          assert(
+            script.indexOf("umask 077") < script.indexOf(">'"),
+            s"array element logs must be created private, got:\n$script"
+          )
           assert(script.contains("'0')"))
           assert(script.contains("'1')"))
           assert(!script.contains("'41'"))
@@ -642,15 +673,15 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
     )
     val inputCodec: InputCodec[String] = new InputCodec[String]:
       val schemaId: SchemaId = operation.inputSchema
-      def encode(value: String): Either[ResultCodecFailure, Vector[Byte]] =
-        Right(value.getBytes("UTF-8").toVector)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, String] =
+      def encode(value: String): Either[ResultCodecFailure, ByteVector] =
+        Right(ByteVector.view(value.getBytes("UTF-8")))
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, String] =
         Right(new String(bytes.toArray, "UTF-8"))
     val outputCodec: ResultCodec[Int] = new ResultCodec[Int]:
       val schemaId: ResultSchemaId = operation.outputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-        Right(value.toString.getBytes("UTF-8").toVector)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] =
+        Right(ByteVector.view(value.toString.getBytes("UTF-8")))
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] =
         bytesToInt(bytes)
     override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
 
@@ -658,13 +689,13 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       for
         _ <- context.progress(ProgressEvent("computing"))
         value <- IO.fromEither(
-          bytesToInt(input.getBytes("UTF-8").toVector).left.map(failure =>
+          bytesToInt(ByteVector.view(input.getBytes("UTF-8"))).left.map(failure =>
             new IllegalArgumentException(failure.message)
           )
         )
         _ <- writes.traverse_ { path =>
           context.outputs
-            .write(path, s"answer=${value + 1}\n".getBytes("UTF-8").toVector, outputLimit)
+            .write(path, ByteVector.view(s"answer=${value + 1}\n".getBytes("UTF-8")), outputLimit)
             .flatMap {
               case Right(_)      => IO.unit
               case Left(failure) => IO.raiseError(new IllegalStateException(failure.toString))
@@ -672,7 +703,34 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         }
       yield value + 1
 
+  /** Overrides go through TaskInvocation.from, because the bounds are the type's invariant now. */
   private def invocationFor(
+      task: ExampleTask,
+      input: String,
+      declared: Vector[RelativeOutputPath],
+      operation: Option[RegisteredOperation] = None,
+      maximumResultBytes: Option[ByteLimit] = None
+  ): TaskInvocation =
+    val base = baseInvocation(task, input, declared)
+    TaskInvocation
+      .from(
+        base.submissionKey,
+        base.attemptId,
+        base.attemptEpoch,
+        base.job,
+        operation.getOrElse(base.operation),
+        base.inputBytes,
+        base.declaredOutputs,
+        base.maximumInputBytes,
+        maximumResultBytes.getOrElse(base.maximumResultBytes),
+        base.maximumEnvelopeBytes,
+        base.maximumOutputBytes,
+        base.workerRelease,
+        base.retrySafety
+      )
+      .fold(problem => fail(problem.reason), identity)
+
+  private def baseInvocation(
       task: ExampleTask,
       input: String,
       declared: Vector[RelativeOutputPath]
@@ -710,7 +768,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       payload
     )
 
-  private def bytesToInt(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+  private def bytesToInt(bytes: ByteVector): Either[ResultCodecFailure, Int] =
     scala.util
       .Try(new String(bytes.toArray, "UTF-8").toInt)
       .toEither
@@ -732,23 +790,23 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
       def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
         IO.raiseError(new AssertionError("capabilities must not be queried"))
 
-      def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = request.payload match
-        case Payload.Script(source, _, _) =>
-          observed.set(Some(source)) *> IO.pure(
-            SubmissionAttempt.Completed(
-              Submission.Accepted(
-                JobRef(JobId.from("8100").toOption.get, None, None),
-                EvidenceBundle(
-                  BoundedEvidence.capture(
-                    EvidenceSource.WorkerEvent,
-                    java.time.Instant.parse("2026-07-22T12:00:00Z"),
-                    Vector.empty
-                  )
+      // A LaunchSpec is script-shaped by construction, so "was the task lowered to a script?"
+      // is now answered by the type. What remains worth asserting is WHICH script it lowered to.
+      def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+        observed.set(Some(spec.source)) *> IO.pure(
+          SubmissionAttempt.Completed(
+            Submission.Accepted(
+              JobRef(JobId.from("8100").toOption.get, None),
+              EvidenceBundle(
+                BoundedEvidence.capture(
+                  EvidenceSource.WorkerEvent,
+                  java.time.Instant.parse("2026-07-22T12:00:00Z"),
+                  ByteVector.empty
                 )
               )
             )
           )
-        case _ => IO.raiseError(new AssertionError("registered task was not lowered to a script"))
+        )
 
       def observe(
           _jobs: NonEmptyVector[JobRef]

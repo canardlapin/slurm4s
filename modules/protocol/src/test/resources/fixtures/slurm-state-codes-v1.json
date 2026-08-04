@@ -6,9 +6,6 @@
     "code": "running"
   },
   {
-    "code": "completing"
-  },
-  {
     "code": "completed"
   },
   {
@@ -30,16 +27,13 @@
     "code": "preempted"
   },
   {
-    "code": "requeued"
+    "code": "boot-fail"
   },
   {
-    "code": "requeue-held"
+    "code": "deadline"
   },
   {
-    "code": "requeue-federation"
-  },
-  {
-    "code": "special-exit"
+    "code": "suspended"
   },
   {
     "code": "unknown",

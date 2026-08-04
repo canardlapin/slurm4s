@@ -2,9 +2,11 @@ package io.github.bbuchsbaum.slurm4s.agent
 
 import cats.data.NonEmptyVector
 import cats.effect.IO
+import fs2.Chunk
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
+import scodec.bits.ByteVector
 
 class AgentStdioServerSuite extends munit.CatsEffectSuite:
   test("stdio command is deliberately fixed") {
@@ -32,7 +34,7 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
       AgentRuntimeConfig.WorkspaceEnvironment -> "/tmp/slurm4s-agent",
       AgentRuntimeConfig.WorkerExecutableEnvironment -> "/tmp/slurm4s-worker",
       AgentRuntimeConfig.WorkerReleaseIdEnvironment -> "worker-v1",
-      AgentRuntimeConfig.WorkerReleaseDigestEnvironment -> "sha256:worker-v1",
+      AgentRuntimeConfig.WorkerReleaseDigestEnvironment -> "sha256:50f78b480f466c542a8fc083c27c1143d0d7f571dbac6ede72f7d70cc3f3fec2",
       AgentRuntimeConfig.AllowedEnvironmentNames -> "LANG,OMP_NUM_THREADS"
     )
 
@@ -80,13 +82,13 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
       .get
 
     Stream
-      .emits(framed)
+      .chunk(Chunk.byteVector(framed))
       .covary[IO]
       .chunkN(2)
       .flatMap(Stream.chunk)
       .through(server.pipe)
       .compile
-      .toVector
+      .to(ByteVector)
       .map { bytes =>
         val decodedFrame = FrameDecoder.empty().feed(bytes).toOption.get
         assertEquals(decodedFrame._2.size, 1)
@@ -118,11 +120,11 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
     val input = frame(failing) ++ frame(following)
 
     Stream
-      .emits(input)
+      .chunk(Chunk.byteVector(input))
       .covary[IO]
       .through(AgentStdioServer[IO](handler).pipe)
       .compile
-      .toVector
+      .to(ByteVector)
       .map { bytes =>
         val responses = decodeFrames(bytes)
         assertEquals(responses.map(_.requestId), Vector(failing.requestId, following.requestId))
@@ -149,10 +151,10 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
   }
 
   test("framing corruption remains a stream failure") {
-    val invalidLength = Vector[Byte](0x7f, 0xff.toByte, 0xff.toByte, 0xff.toByte)
+    val invalidLength = ByteVector(0x7f, 0xff.toByte, 0xff.toByte, 0xff.toByte)
 
     Stream
-      .emits(invalidLength)
+      .chunk(Chunk.byteVector(invalidLength))
       .covary[IO]
       .through(AgentStdioServer[IO](unusedHandler).pipe)
       .compile
@@ -173,7 +175,7 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
 
   private val unusedScheduler: Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = unused
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] = unused
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] = unused
     def accounting(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[AccountingBatch]] = unused
     def cancel(job: JobRef): IO[CancellationAttempt] = unused
@@ -187,12 +189,12 @@ class AgentStdioServerSuite extends munit.CatsEffectSuite:
       AgentBody.Request(AgentMethod.Capabilities, io.circe.Json.obj())
     )
 
-  private def frame(request: AgentEnvelope): Vector[Byte] =
+  private def frame(request: AgentEnvelope): ByteVector =
     FrameCodec
       .encode(AgentMessageCodec.encode(request), FrameLimits.default)
       .fold(problem => fail(problem.toString), identity)
 
-  private def decodeFrames(bytes: Vector[Byte]): Vector[AgentEnvelope] =
+  private def decodeFrames(bytes: ByteVector): Vector[AgentEnvelope] =
     FrameDecoder
       .empty()
       .feed(bytes)

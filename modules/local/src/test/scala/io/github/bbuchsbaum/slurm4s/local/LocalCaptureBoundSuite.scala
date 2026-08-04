@@ -27,7 +27,7 @@ class LocalCaptureBoundSuite extends munit.CatsEffectSuite:
     LocalTestSupport.temporaryDirectory.use { root =>
       val jobs = NonEmptyVector.fromVectorUnsafe(
         (1 to jobCount).toVector.map(index =>
-          JobRef(JobId.from((5000 + index).toString).toOption.get, None, None)
+          JobRef(JobId.from((5000 + index).toString).toOption.get, None)
         )
       )
       val payload = squeueJson(jobs.toVector)
@@ -72,7 +72,7 @@ class LocalCaptureBoundSuite extends munit.CatsEffectSuite:
     LocalTestSupport.temporaryDirectory.use { root =>
       val jobs = NonEmptyVector.fromVectorUnsafe(
         (1 to jobCount).toVector.map(index =>
-          JobRef(JobId.from((6000 + index).toString).toOption.get, None, None)
+          JobRef(JobId.from((6000 + index).toString).toOption.get, None)
         )
       )
       val payload = squeueJson(jobs.toVector)
@@ -97,7 +97,7 @@ class LocalCaptureBoundSuite extends munit.CatsEffectSuite:
               case other                             => fail(s"unexpected result: $other")
             assertEquals(
               evidence.bytes.size,
-              ByteLimit.defaultEvidence.value,
+              ByteLimit.defaultEvidence.value.toLong,
               "retained evidence must respect the evidence bound"
             )
             assert(evidence.truncated, "narrowed evidence must be reported as truncated")

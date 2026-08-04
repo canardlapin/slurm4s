@@ -1,12 +1,14 @@
 package io.github.bbuchsbaum.slurm4s.core
 
+import scodec.bits.ByteVector
+
 class SiteProfileSuite extends munit.FunSuite:
   test("site resolution records portable intent and resolved defaults") {
-    val account = token("research")
-    val partition = token("cpu")
-    val module = token("python/3.12")
+    val account = AccountName.unsafeFrom("research")
+    val partition = PartitionName.unsafeFrom("cpu")
+    val module = ModuleName.unsafeFrom("python/3.12")
     val profile = SiteProfile(
-      site = token("example-hpc"),
+      site = SiteId.unsafeFrom("example-hpc"),
       defaultAccount = Some(account),
       defaultPartition = Some(partition),
       defaultMemory = Some(MemoryRequest.PerCpu(memory(1024))),
@@ -31,10 +33,10 @@ class SiteProfileSuite extends munit.FunSuite:
   }
 
   test("site preflight accumulates account, topology, memory, and native-option violations") {
-    val allowed = token("allowed")
-    val denied = token("denied")
+    val allowed = AccountName.unsafeFrom("allowed")
+    val denied = AccountName.unsafeFrom("denied")
     val profile = SiteProfile(
-      site = token("strict-hpc"),
+      site = SiteId.unsafeFrom("strict-hpc"),
       accountRequired = true,
       allowedAccounts = Some(Set(allowed)),
       allowedMemoryModes = Set(MemoryMode.PerCpu),
@@ -74,13 +76,14 @@ class SiteProfileSuite extends munit.FunSuite:
 
   test("disabled site features reject modules, containers, and unknown accelerators") {
     val profile = SiteProfile(
-      site = token("minimal-hpc"),
+      site = SiteId.unsafeFrom("minimal-hpc"),
       features = SiteFeatures(modules = false, containers = false)
     )
     val intent = SiteIntent(
-      modules = Vector(token("R/4.5")),
-      container = Some(token("analysis.sif")),
-      accelerators = Vector(AcceleratorRequest(token("gpu"), positive("gpus", 1)))
+      modules = Vector(ModuleName.unsafeFrom("R/4.5")),
+      container = Some(ContainerImage.unsafeFrom("analysis.sif")),
+      accelerators =
+        Vector(AcceleratorRequest(AcceleratorKind.unsafeFrom("gpu"), positive("gpus", 1)))
     )
 
     val failures = profile
@@ -105,7 +108,7 @@ class SiteProfileSuite extends munit.FunSuite:
     val request =
       JobArrayRequest.contiguous(positive("size", 4), Some(positive("parallel", 3))).toOption.get
     val profile = SiteProfile(
-      site = token("array-limited"),
+      site = SiteId.unsafeFrom("array-limited"),
       limits = SiteLimits(
         maximumArraySize = Some(positive("maximumArraySize", 2)),
         maximumArrayConcurrency = Some(positive("maximumArrayConcurrency", 1))
@@ -126,7 +129,27 @@ class SiteProfileSuite extends munit.FunSuite:
     )
   }
 
-  private def token(value: String): SiteToken = SiteToken.from("test", value).toOption.get
+  test("site resolution carries the requested termination notice unchanged") {
+    val notice = TerminationNotice(
+      TerminationNoticeSignal.Usr1,
+      TerminationNoticeScope.BatchShell,
+      SignalLeadSeconds.unsafeFrom(120)
+    )
+    val spec = LaunchSpec(
+      SubmissionKey.unsafeFrom("notice-site"),
+      JobName.unsafeFrom("notice"),
+      ScriptSource.unsafeInlineScript("notice.sh", ByteVector.empty),
+      Vector.empty,
+      ResultContract.ExitOnly.descriptor,
+      resources(1, Some(1), None),
+      terminationNotice = Some(notice)
+    )
+    val profile = SiteProfile(site = SiteId.unsafeFrom("notice-hpc"))
+
+    val resolution = profile.resolve(spec, SiteIntent()).toOption.get
+
+    assertEquals(resolution.effective.terminationNotice, Some(notice))
+  }
 
   private def memory(value: Long): Mebibytes = Mebibytes.from(value).toOption.get
 

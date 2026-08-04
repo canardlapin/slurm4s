@@ -6,7 +6,7 @@ Run the complete reproducible local v1 evidence gate with:
 tools/acceptance/v1-local-gate.sh
 ```
 
-It validates the requirement matrix, shell harness, Scala 3.7.4 formatting/tests, and worker
+It validates the requirement matrix, shell harness, Scala 3.3.8 formatting/tests, and worker
 package. It does not contact a cluster and cannot satisfy the external P5 evidence gates. Set
 `SLURM4S_CACHE_ROOT` when sbt and Coursier need a specific writable cache root. The audited
 status is recorded in `docs/acceptance/v1-evidence.md`.

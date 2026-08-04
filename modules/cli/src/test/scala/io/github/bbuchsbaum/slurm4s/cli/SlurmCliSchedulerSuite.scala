@@ -5,6 +5,8 @@ import cats.effect.IO
 import cats.effect.Ref
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
@@ -19,7 +21,7 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
   private val evidence = BoundedEvidence.capture(
     EvidenceSource.CommandStdout("test"),
     Instant.parse("2026-07-22T12:00:00Z"),
-    Vector.empty
+    ByteVector.empty
   )
 
   test("a single job that has left the queue is absent, not an invocation failure") {
@@ -164,7 +166,7 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
       )
     )
     val profile = SiteProfile(
-      site = token("disabled-array-site"),
+      site = SiteId.unsafeFrom("disabled-array-site"),
       features = SiteFeatures(arrays = false)
     )
     for
@@ -175,7 +177,11 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
         recordingPlanner(preparations),
         settings
       )
-      result <- scheduler.submitAt(request, profile, SiteIntent())
+      result <- scheduler.submitAt(
+        LaunchSpec.fromRequest(request).toOption.get,
+        profile,
+        SiteIntent()
+      )
       invoked <- commands.get
       prepared <- preparations.get
       _ = assert(result.isInstanceOf[SiteSubmissionResult.PreflightRejected])
@@ -185,9 +191,9 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
   }
 
   test("accepted site resolution is returned and applied to the sbatch argv") {
-    val account = token("research")
+    val account = AccountName.unsafeFrom("research")
     val profile = SiteProfile(
-      site = token("profiled-site"),
+      site = SiteId.unsafeFrom("profiled-site"),
       defaultAccount = Some(account),
       allowedAccounts = Some(Set(account)),
       accountRequired = true
@@ -200,7 +206,11 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
         recordingPlanner(preparations),
         settings
       )
-      result <- scheduler.submitAt(jobRequest, profile, SiteIntent())
+      result <- scheduler.submitAt(
+        LaunchSpec.fromRequest(jobRequest).toOption.get,
+        profile,
+        SiteIntent()
+      )
       invoked <- commands.get
       prepared <- preparations.get
       _ = result match
@@ -228,11 +238,11 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
 
   private def recordingPlanner(counter: Ref[IO, Int]): SubmissionPlanner[IO] =
     new SubmissionPlanner[IO]:
-      def prepare[A](request: JobRequest[A]): IO[Either[Diagnostics, PreparedSubmission[A]]] =
+      def prepare(spec: LaunchSpec): IO[Either[Diagnostics, PreparedSubmission]] =
         counter
           .update(_ + 1)
           .as(
-            Right(PreparedSubmission(request, "/work/job.sh", "/work/stdout", "/work/stderr"))
+            Right(PreparedSubmission(spec, "/work/job.sh", "/work/stdout", "/work/stderr"))
           )
 
   private def recordingExecutor(commands: Ref[IO, Vector[SlurmCommand]]): CommandExecutor[IO] =
@@ -240,21 +250,19 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
       def execute(command: SlurmCommand, policy: CommandPolicy): IO[InvocationResult] =
         commands.update(_ :+ command).as(InvocationResult.Exited(1, evidence, evidence))
 
-  private def token(value: String): SiteToken = SiteToken.from("test", value).toOption.get
-
-  private def jobRef(id: String): JobRef = JobRef(JobId.from(id).toOption.get, None, None)
+  private def jobRef(id: String): JobRef = JobRef(JobId.from(id).toOption.get, None)
 
   private def bytes(text: String): BoundedEvidence =
     BoundedEvidence.capture(
       EvidenceSource.CommandStdout("squeue"),
       Instant.parse("2026-07-25T12:00:00Z"),
-      text.getBytes(java.nio.charset.StandardCharsets.UTF_8).toVector
+      ByteVector.view(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
     )
 
   private def recordingPlanner(): SubmissionPlanner[IO] =
     new SubmissionPlanner[IO]:
-      def prepare[A](request: JobRequest[A]): IO[Either[Diagnostics, PreparedSubmission[A]]] =
-        IO.pure(Right(PreparedSubmission(request, "/work/job.sh", "/work/stdout", "/work/stderr")))
+      def prepare(spec: LaunchSpec): IO[Either[Diagnostics, PreparedSubmission]] =
+        IO.pure(Right(PreparedSubmission(spec, "/work/job.sh", "/work/stdout", "/work/stderr")))
 
   private def fixedExecutor(result: InvocationResult): CommandExecutor[IO] =
     new CommandExecutor[IO]:

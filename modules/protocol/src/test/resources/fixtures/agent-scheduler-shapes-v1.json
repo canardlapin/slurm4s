@@ -6,7 +6,6 @@
           "Accepted" : {
             "job" : {
               "jobId" : "4242",
-              "cluster" : "alpha",
               "arrayIndex" : 7
             },
             "evidence" : {

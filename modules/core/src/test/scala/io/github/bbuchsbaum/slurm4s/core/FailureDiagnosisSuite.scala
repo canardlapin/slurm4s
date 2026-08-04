@@ -1,18 +1,19 @@
 package io.github.bbuchsbaum.slurm4s.core
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 
 class FailureDiagnosisSuite extends munit.FunSuite:
   private val observedAt = Instant.parse("2026-07-22T12:00:00Z")
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.SchedulerText("test"), observedAt, Vector(1, 2, 3))
+    BoundedEvidence.capture(EvidenceSource.SchedulerText("test"), observedAt, ByteVector(1, 2, 3))
   )
   private val attempt =
     AttemptId.from("diagnosis-attempt").fold(problem => fail(problem.toString), identity)
   private val job = JobRef(
     JobId.from("42").fold(problem => fail(problem.toString), identity),
-    None,
     None
   )
   private val maximumItems =
@@ -151,7 +152,9 @@ class FailureDiagnosisSuite extends munit.FunSuite:
       ),
       WorkerRelease(
         WorkerReleaseId.from("worker-1").fold(problem => fail(problem.toString), identity),
-        ContentDigest.from("sha256:worker").fold(problem => fail(problem.toString), identity)
+        ContentDigest
+          .from("sha256:87eba76e7f3164534045ba922e7770fb58bbd14ad732bbf5ba6f11cc56989e6e")
+          .fold(problem => fail(problem.toString), identity)
       ),
       observedAt,
       WorkerEventPayload.Failed("python-error", "task raised")
@@ -191,7 +194,8 @@ class FailureDiagnosisSuite extends munit.FunSuite:
   }
 
   test("log recognition rejects an incoherent page cursor without throwing") {
-    val bytes = "Traceback (most recent call last)".getBytes(StandardCharsets.UTF_8).toVector
+    val bytes =
+      ByteVector.view("Traceback (most recent call last)".getBytes(StandardCharsets.UTF_8))
     val invalidPage = LogPage(
       bytes,
       LogCursor(LogOffset.from(1L).fold(problem => fail(problem.toString), identity), None),
@@ -243,7 +247,7 @@ class FailureDiagnosisSuite extends munit.FunSuite:
       start: Long,
       maximumExcerptBytes: Int = 32
   ): Vector[LogHint] =
-    val bytes = text.getBytes(StandardCharsets.UTF_8).toVector
+    val bytes = ByteVector.view(text.getBytes(StandardCharsets.UTF_8))
     val next = LogOffset
       .from(start + bytes.size.toLong)
       .fold(problem => fail(problem.toString), identity)

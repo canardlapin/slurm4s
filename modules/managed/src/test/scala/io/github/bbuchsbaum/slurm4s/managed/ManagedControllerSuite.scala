@@ -51,7 +51,7 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
       submitCalls <- Ref.of[IO, Int](0)
       scheduler = new Scheduler[IO]:
         def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-        def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
+        def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
           submitCalls.update(_ + 1) *> IO.pure(accepted)
         def observe(
             jobs: NonEmptyVector[JobRef]
@@ -271,6 +271,35 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
     yield ()
   }
 
+  test("a rejected submission record recovers the claim rather than stranding it") {
+    for
+      underlying <- InMemoryControlStore.create[IO]()
+      store = rejectingStore(
+        underlying,
+        {
+          case ControlCommand.RecordSubmission(_, _, _, _) => true
+          case _                                           => false
+        }
+      )
+      calls <- Ref.of[IO, Int](0)
+      controller = ManagedController[IO](store, schedulerWithSubmit(calls, IO.pure(accepted)))
+      key = SubmissionKey.from("record-rejected").toOption.get
+      _ <- controller.submit(request("record-rejected"))
+      dispatched <- controller.dispatchSubmission(key)
+      count <- calls.get
+      snapshot <- underlying.snapshot
+      // sbatch ran, so the claim cannot stay in Submitting: a typed rejection of the record is
+      // still an effect that ended without a persisted result, and the attempt must say so.
+      _ = assertEquals(count, 1)
+      _ = assert(dispatched.isLeft)
+      _ = assert(
+        snapshot.attempts(key).phase.isInstanceOf[ManagedPhase.AcceptanceUnknown],
+        s"expected AcceptanceUnknown, found ${snapshot.attempts(key).phase}"
+      )
+      _ = assert(snapshot.outbox.values.exists(_.status.isInstanceOf[OutboxStatus.Uncertain]))
+    yield ()
+  }
+
   test("cancellation after a cancellation claim recovers before invoking scancel") {
     for
       underlying <- InMemoryControlStore.create[IO]()
@@ -466,12 +495,31 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
     yield ()
   }
 
+  test("an event stream fails explicitly when its cursor predates retained history") {
+    for
+      underlying <- InMemoryControlStore.create[IO]()
+      calls <- Ref.of[IO, Int](0)
+      controller = ManagedController[IO](
+        gapStore(underlying, EventCursor.from(10L).toOption.get),
+        schedulerWithSubmit(calls, IO.pure(accepted))
+      )
+      result <- controller
+        .eventStream(EventCursor.origin, 1, 10.millis)
+        .compile
+        .drain
+        .attempt
+      _ = result match
+        case Left(_: EventHistoryUnavailable) => ()
+        case other => fail(s"expected an event-history failure, got $other")
+    yield ()
+  }
+
   private def schedulerWithSubmit(
       calls: Ref[IO, Int],
       result: IO[SubmissionAttempt]
   ): Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] = calls.update(_ + 1) *> result
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] = calls.update(_ + 1) *> result
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] = unused
     def accounting(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[AccountingBatch]] = unused
     def cancel(job: JobRef): IO[CancellationAttempt] = unused
@@ -482,7 +530,7 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
       result: IO[CancellationAttempt] = acknowledgedCancellation
   ): Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = unused
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
       submitCalls.update(_ + 1) *> IO.pure(accepted)
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] = unused
     def accounting(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[AccountingBatch]] = unused
@@ -517,6 +565,52 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
       _ <- cancellation.join
       outcome <- fiber.join
     yield outcome
+
+  /** Fails a matched command with a typed rejection rather than an effect failure. */
+  private def rejectingStore(
+      underlying: ControlStore[IO],
+      matches: ControlCommand => Boolean
+  ): ControlStore[IO] = new ControlStore[IO]:
+    def transact(command: ControlCommand): IO[Either[ControlFailure, ControlCommit]] =
+      if !matches(command) then underlying.transact(command)
+      else
+        IO.pure(
+          Left(ControlFailure.JournalCorrupt("record rejected by a store fault injection"))
+        )
+
+    def snapshot: IO[ControlState] = underlying.snapshot
+    def attempt(submissionKey: SubmissionKey): IO[Option[ManagedAttempt]] =
+      underlying.attempt(submissionKey)
+    def events(after: EventCursor, maximum: Int): IO[EventPage] =
+      underlying.events(after, maximum)
+    def pendingOutbox(maximum: Int): IO[Vector[OutboxEntry]] =
+      underlying.pendingOutbox(maximum)
+    def nonTerminal(maximum: Int): IO[Vector[ManagedAttempt]] =
+      underlying.nonTerminal(maximum)
+    def bound(maximum: Int): IO[Vector[ManagedAttempt]] =
+      underlying.bound(maximum)
+
+  private def gapStore(
+      underlying: ControlStore[IO],
+      minimumAvailableAfter: EventCursor
+  ): ControlStore[IO] = new ControlStore[IO]:
+    def transact(command: ControlCommand): IO[Either[ControlFailure, ControlCommit]] =
+      underlying.transact(command)
+    def snapshot: IO[ControlState] = underlying.snapshot
+    def attempt(submissionKey: SubmissionKey): IO[Option[ManagedAttempt]] =
+      underlying.attempt(submissionKey)
+    def events(after: EventCursor, maximum: Int): IO[EventPage] =
+      IO.pure(
+        EventPage.HistoryUnavailable(
+          EventHistoryGap.from(after, minimumAvailableAfter).toOption.get
+        )
+      )
+    def pendingOutbox(maximum: Int): IO[Vector[OutboxEntry]] =
+      underlying.pendingOutbox(maximum)
+    def nonTerminal(maximum: Int): IO[Vector[ManagedAttempt]] =
+      underlying.nonTerminal(maximum)
+    def bound(maximum: Int): IO[Vector[ManagedAttempt]] =
+      underlying.bound(maximum)
 
   private def pausingStore(
       underlying: ControlStore[IO],

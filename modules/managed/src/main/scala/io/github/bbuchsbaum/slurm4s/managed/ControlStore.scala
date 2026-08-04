@@ -6,11 +6,55 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.slurm4s.core.EventCursor
 import io.github.bbuchsbaum.slurm4s.core.SubmissionKey
 
-final case class EventPage(
-    events: Vector[CommittedEvent],
-    next: EventCursor,
-    endOfJournal: Boolean
+final case class InvalidEventHistoryGap(
+    requestedAfter: EventCursor,
+    minimumAvailableAfter: EventCursor
 ) derives CanEqual
+
+final case class EventHistoryGap private (
+    requestedAfter: EventCursor,
+    minimumAvailableAfter: EventCursor
+) derives CanEqual:
+  require(
+    requestedAfter.value < minimumAvailableAfter.value,
+    "an event-history gap must advance beyond the requested cursor"
+  )
+
+object EventHistoryGap:
+  def from(
+      requestedAfter: EventCursor,
+      minimumAvailableAfter: EventCursor
+  ): Either[InvalidEventHistoryGap, EventHistoryGap] =
+    Either.cond(
+      requestedAfter.value < minimumAvailableAfter.value,
+      new EventHistoryGap(requestedAfter, minimumAvailableAfter),
+      InvalidEventHistoryGap(requestedAfter, minimumAvailableAfter)
+    )
+
+  private[managed] def known(
+      requestedAfter: EventCursor,
+      minimumAvailableAfter: EventCursor
+  ): EventHistoryGap =
+    new EventHistoryGap(requestedAfter, minimumAvailableAfter)
+
+/** A bounded event page or proof that the requested cursor has been retired.
+  *
+  * Resume explicitly from `HistoryUnavailable.gap.minimumAvailableAfter`; no interpreter may
+  * silently skip from the requested cursor to its retained window.
+  */
+enum EventPage derives CanEqual:
+  case Available(
+      events: Vector[CommittedEvent],
+      next: EventCursor,
+      endOfJournal: Boolean
+  )
+  case HistoryUnavailable(gap: EventHistoryGap)
+
+final case class EventHistoryUnavailable(gap: EventHistoryGap)
+    extends RuntimeException(
+      s"event history after cursor ${gap.requestedAfter.value} was compacted; " +
+        s"resume after cursor ${gap.minimumAvailableAfter.value}"
+    )
 
 trait ControlStore[F[_]]:
   def transact(command: ControlCommand): F[Either[ControlFailure, ControlCommit]]
@@ -88,7 +132,7 @@ object ControlStore:
     val limit = math.max(0, maximum)
     val values = state.events.filter(_.cursor.value > after.value).take(limit)
     val next = values.lastOption.map(_.cursor).getOrElse(after)
-    EventPage(
+    EventPage.Available(
       values,
       next,
       endOfJournal = !state.events.exists(_.cursor.value > next.value)

@@ -22,6 +22,7 @@ enum AgentMethod(val wireName: String) derives CanEqual:
   case Cancel extends AgentMethod("cancel")
   case ReadLog extends AgentMethod("read-log")
   case ReadResult extends AgentMethod("read-result")
+  case ReadResults extends AgentMethod("read-results")
   case ReadScriptExit extends AgentMethod("read-script-exit")
 
 object AgentMethod:
@@ -84,6 +85,7 @@ enum AgentFeature(val wireName: String) derives CanEqual:
   case TypedResults extends AgentFeature("typed-results")
   case TypedBatches extends AgentFeature("typed-batches")
   case ScriptBatches extends AgentFeature("script-batches")
+  case TerminationNotices extends AgentFeature("termination-notices")
 
 object AgentFeature:
   def fromWireName(raw: String): Option[AgentFeature] = values.find(_.wireName == raw)

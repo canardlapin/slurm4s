@@ -5,7 +5,6 @@ import cats.effect.Ref
 import cats.effect.kernel.Concurrent
 import cats.syntax.all.*
 import io.circe.Json
-import io.github.bbuchsbaum.slurm4s.agent.AgentApi
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 
@@ -30,17 +29,22 @@ final class SshAgentApi[F[_]: Concurrent] private (
   def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
     call(AgentMethod.Capabilities, Json.obj(), AgentDomainJson.decodeCapabilities)
 
-  def submitOpaque(request: JobRequest[NoResult]): F[AgentCall[SubmissionAttempt]] =
-    AgentDomainJson.encodeSubmitRequest(request) match
-      case Left(problem)  => protocolFailure(problem).pure[F]
-      case Right(payload) =>
-        call(AgentMethod.SubmitOpaque, payload, AgentDomainJson.decodeSubmission)
+  def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
+    if !supportsTerminationNotice(spec.terminationNotice) then
+      protocolFailure("termination notices were not negotiated").pure[F]
+    else
+      AgentDomainJson.encodeSubmitRequest(spec) match
+        case Left(problem)  => protocolFailure(problem).pure[F]
+        case Right(payload) =>
+          call(AgentMethod.SubmitOpaque, payload, AgentDomainJson.decodeSubmission)
 
   def submitRegistered(
       request: RemoteRegisteredTaskRequest
   ): F[AgentCall[RemoteRegisteredSubmission]] =
     if !handshake.availableFeatures.contains(AgentFeature.RegisteredTasks) then
       protocolFailure("registered tasks were not negotiated").pure[F]
+    else if !supportsTerminationNotice(request.terminationNotice) then
+      protocolFailure("termination notices were not negotiated").pure[F]
     else
       AgentDomainJson.encodeRemoteTaskRequest(request) match
         case Left(problem)  => protocolFailure(problem).pure[F]
@@ -56,6 +60,8 @@ final class SshAgentApi[F[_]: Concurrent] private (
   ): F[AgentCall[RemoteRegisteredBatchSubmission]] =
     if !handshake.availableFeatures.contains(AgentFeature.TypedBatches) then
       protocolFailure("typed batches were not negotiated").pure[F]
+    else if !supportsTerminationNotice(request.terminationNotice) then
+      protocolFailure("termination notices were not negotiated").pure[F]
     else
       AgentDomainJson.encodeRemoteBatchRequest(request) match
         case Left(problem)  => protocolFailure(problem).pure[F]
@@ -71,6 +77,8 @@ final class SshAgentApi[F[_]: Concurrent] private (
   ): F[AgentCall[RemoteScriptBatchSubmission]] =
     if !handshake.availableFeatures.contains(AgentFeature.ScriptBatches) then
       protocolFailure("script batches were not negotiated").pure[F]
+    else if !supportsTerminationNotice(request.terminationNotice) then
+      protocolFailure("termination notices were not negotiated").pure[F]
     else
       AgentDomainJson.encodeRemoteScriptBatchRequest(request) match
         case Left(problem)  => protocolFailure(problem).pure[F]
@@ -142,6 +150,35 @@ final class SshAgentApi[F[_]: Concurrent] private (
         case None =>
           protocolFailure("the negotiated frame cannot carry typed results").pure[F]
 
+  /** Read several results in one exchange.
+    *
+    * `maximumBytes` bounds EACH result, so a group is admitted only when the whole group fits the
+    * negotiated typed-result budget. An oversized group is a protocol failure, never a truncated
+    * answer.
+    */
+  def readResults(
+      refs: NonEmptyVector[RemoteResultRef],
+      maximumBytes: ByteLimit
+  ): F[AgentCall[NonEmptyVector[RemoteResultRead]]] =
+    if !handshake.availableFeatures.contains(AgentFeature.TypedResults) then
+      protocolFailure("typed results were not negotiated").pure[F]
+    else
+      AgentFrameBudget.maximumTypedResultBytes(handshake.maximumFrameBytes) match
+        case Some(maximum)
+            if maximumBytes.value.toLong * refs.length.toLong <= maximum.value.toLong =>
+          call(
+            AgentMethod.ReadResults,
+            AgentDomainJson.encodeRemoteResultReadsRequest(refs, maximumBytes),
+            AgentDomainJson.decodeRemoteResultReads(_, maximumBytes)
+          )
+        case Some(maximum) =>
+          protocolFailure(
+            s"a group of ${refs.length} results bounded at ${maximumBytes.value} bytes each " +
+              s"exceeds the negotiated maximum ${maximum.value}"
+          ).pure[F]
+        case None =>
+          protocolFailure("the negotiated frame cannot carry typed results").pure[F]
+
   def readScriptExit(
       ref: RemoteScriptExitRef
   ): F[AgentCall[RemoteScriptExitRead]] =
@@ -196,6 +233,9 @@ final class SshAgentApi[F[_]: Concurrent] private (
   private def protocolFailure[A](problem: String): AgentCall[A] =
     AgentCall.Failed(AgentFailure.ProtocolViolation(problem, None))
 
+  private def supportsTerminationNotice(notice: Option[TerminationNotice]): Boolean =
+    notice.isEmpty || handshake.availableFeatures.contains(AgentFeature.TerminationNotices)
+
 object SshAgentApi:
   def connect[F[_]: Concurrent](
       wire: SshAgentWireClient[F],
@@ -208,7 +248,8 @@ object SshAgentApi:
         AgentFeature.RegisteredTasks,
         AgentFeature.TypedResults,
         AgentFeature.TypedBatches,
-        AgentFeature.ScriptBatches
+        AgentFeature.ScriptBatches,
+        AgentFeature.TerminationNotices
       )
   ): F[AgentCall[SshAgentApi[F]]] =
     Ref.of[F, Long](0L).flatMap { sequence =>

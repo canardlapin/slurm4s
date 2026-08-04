@@ -18,9 +18,12 @@ import io.github.bbuchsbaum.slurm4s.cli.SlurmCommand
 import io.github.bbuchsbaum.slurm4s.cli.SlurmExecutable
 import io.github.bbuchsbaum.slurm4s.core.*
 
+import scodec.bits.ByteVector
+
 import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.nio.file.NoSuchFileException
+import scala.util.control.NonFatal
 import java.util.Locale
 import scala.concurrent.duration.*
 
@@ -82,6 +85,13 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
           Resource.eval(spawnFailure(command, spawnFailureKindOf(error), error))
         case error: SecurityException =>
           Resource.eval(spawnFailure(command, SpawnFailureKind.PermissionDenied, error))
+        // ProcessBuilder also rejects invalid process values with unchecked exceptions —
+        // IllegalArgumentException for a malformed command vector, UnsupportedOperationException
+        // where the platform refuses the request, NullPointerException for a null element. Those
+        // are spawn failures like any other and must stay inside InvocationResult rather than
+        // escaping the typed outcome algebra as a raised throwable.
+        case NonFatal(error) =>
+          Resource.eval(spawnFailure(command, SpawnFailureKind.EnvironmentInvalid, error))
         case error => Resource.eval(Async[F].raiseError(error))
       }
 
@@ -187,7 +197,7 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
       val evidence = BoundedEvidence.capture(
         EvidenceSource.CommandLaunch(command.executable.fileName),
         observedAt,
-        Vector.empty
+        ByteVector.empty
       )
       InvocationResult.SpawnFailed(
         SpawnFailureKind.EnvironmentInvalid,
@@ -207,7 +217,7 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
       val evidence = BoundedEvidence.capture(
         EvidenceSource.CommandLaunch(command.executable.fileName),
         observedAt,
-        Vector.empty
+        ByteVector.empty
       )
       InvocationResult.SpawnFailed(
         SpawnFailureKind.ExecutableMissing,
@@ -231,7 +241,7 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
       val evidence = BoundedEvidence.capture(
         EvidenceSource.CommandLaunch(command.executable.fileName),
         observedAt,
-        Vector.empty
+        ByteVector.empty
       )
       Left(
         InvocationResult.SpawnFailed(
@@ -248,14 +258,17 @@ final class Fs2CommandExecutor[F[_]: Async](settings: LocalCommandSettings)(usin
       )
     }
 
-final private case class CaptureState(bytes: Vector[Byte], totalBytes: Long):
+final private case class CaptureState(bytes: ByteVector, totalBytes: Long):
   def append(chunk: Chunk[Byte], limit: ByteLimit): CaptureState =
-    val remaining = math.max(0, limit.value - bytes.size)
-    val retained = if remaining == 0 then Vector.empty else chunk.take(remaining).toVector
+    // Bounded by an Int-valued limit, so narrowing for Chunk.take cannot overflow. The chunk
+    // converts to owned bytes directly rather than through a boxed intermediate.
+    val remaining = math.max(0L, limit.value.toLong - bytes.size)
+    val retained =
+      if remaining == 0L then ByteVector.empty else chunk.take(remaining.toInt).toByteVector
     CaptureState(bytes ++ retained, totalBytes + chunk.size.toLong)
 
   def evidence(source: EvidenceSource, observedAt: java.time.Instant): BoundedEvidence =
     BoundedEvidence.fromCapture(source, observedAt, bytes, totalBytes)
 
 private object CaptureState:
-  val empty: CaptureState = CaptureState(Vector.empty, 0L)
+  val empty: CaptureState = CaptureState(ByteVector.empty, 0L)

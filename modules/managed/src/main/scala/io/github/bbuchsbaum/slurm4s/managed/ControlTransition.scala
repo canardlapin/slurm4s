@@ -74,6 +74,8 @@ enum ControlFailure derives CanEqual:
   case EpochExhausted(submissionKey: SubmissionKey)
   case OutboxInvariant(submissionKey: SubmissionKey, message: String)
   case JournalCorrupt(message: String)
+  case JournalIo(message: String)
+  case JournalExhausted(message: String)
   case JournalLocked(path: String)
 
 enum ControlResult derives CanEqual:
@@ -156,16 +158,14 @@ object ControlTransition:
           OutboxStatus.Pending,
           intent.recordedAt
         )
-        Right(
-          commit(
-            state.copy(
-              attempts = state.attempts.updated(intent.submissionKey, attempt),
-              outbox = state.outbox.updated(outbox.id, outbox)
-            ),
-            ControlResult.IntentCreated(attempt),
-            Vector(ManagedEvent.IntentRecorded(intent)),
-            intent.recordedAt
-          )
+        commit(
+          state.copy(
+            attempts = state.attempts.updated(intent.submissionKey, attempt),
+            outbox = state.outbox.updated(outbox.id, outbox)
+          ),
+          ControlResult.IntentCreated(attempt),
+          Vector(ManagedEvent.IntentRecorded(intent)),
+          intent.recordedAt
         )
 
   private def retrySubmission(
@@ -179,7 +179,7 @@ object ControlTransition:
       retryAuthorized(current, authorization).flatMap { _ =>
         current.intent.epoch.next.left
           .map(_ => ControlFailure.EpochExhausted(key))
-          .map { nextEpoch =>
+          .flatMap { nextEpoch =>
             val nextIntent = current.intent.copy(epoch = nextEpoch)
             val updated = current.copy(
               intent = nextIntent,
@@ -259,16 +259,14 @@ object ControlTransition:
                 ) if epoch == current.intent.epoch =>
               val updatedAttempt = current.copy(phase = ManagedPhase.Submitting(at), updatedAt = at)
               val updatedOutbox = entry.copy(status = OutboxStatus.InFlight(at))
-              Right(
-                commit(
-                  state.copy(
-                    attempts = state.attempts.updated(key, updatedAttempt),
-                    outbox = state.outbox.updated(outboxId, updatedOutbox)
-                  ),
-                  ControlResult.SubmissionClaimed(updatedAttempt, updatedOutbox),
-                  Vector(ManagedEvent.SubmissionClaimed(key, current.intent.epoch)),
-                  at
-                )
+              commit(
+                state.copy(
+                  attempts = state.attempts.updated(key, updatedAttempt),
+                  outbox = state.outbox.updated(outboxId, updatedOutbox)
+                ),
+                ControlResult.SubmissionClaimed(updatedAttempt, updatedOutbox),
+                Vector(ManagedEvent.SubmissionClaimed(key, current.intent.epoch)),
+                at
               )
             case _ => Left(ControlFailure.OutboxInvariant(key, "pending submit outbox is missing"))
         case _: ManagedPhase.Submitting =>
@@ -323,16 +321,14 @@ object ControlTransition:
                     OutboxStatus.Completed(at)
                   )
               val updated = current.copy(phase = phase, bindings = bindings, updatedAt = at)
-              Right(
-                commit(
-                  state.copy(
-                    attempts = state.attempts.updated(key, updated),
-                    outbox = state.outbox.updated(outboxId, entry.copy(status = outboxStatus))
-                  ),
-                  ControlResult.Updated(Vector(updated)),
-                  Vector(ManagedEvent.SubmissionResolved(key, epoch, result)),
-                  at
-                )
+              commit(
+                state.copy(
+                  attempts = state.attempts.updated(key, updated),
+                  outbox = state.outbox.updated(outboxId, entry.copy(status = outboxStatus))
+                ),
+                ControlResult.Updated(Vector(updated)),
+                Vector(ManagedEvent.SubmissionResolved(key, epoch, result)),
+                at
               )
             case _ =>
               Left(ControlFailure.OutboxInvariant(key, "in-flight submit outbox is missing"))
@@ -359,24 +355,22 @@ object ControlTransition:
                 ),
                 updatedAt = at
               )
-              Right(
-                commit(
-                  state.copy(
-                    attempts = state.attempts.updated(key, updated),
-                    outbox = state.outbox.updated(
-                      outboxId,
-                      entry.copy(
-                        status = OutboxStatus.Uncertain(
-                          at,
-                          "process restarted with submission in flight"
-                        )
+              commit(
+                state.copy(
+                  attempts = state.attempts.updated(key, updated),
+                  outbox = state.outbox.updated(
+                    outboxId,
+                    entry.copy(
+                      status = OutboxStatus.Uncertain(
+                        at,
+                        "process restarted with submission in flight"
                       )
                     )
-                  ),
-                  ControlResult.Updated(Vector(updated)),
-                  Vector(ManagedEvent.SubmissionRecoveryRequired(key, epoch)),
-                  at
-                )
+                  )
+                ),
+                ControlResult.Updated(Vector(updated)),
+                Vector(ManagedEvent.SubmissionRecoveryRequired(key, epoch)),
+                at
               )
             case None => Left(ControlFailure.OutboxInvariant(key, "submit outbox is missing"))
         case _: ManagedPhase.AcceptanceUnknown =>
@@ -401,13 +395,11 @@ object ControlTransition:
             bindings = current.bindings :+ binding,
             updatedAt = at
           )
-          Right(
-            commit(
-              state.copy(attempts = state.attempts.updated(key, updated)),
-              ControlResult.Updated(Vector(updated)),
-              Vector(ManagedEvent.BindingReconciled(key, epoch, job)),
-              at
-            )
+          commit(
+            state.copy(attempts = state.attempts.updated(key, updated)),
+            ControlResult.Updated(Vector(updated)),
+            Vector(ManagedEvent.BindingReconciled(key, epoch, job)),
+            at
           )
         case ManagedPhase.Bound(existing) if existing == job =>
           Right(noChange(state, ControlResult.NoChange(Some(current))))
@@ -421,8 +413,10 @@ object ControlTransition:
       at: Instant
   ): Either[ControlFailure, ControlCommit] =
     val candidates = activeBound(state, requested.toVector.toSet)
-    val updated = result match
-      case SchedulerQueryResult.Succeeded(batch) =>
+    val updated = querySplit("active-observation-unavailable", result) match
+      case Right(batch) =>
+        // JobRef is the operational identity, so a report either names a bound attempt or it does
+        // not. There is no longer a cluster to disagree about.
         val byJob = batch.results.toVector.map(value => observationJob(value) -> value).toMap
         candidates.flatMap { case (key, current) =>
           current.currentJob.flatMap(byJob.get).map { value =>
@@ -432,8 +426,7 @@ object ControlTransition:
             )
           }
         }
-      case failure =>
-        val (diagnostics, evidence) = queryFailure("active-observation-unavailable", failure)
+      case Left((diagnostics, evidence)) =>
         candidates.map { case (key, current) =>
           val next = current.observation match
             case ManagedObservation.Current(value) =>
@@ -464,8 +457,8 @@ object ControlTransition:
       at: Instant
   ): Either[ControlFailure, ControlCommit] =
     val candidates = activeBound(state, requested.toVector.toSet)
-    val updated = result match
-      case SchedulerQueryResult.Succeeded(batch) =>
+    val updated = querySplit("accounting-unavailable", result) match
+      case Right(batch) =>
         val byJob = batch.records.toVector.map(record => record.job -> record).toMap
         candidates.flatMap { case (key, current) =>
           current.currentJob.flatMap(byJob.get).map { record =>
@@ -474,12 +467,11 @@ object ControlTransition:
               updatedAt = at
             )
             key -> record.outcome.fold(withAccounting)(outcome =>
-              terminal(withAccounting, outcome, at)
+              terminal(withAccounting, outcome, record.evidence, at)
             )
           }
         }
-      case failure =>
-        val (diagnostics, evidence) = queryFailure("accounting-unavailable", failure)
+      case Left((diagnostics, evidence)) =>
         candidates.map { case (key, current) =>
           key -> current.copy(
             accounting = ManagedAccounting.Unavailable(at, diagnostics, evidence),
@@ -516,16 +508,14 @@ object ControlTransition:
                 cancellation = ManagedCancellation.Requested(at),
                 updatedAt = at
               )
-              Right(
-                commit(
-                  state.copy(
-                    attempts = state.attempts.updated(key, updated),
-                    outbox = state.outbox.updated(entry.id, entry)
-                  ),
-                  ControlResult.CancellationQueued(updated, entry),
-                  Vector(ManagedEvent.CancellationRequested(key)),
-                  at
-                )
+              commit(
+                state.copy(
+                  attempts = state.attempts.updated(key, updated),
+                  outbox = state.outbox.updated(entry.id, entry)
+                ),
+                ControlResult.CancellationQueued(updated, entry),
+                Vector(ManagedEvent.CancellationRequested(key)),
+                at
               )
             case _ => Right(noChange(state, ControlResult.NoChange(Some(current))))
         case phase => Left(ControlFailure.InvalidPhase(key, phase, "request-cancellation"))
@@ -547,16 +537,14 @@ object ControlTransition:
                 updatedAt = at
               )
               val claimed = entry.copy(status = OutboxStatus.InFlight(at))
-              Right(
-                commit(
-                  state.copy(
-                    attempts = state.attempts.updated(key, updated),
-                    outbox = state.outbox.updated(outboxId, claimed)
-                  ),
-                  ControlResult.CancellationQueued(updated, claimed),
-                  Vector(ManagedEvent.CancellationClaimed(key)),
-                  at
-                )
+              commit(
+                state.copy(
+                  attempts = state.attempts.updated(key, updated),
+                  outbox = state.outbox.updated(outboxId, claimed)
+                ),
+                ControlResult.CancellationQueued(updated, claimed),
+                Vector(ManagedEvent.CancellationClaimed(key)),
+                at
               )
             case _ => Left(ControlFailure.OutboxInvariant(key, "pending cancel outbox is missing"))
         case (_, _, _: ManagedCancellation.Dispatching) =>
@@ -605,16 +593,14 @@ object ControlTransition:
                   OutboxStatus.Uncertain(at, "cancellation acknowledgement is unknown")
                 case _ => OutboxStatus.Completed(at)
               val updated = current.copy(cancellation = cancellation, updatedAt = at)
-              Right(
-                commit(
-                  state.copy(
-                    attempts = state.attempts.updated(key, updated),
-                    outbox = state.outbox.updated(outboxId, entry.copy(status = status))
-                  ),
-                  ControlResult.Updated(Vector(updated)),
-                  Vector(ManagedEvent.CancellationResolved(key, result)),
-                  at
-                )
+              commit(
+                state.copy(
+                  attempts = state.attempts.updated(key, updated),
+                  outbox = state.outbox.updated(outboxId, entry.copy(status = status))
+                ),
+                ControlResult.Updated(Vector(updated)),
+                Vector(ManagedEvent.CancellationResolved(key, result)),
+                at
               )
             case _ =>
               Left(ControlFailure.OutboxInvariant(key, "in-flight cancel outbox is missing"))
@@ -643,24 +629,22 @@ object ControlTransition:
                 cancellation = ManagedCancellation.Unknown(diagnostics, evidence),
                 updatedAt = at
               )
-              Right(
-                commit(
-                  state.copy(
-                    attempts = state.attempts.updated(key, updated),
-                    outbox = state.outbox.updated(
-                      outboxId,
-                      entry.copy(
-                        status = OutboxStatus.Uncertain(
-                          at,
-                          "process restarted with cancellation in flight"
-                        )
+              commit(
+                state.copy(
+                  attempts = state.attempts.updated(key, updated),
+                  outbox = state.outbox.updated(
+                    outboxId,
+                    entry.copy(
+                      status = OutboxStatus.Uncertain(
+                        at,
+                        "process restarted with cancellation in flight"
                       )
                     )
-                  ),
-                  ControlResult.Updated(Vector(updated)),
-                  Vector(ManagedEvent.CancellationRecoveryRequired(key)),
-                  at
-                )
+                  )
+                ),
+                ControlResult.Updated(Vector(updated)),
+                Vector(ManagedEvent.CancellationRecoveryRequired(key)),
+                at
               )
             case None => Left(ControlFailure.OutboxInvariant(key, "cancel outbox is missing"))
         case (_, _: ManagedCancellation.Unknown) =>
@@ -668,14 +652,15 @@ object ControlTransition:
         case _ => Left(ControlFailure.InvalidPhase(key, current.phase, "recover-cancellation"))
     }
 
+  /** Takes the evidence rather than re-reading it from `current.accounting`, so the only caller's
+    * knowledge that the accounting is current is expressed in the signature instead of a `throw`.
+    */
   private def terminal(
       current: ManagedAttempt,
       outcome: WorkloadOutcome,
+      evidence: EvidenceBundle,
       at: Instant
   ): ManagedAttempt =
-    val evidence = current.accounting match
-      case ManagedAccounting.Current(record) => record.evidence
-      case _ => throw new IllegalStateException("terminal needs accounting")
     current.copy(
       phase = ManagedPhase.Terminal(outcome, evidence),
       cancellation = current.cancellation match
@@ -716,13 +701,11 @@ object ControlTransition:
               case _ => Vector.empty
           }
         else Vector.empty
-      Right(
-        commit(
-          state.copy(attempts = attempts, outbox = outbox),
-          ControlResult.Updated(updates.map(_._2)),
-          ordinary ++ terminalEvents,
-          at
-        )
+      commit(
+        state.copy(attempts = attempts, outbox = outbox),
+        ControlResult.Updated(updates.map(_._2)),
+        ordinary ++ terminalEvents,
+        at
       )
 
   private def activeBound(
@@ -741,19 +724,26 @@ object ControlTransition:
     case ObservationResult.NotFound(job, _, _)  => job
     case ObservationResult.Failed(job, _, _, _) => job
 
-  private def queryFailure[A](
+  /** Splits a query result into its payload or the diagnostics and evidence explaining its failure.
+    *
+    * Returning the split rather than assuming a failure keeps the function total: a caller cannot
+    * reach the failure branch with a successful result, and a new `SchedulerQueryResult` case fails
+    * to compile here instead of throwing at runtime.
+    */
+  private def querySplit[A](
       code: String,
       result: SchedulerQueryResult[A]
-  ): (Diagnostics, EvidenceBundle) = result match
+  ): Either[(Diagnostics, EvidenceBundle), A] = result match
+    case SchedulerQueryResult.Succeeded(value)   => Right(value)
     case SchedulerQueryResult.Empty(_, evidence) =>
-      Diagnostics.one(Diagnostic(code, "scheduler query returned no rows")) -> evidence
+      Left(Diagnostics.one(Diagnostic(code, "scheduler query returned no rows")) -> evidence)
     case SchedulerQueryResult.InvocationFailed(invocation) =>
-      Diagnostics.one(Diagnostic(code, "scheduler query invocation failed")) -> evidenceOf(
-        invocation
+      Left(
+        Diagnostics.one(Diagnostic(code, "scheduler query invocation failed")) -> evidenceOf(
+          invocation
+        )
       )
-    case SchedulerQueryResult.ParseFailed(diagnostics, evidence) => diagnostics -> evidence
-    case SchedulerQueryResult.Succeeded(_)                       =>
-      throw new IllegalArgumentException("successful query is not a failure")
+    case SchedulerQueryResult.ParseFailed(diagnostics, evidence) => Left(diagnostics -> evidence)
 
   private def evidenceOf(invocation: InvocationResult): EvidenceBundle = invocation match
     case InvocationResult.Exited(_, stdout, stderr)   => EvidenceBundle(stdout, Vector(stderr))
@@ -788,22 +778,42 @@ object ControlTransition:
   private def noChange(state: ControlState, result: ControlResult): ControlCommit =
     ControlCommit(result, state, Vector.empty)
 
+  /** Advance the journal, refusing rather than wrapping.
+    *
+    * `StoreRevision.next` and `EventCursor.next` return `Either` because `+ 1L` past
+    * `Long.MaxValue` wraps to a negative value, silently violating each type's own non-negative
+    * invariant and inverting its `Order`. Exhaustion is unreachable in practice; representing it as
+    * a typed failure rather than an assumption is the point.
+    */
   private def commit(
       state: ControlState,
       result: ControlResult,
       events: Vector[ManagedEvent],
       at: Instant
-  ): ControlCommit =
-    if events.isEmpty then noChange(state, result)
+  ): Either[ControlFailure, ControlCommit] =
+    if events.isEmpty then Right(noChange(state, result))
     else
-      val revision = state.revision.next
-      var cursor = state.events.lastOption.map(_.cursor).getOrElse(EventCursor.origin)
-      val committed = events.map { event =>
-        cursor = cursor.next
-        CommittedEvent(cursor, revision, at, event)
-      }
-      val next = state.copy(
-        revision = revision,
-        events = state.events ++ committed
-      )
-      ControlCommit(result, next, committed)
+      val origin = state.events.lastOption.map(_.cursor).getOrElse(EventCursor.origin)
+      for
+        revision <- state.revision.next.left.map(problem =>
+          ControlFailure.JournalExhausted(problem.reason)
+        )
+        committed <- events.foldLeft(
+          Right((origin, Vector.empty[CommittedEvent])): Either[
+            ControlFailure,
+            (EventCursor, Vector[CommittedEvent])
+          ]
+        ) { case (accumulated, event) =>
+          accumulated.flatMap { case (cursor, entries) =>
+            cursor.next.left
+              .map(problem => ControlFailure.JournalExhausted(problem.reason))
+              .map(advanced => (advanced, entries :+ CommittedEvent(advanced, revision, at, event)))
+          }
+        }
+      yield
+        val entries = committed._2
+        ControlCommit(
+          result,
+          state.copy(revision = revision, events = state.events ++ entries),
+          entries
+        )

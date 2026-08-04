@@ -1,6 +1,7 @@
 package io.github.bbuchsbaum.remoteexec.kernel
 
 import cats.data.NonEmptyVector
+import scodec.bits.ByteVector
 
 import java.time.Instant
 
@@ -33,13 +34,13 @@ final case class ResultCodecFailure(code: String, message: String) derives CanEq
 
 trait ResultCodec[A]:
   def schemaId: ResultSchemaId
-  def encode(value: A): Either[ResultCodecFailure, Vector[Byte]]
-  def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, A]
+  def encode(value: A): Either[ResultCodecFailure, ByteVector]
+  def decode(bytes: ByteVector): Either[ResultCodecFailure, A]
 
 trait InputCodec[A]:
   def schemaId: SchemaId
-  def encode(value: A): Either[ResultCodecFailure, Vector[Byte]]
-  def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, A]
+  def encode(value: A): Either[ResultCodecFailure, ByteVector]
+  def decode(bytes: ByteVector): Either[ResultCodecFailure, A]
 
 enum SpawnFailureKind derives CanEqual:
   case ExecutableMissing

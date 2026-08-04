@@ -2,7 +2,12 @@ import sbt.*
 
 object Dependencies {
   object Versions {
-    val scala3 = "3.7.4"
+    // Publication baseline. Scala recommends libraries publish from the LTS line: a compiler
+    // consumes TASTy from its own or an EARLIER minor line, so publishing from 3.7 excluded every
+    // 3.3 consumer.
+    val scala3 = "3.3.8"
+    // Verification-only lane for the current regular release.
+    val scala3Next = "3.8.4"
     val cats = "2.13.0"
     val catsEffect = "3.7.0"
     val fs2 = "3.13.0"
@@ -11,6 +16,7 @@ object Dependencies {
     val munit = "1.3.0"
     val munitCatsEffect = "2.2.0"
     val scalaCheck = "1.19.0"
+    val disciplineMunit = "2.0.0"
   }
 
   object Libraries {
@@ -26,5 +32,7 @@ object Dependencies {
     val munitScalaCheck = "org.scalameta" %% "munit-scalacheck" % Versions.munit
     val munitCatsEffect = "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect
     val scalaCheck = "org.scalacheck" %% "scalacheck" % Versions.scalaCheck
+    val catsLaws = "org.typelevel" %% "cats-laws" % Versions.cats
+    val disciplineMunit = "org.typelevel" %% "discipline-munit" % Versions.disciplineMunit
   }
 }

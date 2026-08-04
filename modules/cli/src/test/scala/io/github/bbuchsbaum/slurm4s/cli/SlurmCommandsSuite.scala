@@ -35,6 +35,29 @@ class SlurmCommandsSuite extends munit.FunSuite:
     assert(command(MemoryRequest.AllNodeMemory).arguments.contains("--mem=0"))
   }
 
+  test("termination notice is one argv value with explicit Slurm scope") {
+    def command(scope: TerminationNoticeScope): SlurmCommand =
+      val notice = TerminationNotice(
+        TerminationNoticeSignal.Usr1,
+        scope,
+        SignalLeadSeconds.unsafeFrom(120)
+      )
+      SlurmCommands.submit(
+        PreparedSubmission(
+          jobRequest(MemoryRequest.AllNodeMemory).copy(terminationNotice = Some(notice)),
+          "/work/script",
+          "/work/out",
+          "/work/err"
+        )
+      )
+
+    val batch = command(TerminationNoticeScope.BatchShell).arguments
+    val steps = command(TerminationNoticeScope.JobSteps).arguments
+
+    assertEquals(batch.filter(_.startsWith("--signal=")), Vector("--signal=B:USR1@120"))
+    assertEquals(steps.filter(_.startsWith("--signal=")), Vector("--signal=USR1@120"))
+  }
+
   test("resolved site settings are emitted as argv and retain explicit environment export") {
     val request = jobRequest(MemoryRequest.PerNode(Mebibytes.from(8192).toOption.get))
       .copy(
@@ -43,13 +66,13 @@ class SlurmCommandsSuite extends munit.FunSuite:
           EnvName.unsafeFrom("LANG") -> "C.UTF-8"
         )
       )
-    val account = SiteToken.from("account", "research").toOption.get
-    val partition = SiteToken.from("partition", "compute").toOption.get
-    val qos = SiteToken.from("qos", "normal").toOption.get
-    val gpu = SiteToken.from("accelerator", "gpu:a100").toOption.get
+    val account = AccountName.unsafeFrom("research")
+    val partition = PartitionName.unsafeFrom("compute")
+    val qos = QosName.unsafeFrom("normal")
+    val gpu = AcceleratorKind.unsafeFrom("gpu:a100")
     val native = NativeOption.from("licenses", "matlab@server:1").toOption.get
     val resolution = SiteProfile(
-      site = SiteToken.from("site", "example").toOption.get,
+      site = SiteId.unsafeFrom("example"),
       defaultAccount = Some(account),
       defaultPartition = Some(partition),
       defaultQos = Some(qos),
@@ -95,7 +118,6 @@ class SlurmCommandsSuite extends munit.FunSuite:
     )
     val element = JobRef(
       JobId.from("9000").toOption.get,
-      None,
       Some(ArrayIndex.from(2).toOption.get)
     )
 
@@ -104,15 +126,13 @@ class SlurmCommandsSuite extends munit.FunSuite:
     assertEquals(SlurmCommands.focused(element).arguments.last, "9000_2")
   }
 
-  private def jobRequest(memory: MemoryRequest): JobRequest[NoResult] =
-    JobRequest(
+  private def jobRequest(memory: MemoryRequest): LaunchSpec =
+    LaunchSpec(
       submissionKey = SubmissionKey.from("submit-command-test").toOption.get,
       name = JobName.from("analysis").toOption.get,
-      payload = Payload.Script(
-        ScriptSource.ExistingRemote("/private/work/script.R"),
-        Vector("--vanilla"),
-        ResultContract.ExitOnly
-      ),
+      source = ScriptSource.ExistingRemote("/private/work/script.R"),
+      arguments = Vector("--vanilla"),
+      resultContract = ResultContract.ExitOnly.descriptor,
       resources = ResourceRequest
         .validate(2, 1, Some(1), Some(memory), WallTimeMinutes.from(10).toOption)
         .toOption

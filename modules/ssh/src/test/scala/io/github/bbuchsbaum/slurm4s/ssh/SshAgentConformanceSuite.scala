@@ -2,10 +2,13 @@ package io.github.bbuchsbaum.slurm4s.ssh
 
 import cats.data.NonEmptyVector
 import cats.effect.IO
+import fs2.Chunk
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.agent.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
+
+import scodec.bits.ByteVector
 
 import java.time.Instant
 
@@ -57,7 +60,7 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
       IO.pure(
         LogReadResult.Page(
           LogPage(
-            Vector.fill(maximum.value)(0xff.toByte),
+            ByteVector.fill(maximum.value.toLong)(0xff.toByte),
             cursor,
             endOfFile = false,
             observedAt
@@ -102,10 +105,37 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
         LogCursor.start,
         ByteLimit.from(pageLimit.value + 1).toOption.get
       )
-      _ = assertEquals(logPage(boundary).bytes.size, pageLimit.value)
+      _ = assertEquals(logPage(boundary).bytes.size, pageLimit.value.toLong)
       _ = assert(oversized.isInstanceOf[AgentCall.Failed[?]])
       _ = assertEquals(runner.exchangeCount, exchangesAfterBoundary)
     yield ()
+  }
+
+  test("a requested termination notice is refused locally when the agent did not negotiate it") {
+    val config = AgentServiceConfig.default.copy(
+      features = AgentServiceConfig.default.features - AgentFeature.TerminationNotices
+    )
+    val service = AgentService[IO](deterministicScheduler, deterministicLogs, config = config)
+    val server = AgentStdioServer[IO](
+      ServiceRequestHandler[IO](service, SchedulerRequestHandler[IO](service))
+    )
+    val runner = LoopbackSshRunner(server)
+
+    for
+      connected <- SshAgentApi.connect[IO](wireClient(runner))
+      remote = connected match
+        case AgentCall.Succeeded(value) => value
+        case AgentCall.Failed(failure)  => throw new AssertionError(failure.toString)
+      exchangesAfterHandshake = runner.exchangeCount
+      result <- remote.submitOpaque(request)
+    yield
+      assert(
+        result match
+          case AgentCall.Failed(AgentFailure.ProtocolViolation(message, _)) =>
+            message.contains("termination notices")
+          case _ => false
+      )
+      assertEquals(runner.exchangeCount, exchangesAfterHandshake)
   }
 
   private def localScenario(scheduler: Scheduler[IO]): IO[SchedulerTrace] =
@@ -147,9 +177,9 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
 
   private val observedAt = Instant.parse("2026-07-22T12:00:00Z")
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector(1, 2, 3))
+    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector(1, 2, 3))
   )
-  private val job = JobRef(JobId.from("8182").toOption.get, None, None)
+  private val job = JobRef(JobId.from("8182").toOption.get, None)
   private val freshness = Freshness.Current(observedAt)
   private val observation = JobObservation(
     job,
@@ -163,7 +193,7 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     job,
     SlurmState.Completed,
     Some(ExitStatus(0, None)),
-    Some(WorkloadOutcome.Completed(0)),
+    Some(WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero)),
     freshness,
     Map("State" -> "COMPLETED"),
     evidence
@@ -177,24 +207,32 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     CapabilitySupport.Supported,
     Vector(evidence.primary)
   )
-  private val request = JobRequest(
+  private val request = LaunchSpec(
     SubmissionKey.from("submission-ssh-1").toOption.get,
     JobName.from("opaque-remote").toOption.get,
-    Payload.Script(
-      ScriptSource.Inline("job.sh", "#!/bin/sh\ntrue\n".getBytes("UTF-8").toVector),
-      Vector("one", "two"),
-      ResultContract.ExitOnly
-    ),
+    ScriptSource
+      .unsafeInlineScript("job.sh", ByteVector.view("#!/bin/sh\ntrue\n".getBytes("UTF-8"))),
+    Vector("one", "two"),
+    ResultContract.ExitOnly.descriptor,
     ResourceRequest.validate(2, 1, None, None, None).toEither.toOption.get,
-    Map(EnvName.unsafeFrom("LANG") -> "C")
+    Map(EnvName.unsafeFrom("LANG") -> "C"),
+    terminationNotice = Some(
+      TerminationNotice(
+        TerminationNoticeSignal.Usr1,
+        TerminationNoticeScope.BatchShell,
+        SignalLeadSeconds.unsafeFrom(90)
+      )
+    )
   )
 
   private val deterministicScheduler: Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
       IO.pure(SchedulerQueryResult.Succeeded(schedulerCapabilities))
 
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
-      IO.pure(SubmissionAttempt.Completed(Submission.Accepted(job, evidence)))
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+      if spec.terminationNotice == request.terminationNotice then
+        IO.pure(SubmissionAttempt.Completed(Submission.Accepted(job, evidence)))
+      else IO.raiseError(new AssertionError("termination notice was not preserved"))
 
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] =
       IO.pure(
@@ -213,7 +251,7 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     def cancel(job: JobRef): IO[CancellationAttempt] =
       IO.pure(CancellationAttempt.Completed(CancellationResult.Acknowledged(evidence)))
 
-  private val logBytes = "abcdef".getBytes("UTF-8").toVector
+  private val logBytes = ByteVector.view("abcdef".getBytes("UTF-8"))
   private val logIdentity = FileIdentity.from("ssh-log-file").toOption.get
   private val logRef = LogRef(
     AttemptId.from("ssh-attempt").toOption.get,
@@ -243,24 +281,24 @@ final private class LoopbackSshRunner(server: AgentStdioServer[IO]) extends SshP
 
   def exchange(
       launch: SshLaunch,
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy
   ): IO[SshProcessOutcome] =
     count += 1
     Stream
-      .emits(request)
+      .chunk(Chunk.byteVector(request))
       .covary[IO]
       .chunkN(3)
       .flatMap(Stream.chunk)
       .through(server.pipe)
       .compile
-      .toVector
+      .to(ByteVector)
       .map { response =>
         val now = Instant.parse("2026-07-22T12:00:00Z")
         SshProcessOutcome.Exited(
           0,
           requestWriteCompleted = true,
           BoundedEvidence.capture(EvidenceSource.CommandStdout("ssh"), now, response),
-          BoundedEvidence.capture(EvidenceSource.CommandStderr("ssh"), now, Vector.empty)
+          BoundedEvidence.capture(EvidenceSource.CommandStderr("ssh"), now, ByteVector.empty)
         )
       }

@@ -5,6 +5,8 @@ import cats.syntax.all.*
 import io.github.bbuchsbaum.slurm4s.core.AttemptEpoch
 import io.github.bbuchsbaum.slurm4s.core.ByteLimit
 
+import scodec.bits.ByteVector
+
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
 
@@ -77,7 +79,7 @@ class LocalSubmissionPlannerSuite extends munit.CatsEffectSuite:
         LocalWorkspaceSettings(root, ByteLimit.from(1024 * 1024).toOption.get)
       )
       val request = LocalTestSupport.request("concurrent-private-stage")
-      val expected = "#!/bin/sh\nprintf result\n".getBytes.toVector
+      val expected = ByteVector.view("#!/bin/sh\nprintf result\n".getBytes)
 
       (1 to 32).toVector
         .parTraverse(_ => planner.prepareLocal(request))
@@ -85,7 +87,10 @@ class LocalSubmissionPlannerSuite extends munit.CatsEffectSuite:
           assert(outcomes.forall(_.isRight), outcomes.mkString(", "))
           val paths = outcomes.flatMap(_.toOption).map(_.submission.scriptPath).distinct
           assertEquals(paths.size, 1)
-          assertEquals(Files.readAllBytes(java.nio.file.Path.of(paths.head)).toVector, expected)
+          assertEquals(
+            ByteVector.view(Files.readAllBytes(java.nio.file.Path.of(paths.head))),
+            expected
+          )
         }
     }
   }
@@ -94,13 +99,10 @@ class LocalSubmissionPlannerSuite extends munit.CatsEffectSuite:
     LocalTestSupport.temporaryDirectory.use { root =>
       val base = LocalTestSupport.request("missing-script")
       val request = base.copy(
-        payload = io.github.bbuchsbaum.slurm4s.core.Payload.Script(
-          io.github.bbuchsbaum.slurm4s.core.ScriptSource.StagedLocal(
-            root.resolve("absent.R").toString
-          ),
-          Vector.empty,
-          io.github.bbuchsbaum.slurm4s.core.ResultContract.ExitOnly
-        )
+        source = io.github.bbuchsbaum.slurm4s.core.ScriptSource.StagedLocal(
+          root.resolve("absent.R").toString
+        ),
+        arguments = Vector.empty
       )
       val planner = LocalSubmissionPlanner[IO](
         LocalWorkspaceSettings(root, ByteLimit.from(1024 * 1024).toOption.get)
@@ -116,11 +118,8 @@ class LocalSubmissionPlannerSuite extends munit.CatsEffectSuite:
       val workspace = root.resolve("workspace")
       val base = LocalTestSupport.request("staged-script")
       val request = base.copy(
-        payload = io.github.bbuchsbaum.slurm4s.core.Payload.Script(
-          io.github.bbuchsbaum.slurm4s.core.ScriptSource.StagedLocal(source.toString),
-          Vector("--quiet"),
-          io.github.bbuchsbaum.slurm4s.core.ResultContract.ExitOnly
-        )
+        source = io.github.bbuchsbaum.slurm4s.core.ScriptSource.StagedLocal(source.toString),
+        arguments = Vector("--quiet")
       )
       val planner = LocalSubmissionPlanner[IO](
         LocalWorkspaceSettings(workspace, ByteLimit.from(1024 * 1024).toOption.get)

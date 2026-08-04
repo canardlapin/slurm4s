@@ -6,14 +6,18 @@ import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all.*
 import fs2.io.process.Processes
-import io.github.bbuchsbaum.slurm4s.agent.AgentApi
+import io.github.bbuchsbaum.slurm4s.protocol.AgentApi
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
+import io.github.bbuchsbaum.slurm4s.task.*
 import io.github.bbuchsbaum.slurm4s.local.*
 import io.github.bbuchsbaum.slurm4s.managed.*
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
 import io.github.bbuchsbaum.slurm4s.ssh.*
 import io.github.bbuchsbaum.slurm4s.worker.*
+
+import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
@@ -58,16 +62,12 @@ object JobRequests:
       source: ScriptSource,
       arguments: Vector[String],
       outputPaths: Vector[String],
-      maximumManifestBytes: Int,
       resources: ResourceRequest,
       environment: Map[String, String] = Map.empty
   ): ValidatedNec[ValidationFailure, JobRequest[OutputManifest]] =
-    val contract = (
-      outputPaths.traverse(path => RelativeOutputPath.from(path).toValidatedNec),
-      ByteLimit.from(maximumManifestBytes).toValidatedNec
-    ).tupled.andThen { case (paths, maximum) =>
-      ResultContract.DeclaredOutputs.from(paths, maximum).toValidatedNec
-    }
+    val contract = outputPaths
+      .traverse(path => RelativeOutputPath.from(path).toValidatedNec)
+      .andThen(paths => ResultContract.DeclaredOutputs.from(paths).toValidatedNec)
 
     (
       SubmissionKey.from(submissionKey).toValidatedNec,
@@ -103,7 +103,7 @@ object LocalOpaque:
       runtime: SlurmLocal[IO],
       request: JobRequest[NoResult]
   ): IO[SubmissionAttempt] =
-    runtime.submit(request)
+    runtime.submitLowered(request)
 
 object RemoteOpaque:
   def wire(
@@ -134,7 +134,18 @@ object RemoteOpaque:
       api: AgentApi[IO],
       request: JobRequest[NoResult]
   ): IO[AgentCall[SubmissionAttempt]] =
-    api.submitOpaque(request)
+    LaunchSpec
+      .fromRequest(request)
+      .fold(
+        diagnostics =>
+          IO.pure(
+            AgentCall.Failed(
+              io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
+                .ProtocolViolation(diagnostics.values.head.message, None)
+            )
+          ),
+        api.submitOpaque
+      )
 
 object LogMonitoring:
   def readLocal(
@@ -192,16 +203,16 @@ final class IncrementTask private (
 ) extends SlurmTask[Int, Int]:
   val inputCodec: InputCodec[Int] = new InputCodec[Int]:
     val schemaId: SchemaId = operation.inputSchema
-    def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-      Right(value.toString.getBytes(StandardCharsets.UTF_8).toVector)
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+    def encode(value: Int): Either[ResultCodecFailure, ByteVector] =
+      Right(ByteVector.view(value.toString.getBytes(StandardCharsets.UTF_8)))
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] =
       IncrementTask.decodeInt(bytes)
 
   val outputCodec: ResultCodec[Int] = new ResultCodec[Int]:
     val schemaId: ResultSchemaId = operation.outputSchema
-    def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-      Right(value.toString.getBytes(StandardCharsets.UTF_8).toVector)
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+    def encode(value: Int): Either[ResultCodecFailure, ByteVector] =
+      Right(ByteVector.view(value.toString.getBytes(StandardCharsets.UTF_8)))
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] =
       IncrementTask.decodeInt(bytes)
 
   override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
@@ -225,7 +236,7 @@ object IncrementTask:
       IncrementTask(OperationRef(id, version, input, output))
     }
 
-  private def decodeInt(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+  private def decodeInt(bytes: ByteVector): Either[ResultCodecFailure, Int] =
     Try(new String(bytes.toArray, StandardCharsets.UTF_8).toInt).toEither.leftMap { error =>
       ResultCodecFailure("invalid-int", Option(error.getMessage).getOrElse("invalid integer"))
     }

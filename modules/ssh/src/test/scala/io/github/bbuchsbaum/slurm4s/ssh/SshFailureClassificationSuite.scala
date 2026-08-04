@@ -5,6 +5,8 @@ import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 
+import scodec.bits.ByteVector
+
 import java.time.Instant
 
 class SshFailureClassificationSuite extends munit.CatsEffectSuite:
@@ -38,6 +40,75 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     yield ()
   }
 
+  /** P8.A4: "not found" anywhere in remote stderr must not steal the write flag.
+    *
+    * A login shell that prints `module: command not found` while the connection drops after the
+    * request frame was written would otherwise classify as `AgentUnavailable`, whose construction
+    * discards `requestWriteCompleted`. The scheduler adapter then reports a definite "never
+    * submitted" for a job that may well be queued.
+    */
+  test("remote noise containing 'not found' does not become agent absence") {
+    val dropped = SshProcessOutcome.Exited(
+      255,
+      requestWriteCompleted = true,
+      emptyEvidence(EvidenceSource.CommandStdout("ssh")),
+      textEvidence("module: command not found\nConnection closed by remote host")
+    )
+
+    client(dropped).roundTrip(request).map { result =>
+      failure(result) match
+        case AgentFailure.TransportDisconnected(afterRequestWrite, _, _) =>
+          assert(afterRequestWrite, "the completed request write must survive classification")
+        case other =>
+          fail(s"expected a transport disconnect that preserves the write flag, observed $other")
+    }
+  }
+
+  test("a remote permission-denied message is not mistaken for ssh authentication failure") {
+    val dropped = SshProcessOutcome.Exited(
+      255,
+      requestWriteCompleted = true,
+      emptyEvidence(EvidenceSource.CommandStdout("ssh")),
+      textEvidence("cat: /scratch/secret: Permission denied\nConnection closed by remote host")
+    )
+
+    client(dropped).roundTrip(request).map { result =>
+      failure(result) match
+        case AgentFailure.TransportDisconnected(afterRequestWrite, _, _) =>
+          assert(afterRequestWrite, "the completed request write must survive classification")
+        case other => fail(s"expected a transport disconnect, observed $other")
+    }
+  }
+
+  test("exit 126 after request write preserves uncertainty without an agent marker") {
+    val ambiguous = SshProcessOutcome.Exited(
+      126,
+      requestWriteCompleted = true,
+      emptyEvidence(EvidenceSource.CommandStdout("ssh")),
+      textEvidence("")
+    )
+
+    client(ambiguous).roundTrip(request).map { result =>
+      failure(result) match
+        case AgentFailure.TransportDisconnected(afterRequestWrite, _, _) =>
+          assert(afterRequestWrite)
+        case other => fail(s"expected a transport disconnect, observed $other")
+    }
+  }
+
+  test("exit 126 before request write is definite agent absence") {
+    val absent = SshProcessOutcome.Exited(
+      126,
+      requestWriteCompleted = false,
+      emptyEvidence(EvidenceSource.CommandStdout("ssh")),
+      textEvidence("")
+    )
+
+    client(absent).roundTrip(request).map { result =>
+      assert(failure(result).isInstanceOf[AgentFailure.AgentUnavailable])
+    }
+  }
+
   test("valid remote CLI failure is not collapsed into a transport failure") {
     val response = request.withBody(
       AgentBody.Response(
@@ -47,6 +118,31 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     )
     client(success(response)).roundTrip(request).map { result =>
       assert(failure(result).isInstanceOf[AgentFailure.RemoteCliFailure])
+    }
+  }
+
+  test("a typed failure payload reconstructs its ADT case instead of the response-status default") {
+    val response = request.withBody(
+      AgentBody.Response(
+        AgentResponseStatus.DomainFailure,
+        AgentFailurePayload
+          .fromFailure(
+            AgentFailure.TransportDisconnected(
+              afterRequestWrite = true,
+              "agent lost its scheduler connection",
+              None
+            )
+          )
+          .asJson
+      )
+    )
+
+    client(success(response)).roundTrip(request).map { result =>
+      failure(result) match
+        case AgentFailure.TransportDisconnected(afterRequestWrite, diagnostic, Some(_)) =>
+          assert(afterRequestWrite)
+          assertEquals(diagnostic, "agent lost its scheduler connection")
+        case other => fail(s"expected the typed transport failure, observed $other")
     }
   }
 
@@ -102,7 +198,7 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     val runner = new SshProcessRunner[IO]:
       def exchange(
           launch: SshLaunch,
-          request: Vector[Byte],
+          request: ByteVector,
           policy: SshExchangePolicy
       ): IO[SshProcessOutcome] = IO.pure(outcome)
     val target = SshTarget.from("cluster").toOption.get
@@ -130,8 +226,8 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     BoundedEvidence.capture(
       EvidenceSource.CommandStderr("ssh"),
       Instant.EPOCH,
-      value.getBytes("UTF-8").toVector
+      ByteVector.view(value.getBytes("UTF-8"))
     )
 
   private def emptyEvidence(source: EvidenceSource): BoundedEvidence =
-    BoundedEvidence.capture(source, Instant.EPOCH, Vector.empty)
+    BoundedEvidence.capture(source, Instant.EPOCH, ByteVector.empty)

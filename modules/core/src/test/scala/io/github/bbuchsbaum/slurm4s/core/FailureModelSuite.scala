@@ -1,11 +1,13 @@
 package io.github.bbuchsbaum.slurm4s.core
 
+import scodec.bits.ByteVector
+
 class FailureModelSuite extends munit.FunSuite:
   test("scheduler rejection and unknown acceptance are distinct values") {
     val captured = BoundedEvidence.capture(
       EvidenceSource.CommandStderr("sbatch"),
       java.time.Instant.EPOCH,
-      Vector.empty
+      ByteVector.empty
     )
     val evidence = EvidenceBundle(captured)
     val diagnostics = Diagnostics.one(Diagnostic("invalid-account", "account is required"))

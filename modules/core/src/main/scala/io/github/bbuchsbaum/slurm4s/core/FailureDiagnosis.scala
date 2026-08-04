@@ -1,6 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.core
 
 import cats.data.NonEmptyVector
+import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -41,7 +42,7 @@ final case class LogExcerpt private[core] (
     ref: LogRef,
     matched: LogByteRange,
     retained: LogByteRange,
-    bytes: Vector[Byte],
+    bytes: ByteVector,
     observedAt: Instant
 ) derives CanEqual
 
@@ -53,7 +54,7 @@ final case class LogRecognitionLimits(
 ) derives CanEqual
 
 object CommonLogRecognizer:
-  final private case class Pattern(kind: LogHintKind, needle: Vector[Byte])
+  final private case class Pattern(kind: LogHintKind, needle: ByteVector)
 
   private val patterns = Vector(
     pattern(LogHintKind.MemoryPressure, "out of memory"),
@@ -71,7 +72,7 @@ object CommonLogRecognizer:
       page: LogPage,
       limits: LogRecognitionLimits
   ): Either[ValidationFailure, Vector[LogHint]] =
-    val pageStart = page.next.offset.value - page.bytes.size.toLong
+    val pageStart = page.next.offset.value - page.bytes.size
     Either
       .cond(
         pageStart >= 0L,
@@ -85,8 +86,8 @@ object CommonLogRecognizer:
         val lowered = page.bytes.map(asciiLower)
         val unique = patterns
           .flatMap { candidate =>
-            val index = indexOf(lowered, candidate.needle)
-            Option.when(index >= 0)(candidate -> index)
+            val index = lowered.indexOfSlice(candidate.needle)
+            Option.when(index >= 0L)(candidate -> index)
           }
           .groupBy(_._1.kind)
           .valuesIterator
@@ -98,16 +99,16 @@ object CommonLogRecognizer:
         unique.foldLeft[Either[ValidationFailure, Vector[LogHint]]](Right(Vector.empty)) {
           case (result, (candidate, index)) =>
             result.flatMap { hints =>
-              val matchStart = validPageStart + index.toLong
-              val matchEnd = matchStart + candidate.needle.size.toLong
+              val matchStart = validPageStart + index
+              val matchEnd = matchStart + candidate.needle.size
               val retained = retainedSlice(
                 page.bytes.size,
                 index,
                 candidate.needle.size,
-                limits.maximumExcerptBytes.value
+                limits.maximumExcerptBytes.value.toLong
               )
-              val retainedStart = validPageStart + retained._1.toLong
-              val retainedEnd = validPageStart + retained._2.toLong
+              val retainedStart = validPageStart + retained._1
+              val retainedEnd = validPageStart + retained._2
               for
                 matched <- range(matchStart, matchEnd)
                 retainedRange <- range(retainedStart, retainedEnd)
@@ -126,34 +127,22 @@ object CommonLogRecognizer:
       }
 
   private def pattern(kind: LogHintKind, value: String): Pattern =
-    Pattern(kind, value.getBytes(StandardCharsets.US_ASCII).toVector)
+    Pattern(kind, ByteVector.view(value.getBytes(StandardCharsets.US_ASCII)))
 
   private def asciiLower(value: Byte): Byte =
     if value >= 'A'.toByte && value <= 'Z'.toByte then (value + ('a' - 'A')).toByte
     else value
 
-  private def indexOf(bytes: Vector[Byte], needle: Vector[Byte]): Int =
-    if needle.isEmpty then 0
-    else
-      var start = 0
-      var found = -1
-      while found < 0 && start <= bytes.size - needle.size do
-        var offset = 0
-        while offset < needle.size && bytes(start + offset) == needle(offset) do offset += 1
-        if offset == needle.size then found = start
-        else start += 1
-      found
-
   private def retainedSlice(
-      pageSize: Int,
-      matchStart: Int,
-      matchSize: Int,
-      maximum: Int
-  ): (Int, Int) =
+      pageSize: Long,
+      matchStart: Long,
+      matchSize: Long,
+      maximum: Long
+  ): (Long, Long) =
     val retainedSize = math.min(pageSize, maximum)
-    val preferredStart = math.max(0, matchStart - math.max(0, (retainedSize - matchSize) / 2))
+    val preferredStart = math.max(0L, matchStart - math.max(0L, (retainedSize - matchSize) / 2))
     val end = math.min(pageSize, preferredStart + retainedSize)
-    math.max(0, end - retainedSize) -> end
+    math.max(0L, end - retainedSize) -> end
 
   private def range(
       start: Long,
@@ -451,18 +440,23 @@ object FailureDiagnosis:
     case SlurmState.TimedOut    => Some(FailureCause.TimeLimitExceeded)
     case SlurmState.NodeFailure => Some(FailureCause.NodeFailure)
     case SlurmState.Preempted   => Some(FailureCause.Preempted)
-    case _                      => None
+    // The node never came up, which is infrastructure rather than workload.
+    case SlurmState.BootFail => Some(FailureCause.NodeFailure)
+    // A deadline the scheduler enforced; the nearest neutral cause is a time constraint.
+    case SlurmState.Deadline => Some(FailureCause.TimeLimitExceeded)
+    case SlurmState.Pending | SlurmState.Running | SlurmState.Completed | SlurmState.Suspended |
+        SlurmState.Unknown(_) =>
+      None
 
   private def outcomeCause(value: WorkloadOutcome): Option[FailureCause] = value match
-    case WorkloadOutcome.Completed(exitCode) if exitCode != 0 =>
-      Some(FailureCause.ProgramFailed(Some(exitCode), Vector.empty))
+    case WorkloadOutcome.Completed(_)                  => None
     case WorkloadOutcome.Failed(exitCode, diagnostics) =>
       Some(FailureCause.ProgramFailed(exitCode, codes(diagnostics)))
     case WorkloadOutcome.OutOfMemory       => Some(FailureCause.OutOfMemory)
     case WorkloadOutcome.TimeLimitExceeded => Some(FailureCause.TimeLimitExceeded)
     case WorkloadOutcome.Cancelled         => Some(FailureCause.Cancelled)
     case WorkloadOutcome.NodeFailure       => Some(FailureCause.NodeFailure)
-    case _                                 => None
+    case WorkloadOutcome.Unknown(_)        => None
 
   private def logCause(value: LogHintKind): FailureCause = value match
     case LogHintKind.PythonTraceback => FailureCause.RuntimeError("python")

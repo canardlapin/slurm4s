@@ -3,18 +3,20 @@ package io.github.bbuchsbaum.slurm4s.agent
 import cats.effect.Ref
 import cats.effect.kernel.Concurrent
 import cats.syntax.all.*
+import fs2.Chunk
 import fs2.Pipe
 import fs2.Stream
-import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.protocol.AgentBody
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.AgentEnvelope
+import io.github.bbuchsbaum.slurm4s.protocol.AgentFailurePayload
 import io.github.bbuchsbaum.slurm4s.protocol.AgentMessageCodec
 import io.github.bbuchsbaum.slurm4s.protocol.AgentResponseStatus
 import io.github.bbuchsbaum.slurm4s.protocol.FrameCodec
 import io.github.bbuchsbaum.slurm4s.protocol.FrameDecoder
 import io.github.bbuchsbaum.slurm4s.protocol.FrameLimits
 import io.github.bbuchsbaum.slurm4s.protocol.HandshakeJson
+import scodec.bits.ByteVector
 
 enum AgentCommand derives CanEqual:
   case ServeStdio
@@ -47,7 +49,13 @@ final class ServiceRequestHandler[F[_]: Concurrent](
                   HandshakeJson.response(response)
                 )
               )
-            case AgentCall.Failed(failure) => protocolFailure(request, failure.toString)
+            case AgentCall.Failed(failure) =>
+              request.withBody(
+                AgentBody.Response(
+                  AgentResponseStatus.ProtocolFailure,
+                  AgentFailurePayload.fromFailure(failure).asJson
+                )
+              )
           }
     case AgentBody.Request(_, _)  => delegate.handle(request)
     case AgentBody.Response(_, _) =>
@@ -57,7 +65,7 @@ final class ServiceRequestHandler[F[_]: Concurrent](
     request.withBody(
       AgentBody.Response(
         AgentResponseStatus.ProtocolFailure,
-        Json.obj("message" -> Json.fromString(message))
+        AgentFailurePayload.protocolViolation(message).asJson
       )
     )
 
@@ -70,7 +78,7 @@ final class AgentStdioServer[F[_]: Concurrent](
       val responses = input.chunks
         .evalMap { chunk =>
           decoder.modify { current =>
-            current.feed(chunk.toVector) match
+            current.feed(chunk.toByteVector) match
               case Left(failure)         => (current, Left(AgentWireException(failure.toString)))
               case Right((next, frames)) => (next, Right(frames))
           }
@@ -90,10 +98,10 @@ final class AgentStdioServer[F[_]: Concurrent](
         .evalMap { response =>
           FrameCodec.encode(AgentMessageCodec.encode(response), limits) match
             case Left(failure) =>
-              Concurrent[F].raiseError[Vector[Byte]](AgentWireException(failure.toString))
+              Concurrent[F].raiseError[ByteVector](AgentWireException(failure.toString))
             case Right(frame) => frame.pure[F]
         }
-        .flatMap(Stream.emits)
+        .flatMap(frame => Stream.chunk(Chunk.byteVector(frame)))
 
       responses ++ Stream
         .eval(
@@ -112,11 +120,9 @@ final class AgentStdioServer[F[_]: Concurrent](
     request.withBody(
       AgentBody.Response(
         AgentResponseStatus.InternalFailure,
-        Json.obj(
-          "code" -> Json.fromString("agent-handler-failed"),
-          "message" -> Json.fromString("the remote agent could not complete the request"),
-          "causeClass" -> Json.fromString(causeClass)
-        )
+        AgentFailurePayload
+          .handlerFailure("the remote agent could not complete the request", causeClass)
+          .asJson
       )
     )
 

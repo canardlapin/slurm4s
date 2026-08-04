@@ -13,7 +13,7 @@ digests before returning a typed value.
 exit-only writes no claimed result, declared-output writes an ordinary output for independent
 inspection, and structured mode publishes the v1 envelope last.
 
-Compile-checked Scala 3.7.4 usage for local submission, framed SSH submission, declared outputs,
+Compile-checked Scala 3.3.8 usage for local submission, framed SSH submission, declared outputs,
 resumable logs, durable recovery, and typed tasks lives in
 `modules/examples/src/main/scala/io/github/bbuchsbaum/slurm4s/examples/PublicApiExamples.scala`.
 The accompanying guide is `docs/examples/public-api.md`.

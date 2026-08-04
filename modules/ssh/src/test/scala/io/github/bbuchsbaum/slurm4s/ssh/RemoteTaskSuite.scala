@@ -2,12 +2,15 @@ package io.github.bbuchsbaum.slurm4s.ssh
 
 import cats.data.NonEmptyVector
 import cats.effect.IO
+import fs2.Chunk
 import fs2.Stream
 import io.github.bbuchsbaum.slurm4s.agent.*
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.*
 import io.github.bbuchsbaum.slurm4s.testkit.SchedulerProgram
 import io.github.bbuchsbaum.slurm4s.worker.*
+
+import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -24,13 +27,21 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
     DurationMillis.from(1L).toOption.get,
     DurationMillis.from(1000L).toOption.get
   )
+  private val terminationNotice = TerminationNotice(
+    TerminationNoticeSignal.Usr1,
+    TerminationNoticeScope.BatchShell,
+    SignalLeadSeconds.unsafeFrom(120)
+  )
   private val release = WorkerRelease(
     WorkerReleaseId.from("remote-suite-worker").toOption.get,
-    ContentDigest.from("sha256:remote-suite-worker").toOption.get
+    ContentDigest
+      .from("sha256:cda5a842e205eebd05cf9c9b7b07f330686141b37efc45fbc3bcf3ca530a3379")
+      .toOption
+      .get
   )
-  private val job = JobRef(JobId.from("9001").toOption.get, None, None)
+  private val job = JobRef(JobId.from("9001").toOption.get, None)
   private val evidence = EvidenceBundle(
-    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+    BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
   )
 
   private val temporaryRoot = FunFixture[Path](
@@ -210,9 +221,21 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
           )
         }
         oversized <- handle.await
-        staleHandle = handle.resultHandle.copy(
-          attemptEpoch = AttemptEpoch.from(handle.resultHandle.attemptEpoch.value + 1L).toOption.get
-        )
+        staleHandle = DurableResultHandle
+          .from(
+            handle.resultHandle.submissionKey,
+            handle.resultHandle.attemptId,
+            AttemptEpoch.from(handle.resultHandle.attemptEpoch.value + 1L).toOption.get,
+            handle.resultHandle.job,
+            handle.resultHandle.operation,
+            handle.resultHandle.resultSchema,
+            handle.resultHandle.maximumResultBytes,
+            handle.resultHandle.maximumEnvelopeBytes,
+            handle.resultHandle.declaredOutputs,
+            handle.resultHandle.workerRelease,
+            handle.resultHandle.retrySafety
+          )
+          .fold(problem => fail(problem.reason), identity)
         validEnvelope = successEnvelope(handle, 6)
         validBytes = ResultEnvelopeCodec
           .encode(validEnvelope, envelopeLimit, resultLimit)
@@ -311,7 +334,8 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
       JobName.from("remote-increment").toOption.get,
       ResourceRequest.validate(1, 1, None, None, None).toOption.get,
       resultLimit,
-      awaitPolicy = awaitPolicy
+      awaitPolicy = awaitPolicy,
+      terminationNotice = Some(terminationNotice)
     )
 
   private def publishSuccess(
@@ -358,20 +382,20 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
     val inputCodec: InputCodec[Int] = intCodec(operation.inputSchema)
     val outputCodec: ResultCodec[Int] = new ResultCodec[Int]:
       val schemaId: ResultSchemaId = operation.outputSchema
-      def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] = encodeInt(value)
-      def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] = decodeInt(bytes)
+      def encode(value: Int): Either[ResultCodecFailure, ByteVector] = encodeInt(value)
+      def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] = decodeInt(bytes)
     override val retrySafety: RetrySafety = RetrySafety.SafeForAutomaticRetry
     def run(input: Int, context: TaskContext[IO]): IO[Int] = IO.pure(input + 1)
 
   private def intCodec(schema: SchemaId): InputCodec[Int] = new InputCodec[Int]:
     val schemaId: SchemaId = schema
-    def encode(value: Int): Either[ResultCodecFailure, Vector[Byte]] = encodeInt(value)
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] = decodeInt(bytes)
+    def encode(value: Int): Either[ResultCodecFailure, ByteVector] = encodeInt(value)
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, Int] = decodeInt(bytes)
 
-  private def encodeInt(value: Int): Either[ResultCodecFailure, Vector[Byte]] =
-    Right(value.toString.getBytes(StandardCharsets.UTF_8).toVector)
+  private def encodeInt(value: Int): Either[ResultCodecFailure, ByteVector] =
+    Right(ByteVector.view(value.toString.getBytes(StandardCharsets.UTF_8)))
 
-  private def decodeInt(bytes: Vector[Byte]): Either[ResultCodecFailure, Int] =
+  private def decodeInt(bytes: ByteVector): Either[ResultCodecFailure, Int] =
     Try(new String(bytes.toArray, StandardCharsets.UTF_8).toInt).toEither.left.map(error =>
       ResultCodecFailure("invalid-int", Option(error.getMessage).getOrElse("invalid integer"))
     )
@@ -427,13 +451,24 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
         }
       )
 
-    SchedulerProgram[IO](
+    val delegate = SchedulerProgram[IO](
       capabilities,
       _ => IO.pure(submission),
       _ => IO.pure(SchedulerQueryResult.Empty(observedAt, evidence)),
       _ => accounting,
       _ => IO.pure(CancellationAttempt.Completed(CancellationResult.Acknowledged(evidence)))
     ).scheduler
+    new Scheduler[IO]:
+      def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = delegate.capabilities
+      def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+        IO(assertEquals(spec.terminationNotice, Some(terminationNotice))) *> delegate.submit(spec)
+      def observe(
+          jobs: NonEmptyVector[JobRef]
+      ): IO[SchedulerQueryResult[ObservationBatch]] = delegate.observe(jobs)
+      def accounting(
+          jobs: NonEmptyVector[JobRef]
+      ): IO[SchedulerQueryResult[AccountingBatch]] = delegate.accounting(jobs)
+      def cancel(job: JobRef): IO[CancellationAttempt] = delegate.cancel(job)
 
 /** Injects a bounded run of transport failures, then behaves normally.
   *
@@ -449,7 +484,7 @@ final private class FlakySshRunner(delegate: SshProcessRunner[IO]) extends SshPr
 
   def exchange(
       launch: SshLaunch,
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy
   ): IO[SshProcessOutcome] =
     if remaining > 0 then
@@ -461,7 +496,7 @@ final private class FlakySshRunner(delegate: SshProcessRunner[IO]) extends SshPr
           BoundedEvidence.capture(
             EvidenceSource.CommandLaunch("ssh"),
             Instant.parse("2026-07-24T12:00:00Z"),
-            Vector.empty
+            ByteVector.empty
           )
         )
       )
@@ -473,24 +508,24 @@ final private class RemoteLoopbackRunner(server: AgentStdioServer[IO]) extends S
 
   def exchange(
       launch: SshLaunch,
-      request: Vector[Byte],
+      request: ByteVector,
       policy: SshExchangePolicy
   ): IO[SshProcessOutcome] =
     count += 1
     Stream
-      .emits(request)
+      .chunk(Chunk.byteVector(request))
       .covary[IO]
       .chunkN(5)
       .flatMap(Stream.chunk)
       .through(server.pipe)
       .compile
-      .toVector
+      .to(ByteVector)
       .map { response =>
         val now = Instant.parse("2026-07-24T12:00:00Z")
         SshProcessOutcome.Exited(
           0,
           requestWriteCompleted = true,
           BoundedEvidence.capture(EvidenceSource.CommandStdout("ssh"), now, response),
-          BoundedEvidence.capture(EvidenceSource.CommandStderr("ssh"), now, Vector.empty)
+          BoundedEvidence.capture(EvidenceSource.CommandStderr("ssh"), now, ByteVector.empty)
         )
       }

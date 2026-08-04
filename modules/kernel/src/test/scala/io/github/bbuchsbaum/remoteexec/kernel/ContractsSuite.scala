@@ -1,5 +1,7 @@
 package io.github.bbuchsbaum.remoteexec.kernel
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 
@@ -7,15 +9,15 @@ class ContractsSuite extends munit.FunSuite:
   private val utf8Codec = new InputCodec[String]:
     val schemaId: SchemaId = SchemaId.from("text/utf8-v1").toOption.get
 
-    def encode(value: String): Either[ResultCodecFailure, Vector[Byte]] =
-      val bytes = value.getBytes(StandardCharsets.UTF_8).toVector
+    def encode(value: String): Either[ResultCodecFailure, ByteVector] =
+      val bytes = ByteVector.view(value.getBytes(StandardCharsets.UTF_8))
       Either.cond(
         bytes.size <= 32,
         bytes,
         ResultCodecFailure("input-too-large", s"${bytes.size} bytes exceeds 32")
       )
 
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, String] =
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, String] =
       Either.cond(
         bytes.size <= 32,
         new String(bytes.toArray, StandardCharsets.UTF_8),
@@ -63,7 +65,9 @@ class ContractsSuite extends munit.FunSuite:
       assertEquals(roundTrip, Right(value))
     }
     assert(utf8Codec.encode("x" * 33).left.exists(_.code == "input-too-large"))
-    assert(utf8Codec.decode(Vector.fill(33)(0.toByte)).left.exists(_.code == "input-too-large"))
+    assert(
+      utf8Codec.decode(ByteVector.fill(33L)(0.toByte)).left.exists(_.code == "input-too-large")
+    )
   }
 
   test("diagnostics and freshness retain structured evidence") {
@@ -90,9 +94,10 @@ class ContractsSuite extends munit.FunSuite:
   }
 
   test("atomic digest is the shared content identity and is byte-sensitive") {
-    val left = AtomicFiles.digestOf("payload-a".getBytes(StandardCharsets.UTF_8).toVector)
-    val same = AtomicFiles.digestOf("payload-a".getBytes(StandardCharsets.UTF_8).toVector)
-    val different = AtomicFiles.digestOf("payload-b".getBytes(StandardCharsets.UTF_8).toVector)
+    val left = AtomicFiles.digestOf(ByteVector.view("payload-a".getBytes(StandardCharsets.UTF_8)))
+    val same = AtomicFiles.digestOf(ByteVector.view("payload-a".getBytes(StandardCharsets.UTF_8)))
+    val different =
+      AtomicFiles.digestOf(ByteVector.view("payload-b".getBytes(StandardCharsets.UTF_8)))
     assertEquals(left, same)
     assertNotEquals(left, different)
     assert(left.value.matches("sha256:[0-9a-f]{64}"))

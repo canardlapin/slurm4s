@@ -3,7 +3,10 @@ package io.github.bbuchsbaum.slurm4s.worker
 import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all.*
+import io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles
 import io.github.bbuchsbaum.slurm4s.core.*
+
+import scodec.bits.ByteVector
 
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
@@ -35,7 +38,8 @@ object FileTaskContext:
       workspace: FileTaskWorkspace,
       declaredInputs: Map[InputName, Path],
       reportProgress: ProgressEvent => IO[Unit] = _ => IO.unit,
-      taskLogger: TaskLogger[IO] = TaskLogger.noop
+      taskLogger: TaskLogger[IO] = TaskLogger.noop,
+      drainNoticeSource: Option[DrainNoticeSource[IO]] = None
   ): Resource[IO, TaskContext[IO]] =
     Resource.eval(IO.blocking(initialize(workspace))).map { roots =>
       new TaskContext[IO]:
@@ -46,13 +50,15 @@ object FileTaskContext:
         val scratch: Resource[IO, ScratchDirectory] = scratchResource(roots.scratch)
         def progress(event: ProgressEvent): IO[Unit] = reportProgress(event)
         val logger: TaskLogger[IO] = taskLogger
+        override val drainNotice: Option[DrainNoticeSource[IO]] = drainNoticeSource
     }
 
   def native(
       workspace: FileTaskWorkspace,
       declaredInputs: Map[InputName, Path],
       reportProgress: ProgressEvent => IO[Unit] = _ => IO.unit,
-      taskLogger: TaskLogger[IO] = TaskLogger.noop
+      taskLogger: TaskLogger[IO] = TaskLogger.noop,
+      drainNoticeSource: Option[DrainNoticeSource[IO]] = None
   ): Resource[IO, NativeTaskContext[IO]] =
     Resource.eval(IO.blocking(initialize(workspace))).map { roots =>
       new NativeTaskContext[IO]:
@@ -63,6 +69,7 @@ object FileTaskContext:
         val scratch: Resource[IO, ScratchDirectory] = scratchResource(roots.scratch)
         def progress(event: ProgressEvent): IO[Unit] = reportProgress(event)
         val logger: TaskLogger[IO] = taskLogger
+        override val drainNotice: Option[DrainNoticeSource[IO]] = drainNoticeSource
     }
 
   final private case class Roots(root: Path, output: Path, scratch: Path)
@@ -90,7 +97,7 @@ object FileTaskContext:
     def read(
         name: InputName,
         maximumBytes: ByteLimit
-    ): IO[Either[TaskIoFailure, Vector[Byte]]] =
+    ): IO[Either[TaskIoFailure, ByteVector]] =
       declared.get(name) match
         case None       => IO.pure(Left(TaskIoFailure.InputNotDeclared(name)))
         case Some(path) =>
@@ -111,7 +118,7 @@ object FileTaskContext:
 
     def write(
         path: RelativeOutputPath,
-        bytes: Vector[Byte],
+        bytes: ByteVector,
         maximumBytes: ByteLimit
     ): IO[Either[TaskIoFailure, OutputEntry]] =
       if bytes.size > maximumBytes.value then
@@ -191,7 +198,11 @@ object FileTaskContext:
         visited += 1
         if visited.toLong > maximumVisited then throw new TooManyFiles
         val path = iterator.next()
-        if Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) then
+        // Atomic publication leaves its sidecar lock beside the published file; it is machinery,
+        // not a declared output, and counting it would report every published output as unexpected.
+        if Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) &&
+          !AtomicFiles.isInfrastructure(path)
+        then
           builder += path
           count += 1
           if count > maximum then throw new TooManyFiles
@@ -201,7 +212,7 @@ object FileTaskContext:
   private def readBounded(
       path: Path,
       maximum: ByteLimit
-  ): Either[Throwable, Vector[Byte]] =
+  ): Either[Throwable, ByteVector] =
     val input = Files.newInputStream(path, StandardOpenOption.READ)
     val output = ByteArrayOutputStream()
     val buffer = new Array[Byte](8192)
@@ -217,7 +228,7 @@ object FileTaskContext:
           total += count.toLong
       Either.cond(
         total <= maximum.value.toLong,
-        output.toByteArray.toVector,
+        ByteVector.view(output.toByteArray),
         new IllegalArgumentException(s"file exceeds ${maximum.value} bytes")
       )
     catch case NonFatal(error) => Left(error)
@@ -262,7 +273,7 @@ object FileTaskContext:
         }
     finally stream.close()
 
-  private def digest(bytes: Vector[Byte]): ContentDigest =
+  private def digest(bytes: ByteVector): ContentDigest =
     val hex = MessageDigest
       .getInstance("SHA-256")
       .digest(bytes.toArray)

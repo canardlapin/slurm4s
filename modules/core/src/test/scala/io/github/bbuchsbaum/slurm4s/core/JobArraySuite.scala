@@ -5,7 +5,7 @@ class JobArraySuite extends munit.FunSuite:
     val request = JobArrayRequest.contiguous(positive(3), Some(positive(2))).toOption.get
     val elements = request.indices.toVector.map(element)
     val plan = JobArrayPlan.from(request, elements).toOption.get
-    val parent = JobRef(JobId.from("9000").toOption.get, None, None)
+    val parent = JobRef(JobId.from("9000").toOption.get, None)
 
     val bindings = plan.bind(parent).toOption.get.toVector
 
@@ -52,12 +52,14 @@ class JobArraySuite extends munit.FunSuite:
     val schema = ResultSchemaId.from("array.result.v1").toOption.get
     val release = WorkerRelease(
       WorkerReleaseId.from("worker-v1").toOption.get,
-      ContentDigest.from("sha256:worker").toOption.get
+      ContentDigest
+        .from("sha256:87eba76e7f3164534045ba922e7770fb58bbd14ad732bbf5ba6f11cc56989e6e")
+        .toOption
+        .get
     )
     val contract = ResultContractDescriptor(
       ResultMode.Structured,
       Some(schema),
-      ByteLimit.defaultEvidence,
       Vector.empty
     )
     ArrayElementIdentity(
@@ -69,21 +71,24 @@ class JobArraySuite extends munit.FunSuite:
       LogRef(attempt, AttemptEpoch.initial, LogStream.Stderr, s"/work/$suffix/stderr.log"),
       contract,
       Some(
-        DurableResultHandle(
-          key,
-          attempt,
-          AttemptEpoch.initial,
-          None,
-          WorkloadOperation.Registered(
-            OperationId.from("array.operation").toOption.get,
-            OperationVersion.from("1").toOption.get
-          ),
-          schema,
-          ByteLimit.defaultEvidence,
-          ByteLimit.defaultEvidence,
-          Vector.empty,
-          release
-        )
+        DurableResultHandle
+          .from(
+            key,
+            attempt,
+            AttemptEpoch.initial,
+            None,
+            WorkloadOperation.Registered(
+              OperationId.from("array.operation").toOption.get,
+              OperationVersion.from("1").toOption.get
+            ),
+            schema,
+            ByteLimit.defaultEvidence,
+            ByteLimit.defaultEvidence,
+            Vector.empty,
+            release
+          )
+          .toOption
+          .get
       )
     )
 

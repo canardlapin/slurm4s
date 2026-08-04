@@ -2,10 +2,13 @@ package io.github.bbuchsbaum.slurm4s.managed
 
 import cats.Order
 import cats.Show
-import io.circe.Printer
 import io.github.bbuchsbaum.remoteexec.kernel.TextIdentifier
+import io.github.bbuchsbaum.remoteexec.kernel.byteVectorCanEqual
 import io.github.bbuchsbaum.slurm4s.core.*
+import io.github.bbuchsbaum.slurm4s.core.codec.CanonicalJson
 import io.github.bbuchsbaum.slurm4s.protocol.AgentDomainJson
+
+import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -20,7 +23,14 @@ object StoreRevision:
 
   extension (revision: Type)
     def value: Long = revision
-    def next: Type = revision + 1L
+
+    /** Refuses rather than wrapping; see `EventCursor.next`. */
+    def next: Either[ValidationFailure, Type] =
+      Either.cond(
+        revision < Long.MaxValue,
+        revision + 1L,
+        ValidationFailure("storeRevision", "cannot advance beyond Long.MaxValue")
+      )
   given CanEqual[Type, Type] = CanEqual.derived
   given Order[Type] = Order.from((left, right) => java.lang.Long.compare(left, right))
   given Ordering[Type] = summon[Order[Type]].toOrdering
@@ -35,10 +45,10 @@ object SiteId extends TextIdentifier("siteId", 255)
 type SiteId = SiteId.Type
 
 final case class CanonicalRequest private (
-    bytes: Vector[Byte],
+    bytes: ByteVector,
     digest: ContentDigest
 ) derives CanEqual:
-  def decode: Either[String, JobRequest[NoResult]] =
+  def decode: Either[String, LaunchSpec] =
     io.circe.parser
       .parse(new String(bytes.toArray, StandardCharsets.UTF_8))
       .left
@@ -46,10 +56,8 @@ final case class CanonicalRequest private (
       .flatMap(AgentDomainJson.decodeSubmitRequest)
 
 object CanonicalRequest:
-  private val printer = Printer.noSpaces.copy(dropNullValues = false, sortKeys = true)
-
   def from(
-      request: JobRequest[NoResult],
+      request: LaunchSpec,
       policy: ManagedRequestPolicy = ManagedRequestPolicy.rejectEnvironmentValues
   ): Either[ManagedIntentFailure, CanonicalRequest] =
     policy
@@ -58,9 +66,9 @@ object CanonicalRequest:
       .map(ManagedIntentFailure.RequestRejected.apply)
       .flatMap(_ => encode(request).left.map(ManagedIntentFailure.CanonicalizationFailed.apply))
 
-  private def encode(request: JobRequest[NoResult]): Either[String, CanonicalRequest] =
+  private def encode(request: LaunchSpec): Either[String, CanonicalRequest] =
     AgentDomainJson.encodeSubmitRequest(request).flatMap { json =>
-      val bytes = printer.print(json).getBytes(StandardCharsets.UTF_8).toVector
+      val bytes = CanonicalJson.bytes(json)
       Either.cond(
         bytes.size <= ByteLimit.maximumCommandCapture.value,
         CanonicalRequest(bytes, digest(bytes)),
@@ -68,7 +76,7 @@ object CanonicalRequest:
       )
     }
 
-  def validated(bytes: Vector[Byte], digest: ContentDigest): Either[String, CanonicalRequest] =
+  def validated(bytes: ByteVector, digest: ContentDigest): Either[String, CanonicalRequest] =
     val actual = CanonicalRequest.digest(bytes)
     Either
       .cond(
@@ -88,7 +96,7 @@ object CanonicalRequest:
         )
       }
 
-  private def digest(bytes: Vector[Byte]): ContentDigest =
+  private def digest(bytes: ByteVector): ContentDigest =
     val value = MessageDigest
       .getInstance("SHA-256")
       .digest(bytes.toArray)
@@ -152,7 +160,7 @@ final case class ManagedIntent(
 
 object ManagedIntent:
   def from(
-      request: JobRequest[NoResult],
+      request: LaunchSpec,
       recordedAt: Instant,
       policy: ManagedRequestPolicy = ManagedRequestPolicy.rejectEnvironmentValues
   ): Either[ManagedIntentFailure, ManagedIntent] =

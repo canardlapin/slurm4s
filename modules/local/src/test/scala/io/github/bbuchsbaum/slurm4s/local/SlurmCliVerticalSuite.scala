@@ -7,6 +7,8 @@ import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.testkit.ExpectedCommand
 import io.github.bbuchsbaum.slurm4s.testkit.ScriptedCommandExecutor
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.time.Instant
@@ -26,7 +28,6 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
         prepared <- planner.prepareLocal(request).map(_.toOption.get)
         job = JobRef(
           JobId.from("1001").toOption.get,
-          Some(ClusterName.from("alpha").toOption.get),
           None
         )
         jobs = NonEmptyVector.one(job)
@@ -35,7 +36,7 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
             ExpectedCommand.exact(
               SlurmCommands.submit(prepared.submission),
               settings.commandPolicy,
-              exited(SlurmExecutable.Sbatch, "1001;alpha\n")
+              exited(SlurmExecutable.Sbatch, "1001\n")
             ),
             ExpectedCommand.exact(
               SlurmCommands.observe(jobs, parser),
@@ -160,9 +161,9 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
       val request = LocalTestSupport.request("failure-planes")
       for
         prepared <- planner.prepareLocal(request).map(_.toOption.get)
-        job = JobRef(JobId.from("1001").toOption.get, None, None)
+        job = JobRef(JobId.from("1001").toOption.get, None)
         jobs = NonEmptyVector.one(job)
-        job2 = JobRef(JobId.from("1002").toOption.get, None, None)
+        job2 = JobRef(JobId.from("1002").toOption.get, None)
         multiJobs = NonEmptyVector.of(job, job2)
         spawn = InvocationResult.SpawnFailed(
           SpawnFailureKind.ExecutableMissing,
@@ -271,5 +272,5 @@ class SlurmCliVerticalSuite extends munit.CatsEffectSuite:
       if stdout then EvidenceSource.CommandStdout(executable.fileName)
       else EvidenceSource.CommandStderr(executable.fileName),
       Instant.parse("2026-07-22T12:00:00Z"),
-      text.getBytes(StandardCharsets.UTF_8).toVector
+      ByteVector.view(text.getBytes(StandardCharsets.UTF_8))
     )

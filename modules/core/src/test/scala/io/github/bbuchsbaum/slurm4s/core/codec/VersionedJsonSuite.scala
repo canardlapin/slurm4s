@@ -4,6 +4,8 @@ import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
 import io.github.bbuchsbaum.slurm4s.core.SchemaId
 
+import scodec.bits.ByteVector
+
 import java.nio.charset.StandardCharsets
 
 class VersionedJsonSuite extends munit.FunSuite:
@@ -16,7 +18,7 @@ class VersionedJsonSuite extends munit.FunSuite:
 
   test("canonical bytes match the golden fixture exactly") {
     val stream = Option(getClass.getResourceAsStream("/fixtures/wire-envelope-v1.json")).get
-    val expected = try stream.readAllBytes().toVector
+    val expected = try ByteVector.view(stream.readAllBytes())
     finally stream.close()
 
     assertEquals(VersionedJson.encode(envelope), expected)
@@ -54,10 +56,10 @@ class VersionedJsonSuite extends munit.FunSuite:
   }
 
   test("unknown major protocol versions are rejected before payload interpretation") {
-    val bytes =
+    val bytes = ByteVector.view(
       ("""{"payload":null,"protocol":{"major":2,"minor":0},"schema":"example.echo.v1"}""" + "\n")
         .getBytes(StandardCharsets.UTF_8)
-        .toVector
+    )
 
     assertEquals(
       VersionedJson.decode(bytes),
@@ -66,7 +68,7 @@ class VersionedJsonSuite extends munit.FunSuite:
   }
 
   test("malformed UTF-8 is classified") {
-    assert(VersionedJson.decode(Vector(0xc3.toByte, 0x28.toByte)).left.exists {
+    assert(VersionedJson.decode(ByteVector(0xc3, 0x28)).left.exists {
       case CodecFailure.InvalidUtf8(_) => true
       case _                           => false
     })

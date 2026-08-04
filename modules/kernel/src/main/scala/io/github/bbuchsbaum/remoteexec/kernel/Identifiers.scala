@@ -9,7 +9,7 @@ import cats.Show
   */
 final case class ValidationFailure(field: String, reason: String) derives CanEqual
 
-private object IdentifierRules:
+private[kernel] object IdentifierRules:
   def text(field: String, raw: String, maxLength: Int): Either[ValidationFailure, String] =
     if raw == null then Left(ValidationFailure(field, "must not be null"))
     else if raw.isEmpty then Left(ValidationFailure(field, "must not be empty"))
@@ -34,6 +34,9 @@ abstract class TextIdentifier(field: String, maximumLength: Int):
   def unsafeFrom(raw: String): Type =
     from(raw).fold(problem => throw new IllegalArgumentException(problem.reason), identity)
 
+  /** Accept a literal the macro has already validated. Subclasses call this from `apply`. */
+  protected inline def validated(inline value: String): Type = unsafeFrom(value)
+
   extension (id: Type) def value: String = id
 
   given CanEqual[Type, Type] = CanEqual.derived
@@ -49,28 +52,77 @@ object TextIdentifier:
   ): Either[ValidationFailure, String] =
     IdentifierRules.text(field, raw, maximumLength)
 
-object SubmissionKey extends TextIdentifier("submissionKey", 200)
+object SubmissionKey extends TextIdentifier("submissionKey", 200):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("submissionKey", 200, raw))
 type SubmissionKey = SubmissionKey.Type
 
-object AttemptId extends TextIdentifier("attemptId", 200)
+object AttemptId extends TextIdentifier("attemptId", 200):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("attemptId", 200, raw))
 type AttemptId = AttemptId.Type
 
-object OperationId extends TextIdentifier("operationId", 255)
+object OperationId extends TextIdentifier("operationId", 255):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("operationId", 255, raw))
 type OperationId = OperationId.Type
 
-object OperationVersion extends TextIdentifier("operationVersion", 100)
+object OperationVersion extends TextIdentifier("operationVersion", 100):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("operationVersion", 100, raw))
 type OperationVersion = OperationVersion.Type
 
-object SchemaId extends TextIdentifier("schemaId", 255)
+object SchemaId extends TextIdentifier("schemaId", 255):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("schemaId", 255, raw))
 type SchemaId = SchemaId.Type
 
-object ResultSchemaId extends TextIdentifier("resultSchemaId", 255)
+object ResultSchemaId extends TextIdentifier("resultSchemaId", 255):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("resultSchemaId", 255, raw))
 type ResultSchemaId = ResultSchemaId.Type
 
-object WorkerReleaseId extends TextIdentifier("workerReleaseId", 255)
+object WorkerReleaseId extends TextIdentifier("workerReleaseId", 255):
+  /** A literal, validated at compile time. Dynamic values use `from`. */
+  inline def apply(inline raw: String): Type =
+    validated(LiteralIdentifier.text("workerReleaseId", 255, raw))
 type WorkerReleaseId = WorkerReleaseId.Type
 
-object ContentDigest extends TextIdentifier("contentDigest", 200)
+/** A content digest, structurally validated as `sha256:<64 lowercase hex>`.
+  *
+  * A generic bounded-text identifier accepted `"x"` as a digest, so nothing prevented an arbitrary
+  * label from standing in for content identity — including on decode, where every value arriving
+  * from the wire was taken at face value.
+  */
+object ContentDigest:
+  opaque type Type = String
+
+  private val Sha256 = "sha256:[0-9a-f]{64}".r
+
+  def from(raw: String): Either[ValidationFailure, Type] =
+    if raw == null then Left(ValidationFailure("contentDigest", "must not be null"))
+    else if !Sha256.matches(raw) then
+      Left(
+        ValidationFailure("contentDigest", "must be sha256:<64 lowercase hex characters>")
+      )
+    else Right(raw)
+
+  def unsafeFrom(raw: String): Type =
+    from(raw).fold(problem => throw new IllegalArgumentException(problem.reason), identity)
+
+  extension (id: Type) def value: String = id
+
+  given CanEqual[Type, Type] = CanEqual.derived
+  given Order[Type] = Order.from((left, right) => left.compareTo(right))
+  given Ordering[Type] = summon[Order[Type]].toOrdering
+  given Show[Type] = Show.show(identity)
+
 type ContentDigest = ContentDigest.Type
 
 object AttemptEpoch:
@@ -99,6 +151,14 @@ object ByteLimit:
   val defaultEvidence: Type = 64 * 1024
   val maximumCommandCapture: Type = 4 * 1024 * 1024
   val maximumLogPage: Type = 4 * 1024 * 1024
+
+  /** The largest script that may be carried inline in a request.
+    *
+    * Named separately from `maximumCommandCapture` despite sharing its value because it bounds
+    * something else: a script the caller supplies, not output a command produced. The two are free
+    * to diverge, and a reader should not have to infer that a script is bounded by a capture limit.
+    */
+  val maximumInlineScript: Type = 4 * 1024 * 1024
   def from(raw: Int): Either[ValidationFailure, Type] =
     Either.cond(raw > 0, raw, ValidationFailure("byteLimit", "must be positive"))
   def unsafeFrom(raw: Int): Type =

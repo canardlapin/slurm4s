@@ -6,6 +6,8 @@ import io.github.bbuchsbaum.slurm4s.core.ByteLimit
 import io.github.bbuchsbaum.slurm4s.core.WorkerEvent
 import io.github.bbuchsbaum.slurm4s.protocol.WorkerEventCodec
 
+import scodec.bits.ByteVector
+
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Files
@@ -25,7 +27,7 @@ object FileWorkerEventSink:
               semaphore.permit.use(_ => IO.blocking(appendLocked(target, bytes)))
     }
 
-  private def appendLocked(target: Path, bytes: Vector[Byte]): Unit =
+  private def appendLocked(target: Path, bytes: ByteVector): Unit =
     val normalized = target.toAbsolutePath.normalize()
     Option(normalized.getParent).foreach { parent =>
       val _ = Files.createDirectories(parent)

@@ -4,6 +4,8 @@ import cats.effect.IO
 import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.protocol.ResultEnvelopeCodec
 
+import scodec.bits.ByteVector
+
 import java.nio.file.Files
 import java.time.Instant
 
@@ -13,11 +15,17 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
   private val resultLimit = ByteLimit.from(4096).toOption.get
   private val envelopeLimit = ByteLimit.from(65536).toOption.get
   private val outputPath = RelativeOutputPath.from("results/value.txt").toOption.get
-  private val outputDigest = ContentDigest.from("sha256:output").toOption.get
+  private val outputDigest = ContentDigest
+    .from("sha256:e0ee8bb50685e05fa0f47ed04203ae953fdfd055f5bd2892ea186504254f8c3a")
+    .toOption
+    .get
   private val output = OutputEntry.from(outputPath, 8L, outputDigest).toOption.get
   private val release = WorkerRelease(
     WorkerReleaseId.from("managed-worker-1").toOption.get,
-    ContentDigest.from("sha256:managed-worker").toOption.get
+    ContentDigest
+      .from("sha256:ff828dfdff707e2276692cf65d461572268370fdebfd7b584be0dc0efa5e08d7")
+      .toOption
+      .get
   )
   private val operation = RegisteredOperation(
     OperationId.from("example.typed").toOption.get,
@@ -52,7 +60,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
     ResultAttachment.attachVerified(attempt, handle, contract, bytes, Vector(output), later) match
       case VerifiedAttachment.Succeeded(payload) =>
         assertEquals(payload.value, "typed-value")
-        assertEquals(payload.encodedValue, "typed-value".getBytes("UTF-8").toVector)
+        assertEquals(payload.encodedValue, ByteVector.view("typed-value".getBytes("UTF-8")))
         assertEquals(payload.submissionKey, handle.submissionKey)
         assertEquals(payload.attemptId, handle.attemptId)
         assertEquals(payload.attemptEpoch, handle.attemptEpoch)
@@ -84,7 +92,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
           _ <- IO.blocking { val _ = Files.write(path, "replacement".getBytes("UTF-8")) }
         yield attached match
           case VerifiedAttachment.Succeeded(payload) =>
-            assertEquals(payload.encodedValue, "typed-value".getBytes("UTF-8").toVector)
+            assertEquals(payload.encodedValue, ByteVector.view("typed-value".getBytes("UTF-8")))
           case other => fail(s"expected verified payload, received $other")
       }(path => IO.blocking { val _ = Files.deleteIfExists(path) })
   }
@@ -105,7 +113,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       attempt,
       handle,
       wrongContract,
-      "not-json".getBytes("UTF-8").toVector,
+      ByteVector.view("not-json".getBytes("UTF-8")),
       Vector.empty,
       later
     )
@@ -119,7 +127,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       attempt,
       handle,
       contract,
-      "not-json".getBytes("UTF-8").toVector,
+      ByteVector.view("not-json".getBytes("UTF-8")),
       Vector(output),
       later
     )
@@ -132,12 +140,12 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       Vector.empty,
       later
     )
-    val staleHandle = handle.copy(attemptEpoch = AttemptEpoch.from(2L).toOption.get)
+    val staleHandle = rebuilt(handle, attemptEpoch = AttemptEpoch.from(2L).toOption)
     val stale = ResultAttachment.attach(
       attempt,
       staleHandle,
       contract,
-      Vector.empty,
+      ByteVector.empty,
       Vector.empty,
       later
     )
@@ -186,15 +194,15 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       current,
       originalHandle,
       contract,
-      Vector.empty,
+      ByteVector.empty,
       Vector.empty,
       later.plusSeconds(3L)
     )
     val provenanceMismatch = ResultAttachment.attach(
       original,
-      originalHandle.copy(retrySafety = RetrySafety.SafeForAutomaticRetry),
+      rebuilt(originalHandle, retrySafety = Some(RetrySafety.SafeForAutomaticRetry)),
       contract,
-      Vector.empty,
+      ByteVector.empty,
       Vector.empty,
       later.plusSeconds(3L)
     )
@@ -230,8 +238,12 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
 
   test("file reattachment bounds reads and classifies an unavailable file") {
     val attempt = boundAttempt
-    val handle = durableHandle(attempt, contract).copy(
-      maximumEnvelopeBytes = ByteLimit.from(16).toOption.get
+    // Both bounds shrink together: an envelope smaller than the result it must carry is now a
+    // rejected state rather than a constructible one.
+    val handle = rebuilt(
+      durableHandle(attempt, contract),
+      maximumResultBytes = ByteLimit.from(16).toOption,
+      maximumEnvelopeBytes = ByteLimit.from(16).toOption
     )
     IO.blocking(Files.createTempFile("slurm4s-envelope", ".json"))
       .bracket { path =>
@@ -300,7 +312,7 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
       handle.job,
       handle.operation,
       handle.resultSchema,
-      "typed-value".getBytes("UTF-8").toVector,
+      ByteVector.view("typed-value".getBytes("UTF-8")),
       outputs,
       handle.workerRelease,
       Instant.parse("2026-07-22T12:00:02Z")
@@ -308,11 +320,39 @@ class ResultAttachmentSuite extends munit.CatsEffectSuite:
 
   private def stringCodec(schema: ResultSchemaId): ResultCodec[String] = new ResultCodec[String]:
     val schemaId: ResultSchemaId = schema
-    def encode(value: String): Either[ResultCodecFailure, Vector[Byte]] =
-      Right(value.getBytes("UTF-8").toVector)
-    def decode(bytes: Vector[Byte]): Either[ResultCodecFailure, String] =
+    def encode(value: String): Either[ResultCodecFailure, ByteVector] =
+      Right(ByteVector.view(value.getBytes("UTF-8")))
+    def decode(bytes: ByteVector): Either[ResultCodecFailure, String] =
       Right(new String(bytes.toArray, "UTF-8"))
 
   private def invalidCode[A](result: ExecutionResult[A]): String = result match
     case ExecutionResult.ResultInvalid(diagnostics, _) => diagnostics.toVector.head.code
     case other => fail(s"expected invalid result, received $other")
+
+  /** Rebuild a handle with overrides.
+    *
+    * `copy` is private now: a handle's bounds are its invariant, so every change goes back through
+    * the validating constructor rather than around it.
+    */
+  private def rebuilt(
+      handle: DurableResultHandle,
+      attemptEpoch: Option[AttemptEpoch] = None,
+      retrySafety: Option[RetrySafety] = None,
+      maximumResultBytes: Option[ByteLimit] = None,
+      maximumEnvelopeBytes: Option[ByteLimit] = None
+  ): DurableResultHandle =
+    DurableResultHandle
+      .from(
+        handle.submissionKey,
+        handle.attemptId,
+        attemptEpoch.getOrElse(handle.attemptEpoch),
+        handle.job,
+        handle.operation,
+        handle.resultSchema,
+        maximumResultBytes.getOrElse(handle.maximumResultBytes),
+        maximumEnvelopeBytes.getOrElse(handle.maximumEnvelopeBytes),
+        handle.declaredOutputs,
+        handle.workerRelease,
+        retrySafety.getOrElse(handle.retrySafety)
+      )
+      .fold(problem => fail(problem.reason), identity)

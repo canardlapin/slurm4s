@@ -1,12 +1,14 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
 import cats.data.NonEmptyVector
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
+import scodec.bits.ByteVector
 
 final case class RemoteRegisteredBatchElement(
     index: ArrayIndex,
     submissionKey: SubmissionKey,
-    inputBytes: Vector[Byte]
+    inputBytes: ByteVector
 ) derives CanEqual
 
 final case class RemoteRegisteredBatchRequest(
@@ -18,7 +20,8 @@ final case class RemoteRegisteredBatchRequest(
     environment: Map[EnvName, String],
     maximumResultBytes: ByteLimit,
     declaredOutputs: Vector[RelativeOutputPath],
-    retrySafety: RetrySafety
+    retrySafety: RetrySafety,
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 final case class RemoteRegisteredBatchElementSubmission(
@@ -48,7 +51,8 @@ final case class RemoteScriptBatchRequest(
     topology: BatchTopology,
     elements: NonEmptyVector[RemoteScriptBatchElement],
     environment: Map[EnvName, String],
-    retrySafety: RetrySafety
+    retrySafety: RetrySafety,
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 final case class RemoteScriptExitRef(

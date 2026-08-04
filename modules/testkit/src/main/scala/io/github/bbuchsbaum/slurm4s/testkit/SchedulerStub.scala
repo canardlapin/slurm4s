@@ -17,8 +17,8 @@ final case class SchedulerProgram[F[_]](
     def capabilities: F[SchedulerQueryResult[SchedulerCapabilities]] =
       SchedulerProgram.this.capabilities
 
-    def submit[A](request: JobRequest[A]): F[SubmissionAttempt] =
-      SchedulerProgram.this.submit(request.submissionKey)
+    def submit(spec: LaunchSpec): F[SubmissionAttempt] =
+      SchedulerProgram.this.submit(spec.submissionKey)
 
     def observe(
         jobs: NonEmptyVector[JobRef]

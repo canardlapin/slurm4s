@@ -2,13 +2,13 @@ package io.github.bbuchsbaum.slurm4s.ssh
 
 import cats.Monad
 import cats.syntax.all.*
-import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.core.BoundedEvidence
 import io.github.bbuchsbaum.slurm4s.protocol.AgentBody
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCodecFailure
 import io.github.bbuchsbaum.slurm4s.protocol.AgentEnvelope
 import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
+import io.github.bbuchsbaum.slurm4s.protocol.AgentFailurePayload
 import io.github.bbuchsbaum.slurm4s.protocol.AgentMessageCodec
 import io.github.bbuchsbaum.slurm4s.protocol.AgentResponseStatus
 import io.github.bbuchsbaum.slurm4s.protocol.FrameCodec
@@ -76,51 +76,41 @@ final class SshAgentWireClient[F[_]: Monad](
       stdout: BoundedEvidence,
       stderr: BoundedEvidence
   ): F[AgentCall[AgentEnvelope]] =
-    val decoded = for
-      fed <- FrameDecoder.empty(frameLimits).feed(stdout.bytes).left.map(showFrameFailure)
-      _ <- fed._1.finish.left.map(showFrameFailure)
+    val decoded: Either[ResponseFailure, AgentEnvelope] = for
+      fed <- FrameDecoder
+        .empty(frameLimits)
+        .feed(stdout.bytes)
+        .left
+        .map(failure => ResponseFailure.Protocol(showFrameFailure(failure)))
+      _ <- fed._1.finish.left.map(failure => ResponseFailure.Protocol(showFrameFailure(failure)))
       frame <- fed._2 match
         case Vector(single) => Right(single)
-        case other          => Left(s"expected one response frame, received ${other.size}")
-      message <- AgentMessageCodec.decode(frame).left.map(showCodecFailure)
+        case other          =>
+          Left(ResponseFailure.Protocol(s"expected one response frame, received ${other.size}"))
+      message <- AgentMessageCodec
+        .decode(frame)
+        .left
+        .map(failure => ResponseFailure.Protocol(showCodecFailure(failure)))
       _ <- Either.cond(
         message.requestId == expectedRequestId,
         (),
-        s"response correlation mismatch: expected ${expectedRequestId.value}"
+        ResponseFailure.Protocol(
+          s"response correlation mismatch: expected ${expectedRequestId.value}"
+        )
       )
       response <- message.body match
-        case AgentBody.Response(AgentResponseStatus.Ok, _)                  => Right(message)
-        case AgentBody.Response(AgentResponseStatus.DomainFailure, payload) =>
-          Left(s"remote-cli:${diagnostic(payload)}")
-        case AgentBody.Response(AgentResponseStatus.InternalFailure, payload) =>
-          Left(s"remote-agent:${diagnostic(payload)}")
-        case AgentBody.Response(AgentResponseStatus.ProtocolFailure, payload) =>
-          Left(s"protocol:${diagnostic(payload)}")
+        case AgentBody.Response(AgentResponseStatus.Ok, _) => Right(message)
+        case AgentBody.Response(status, payload)           =>
+          Left(decodeFailure(status, payload, stdout, stderr))
         case AgentBody.Request(_, _) =>
-          Left("agent returned a request where a response was required")
+          Left(ResponseFailure.Protocol("agent returned a request where a response was required"))
     yield response
 
     decoded match
-      case Right(message) => AgentCall.Succeeded(message).pure[F]
-      case Left(problem) if problem.startsWith("remote-cli:") =>
-        AgentCall
-          .Failed(
-            AgentFailure.RemoteCliFailure(
-              problem.stripPrefix("remote-cli:"),
-              Some(stderr)
-            )
-          )
-          .pure[F]
-      case Left(problem) if problem.startsWith("remote-agent:") =>
-        AgentCall
-          .Failed(
-            AgentFailure.RemoteAgentFailure(
-              problem.stripPrefix("remote-agent:"),
-              Some(stderr)
-            )
-          )
-          .pure[F]
-      case Left(problem) =>
+      case Right(message)                       => AgentCall.Succeeded(message).pure[F]
+      case Left(ResponseFailure.Typed(failure)) =>
+        AgentCall.Failed(failure).pure[F]
+      case Left(ResponseFailure.Protocol(problem)) =>
         AgentCall
           .Failed(AgentFailure.ProtocolViolation(problem, Some(stdout)))
           .pure[F]
@@ -136,7 +126,12 @@ final class SshAgentWireClient[F[_]: Monad](
       AgentCall.Failed(
         AgentFailure.AuthenticationFailed("OpenSSH authentication failed", Some(stderr))
       )
-    else if exitCode == 126 || exitCode == 127 || normalized.contains("not found") then
+    else if (exitCode == 126 || exitCode == 127) &&
+      (!writeCompleted || agentUnavailableMarker(normalized))
+    then
+      // A remote program can itself exit 126 or 127 after accepting a request. Once the request was
+      // written, classify those exits as definite agent absence only when stderr names the agent
+      // command; otherwise preserve submission uncertainty in TransportDisconnected.
       AgentCall.Failed(
         AgentFailure.AgentUnavailable("slurm4s-agent is unavailable", Some(stderr))
       )
@@ -149,14 +144,50 @@ final class SshAgentWireClient[F[_]: Monad](
         )
       )
 
+  /** OpenSSH-shaped authentication diagnostics only.
+    *
+    * A bare "permission denied" also matches a remote program reporting an inaccessible file, and
+    * misreading that as an authentication failure loses the write flag exactly as the "not found"
+    * match did. Where the message is ambiguous the classification falls through to a transport
+    * disconnect, which preserves uncertainty instead of asserting a cause.
+    */
   private def authenticationMarker(text: String): Boolean =
-    text.contains("permission denied") ||
-      text.contains("authentication failed") ||
-      text.contains("too many authentication failures")
+    text.contains("permission denied (") ||
+      text.contains("permission denied, please try again") ||
+      text.contains("too many authentication failures") ||
+      text.contains("no supported authentication methods available")
 
-  private def diagnostic(payload: Json): String =
-    payload.hcursor.get[String]("message").getOrElse(payload.noSpaces)
+  private def agentUnavailableMarker(text: String): Boolean =
+    text.linesIterator.exists { raw =>
+      val line = raw.trim
+      line.contains("slurm4s-agent") &&
+      (line.endsWith("not found") ||
+        line.contains("command not found: slurm4s-agent") ||
+        line.endsWith("permission denied"))
+    }
+
+  private def decodeFailure(
+      status: AgentResponseStatus,
+      payload: io.circe.Json,
+      stdout: BoundedEvidence,
+      stderr: BoundedEvidence
+  ): ResponseFailure =
+    val evidence =
+      if status == AgentResponseStatus.ProtocolFailure then Some(stdout)
+      else Some(stderr)
+    AgentFailurePayload.decode(payload) match
+      case Right(failure) =>
+        failure.toFailure(status, evidence) match
+          case Right(value)  => ResponseFailure.Typed(value)
+          case Left(problem) =>
+            ResponseFailure.Protocol(s"invalid ${status.wireName} payload: $problem")
+      case Left(problem) =>
+        ResponseFailure.Protocol(s"invalid ${status.wireName} payload: $problem")
 
   private def showFrameFailure(failure: FrameFailure): String = failure.toString
 
   private def showCodecFailure(failure: AgentCodecFailure): String = failure.toString
+
+  private enum ResponseFailure:
+    case Typed(failure: AgentFailure)
+    case Protocol(diagnostic: String)

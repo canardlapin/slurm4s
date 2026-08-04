@@ -1,6 +1,9 @@
 package io.github.bbuchsbaum.slurm4s.protocol
 
+import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
+
+import scodec.bits.ByteVector
 
 import java.time.Instant
 
@@ -16,6 +19,11 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
     PositiveInt.from("cpus", 2).toOption.get,
     Some(MemoryRequest.PerNode(Mebibytes.from(1024).toOption.get)),
     Some(WallTimeMinutes.from(30).toOption.get)
+  )
+  private val terminationNotice = TerminationNotice(
+    TerminationNoticeSignal.Usr1,
+    TerminationNoticeScope.JobSteps,
+    SignalLeadSeconds.unsafeFrom(45)
   )
 
   test("owned batch wire round-trips independent, sharded, and gang topologies") {
@@ -97,9 +105,9 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
       base,
       JobName.from("wire-script-batch").toOption.get,
       ScriptProgram(
-        ScriptSource.Inline(
+        ScriptSource.unsafeInlineScript(
           "analysis.sh",
-          Vector(0x00.toByte, 0x7f.toByte, 0x80.toByte, 0xff.toByte)
+          ByteVector(0x00, 0x7f, 0x80, 0xff)
         ),
         ScriptInvocation.Via(CommandPrefix.bash)
       ),
@@ -115,7 +123,8 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
         )
       },
       Map.empty,
-      RetrySafety.NoAutomaticRetry
+      RetrySafety.NoAutomaticRetry,
+      Some(terminationNotice)
     )
     val elements = request.elements.map { element =>
       val attempt = AttemptId.from(s"script-${element.index.value}").toOption.get
@@ -134,7 +143,7 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
         Submission.AcceptanceUnknown(
           AcceptanceUncertainty.ResponseLost,
           EvidenceBundle(
-            BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+            BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
           )
         )
       )
@@ -185,7 +194,7 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
           .derive(SubmissionKey.from("wire-batch").toOption.get, index)
           .toOption
           .get,
-        Vector(0x00.toByte, 0x7f.toByte, 0x80.toByte, 0xff.toByte)
+        ByteVector(0x00, 0x7f, 0x80, 0xff)
       )
     }
     RemoteRegisteredBatchRequest(
@@ -197,7 +206,8 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
       Map(EnvName.unsafeFrom("LANG") -> "C.UTF-8"),
       ByteLimit.from(1024).toOption.get,
       Vector.empty,
-      RetrySafety.SafeForAutomaticRetry
+      RetrySafety.SafeForAutomaticRetry,
+      Some(terminationNotice)
     )
 
   private def batchResponse(
@@ -206,7 +216,10 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
   ): RemoteRegisteredBatchSubmission =
     val release = WorkerRelease(
       WorkerReleaseId.from("worker-1").toOption.get,
-      ContentDigest.from("sha256:worker-1").toOption.get
+      ContentDigest
+        .from("sha256:13029f9e83d15b3d437c2a7568fc1ca7990ecf3ff79bef6da08f13ff5ae12af8")
+        .toOption
+        .get
     )
     val elements = request.elements.map { element =>
       val attempt = AttemptId.from(s"batch-${element.index.value}").toOption.get
@@ -214,32 +227,35 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
       RemoteRegisteredBatchElementSubmission(
         element.index,
         RemoteResultRef(attempt, epoch),
-        DurableResultHandle(
-          element.submissionKey,
-          attempt,
-          epoch,
-          None,
-          WorkloadOperation.Registered(operation.id, operation.version),
-          operation.outputSchema,
-          request.maximumResultBytes,
-          ByteLimit.defaultEvidence,
-          Vector.empty,
-          release,
-          request.retrySafety
-        ),
+        DurableResultHandle
+          .from(
+            element.submissionKey,
+            attempt,
+            epoch,
+            None,
+            WorkloadOperation.Registered(operation.id, operation.version),
+            operation.outputSchema,
+            request.maximumResultBytes,
+            ByteLimit.defaultEvidence,
+            Vector.empty,
+            release,
+            request.retrySafety
+          )
+          .toOption
+          .get,
         LogRef(attempt, epoch, LogStream.Stdout, s"/work/$attempt/stdout.log"),
         LogRef(attempt, epoch, LogStream.Stderr, s"/work/$attempt/stderr.log")
       )
     }
     val evidence = EvidenceBundle(
-      BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, Vector.empty)
+      BoundedEvidence.capture(EvidenceSource.AgentProtocol, observedAt, ByteVector.empty)
     )
     RemoteRegisteredBatchSubmission(
       topology,
       elements,
       SubmissionAttempt.Completed(
         Submission.Accepted(
-          JobRef(JobId.from("9001").toOption.get, None, None),
+          JobRef(JobId.from("9001").toOption.get, None),
           evidence
         )
       )

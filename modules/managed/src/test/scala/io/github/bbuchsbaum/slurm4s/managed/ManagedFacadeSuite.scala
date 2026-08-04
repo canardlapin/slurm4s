@@ -21,8 +21,8 @@ class ManagedFacadeSuite extends munit.CatsEffectSuite:
   private val inertScheduler: Scheduler[IO] = new Scheduler[IO]:
     def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] =
       IO.raiseError(new AssertionError("unexpected capabilities"))
-    def submit[A](request: JobRequest[A]): IO[SubmissionAttempt] =
-      IO.raiseError(new AssertionError(s"unexpected submit: $request"))
+    def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+      IO.raiseError(new AssertionError(s"unexpected submit: $spec"))
     def observe(
         jobs: NonEmptyVector[JobRef]
     ): IO[SchedulerQueryResult[ObservationBatch]] =

@@ -10,6 +10,10 @@ and controller-safe coalesced observation.
 [PRD.html](PRD.html) is the normative product specification; the source modules and executable
 tests are the implementation authority.
 
+> **Maturity:** `0.1-development` / pre-release. The foundation and local
+> vertical are usable for development, but scheduler, remote-site, and release
+> evidence remain package-specific; APIs may change.
+
 ## Initial modules
 
 | Module | Boundary |
@@ -32,7 +36,8 @@ an interpreter failure that cannot yet be classified safely.
 
 ## Build
 
-The minimum runtime is JDK 17. The publication and verification baseline is Scala 3.7.4.
+The minimum runtime is JDK 17. Scala 3.3.8 LTS is the publication baseline; Scala 3.8.4 is a
+verification-only lane. Both run in CI, and `sbt +test` covers each.
 
 ```shell
 sbt test
@@ -61,6 +66,8 @@ real-site evidence gap and reproducible smoke procedure are recorded in
 [`docs/acceptance/p5-site-scale.md`](docs/acceptance/p5-site-scale.md).
 The executable typed-task API is introduced in
 [`docs/examples/typed-task.md`](docs/examples/typed-task.md).
+Typed pre-deadline signals and the worker drain-notice seam are documented in
+[`docs/termination-notices.md`](docs/termination-notices.md).
 
 Published assembly façades keep routine setup out of application code:
 
