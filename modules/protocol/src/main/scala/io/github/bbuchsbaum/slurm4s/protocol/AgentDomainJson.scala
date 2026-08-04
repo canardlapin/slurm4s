@@ -5,11 +5,8 @@ import cats.syntax.all.*
 import io.circe.Decoder
 import io.circe.DecodingFailure
 import io.circe.Encoder
-import io.circe.ACursor
 import io.circe.HCursor
 import io.circe.Json
-import io.circe.generic.semiauto.deriveDecoder
-import io.circe.generic.semiauto.deriveEncoder
 import io.github.bbuchsbaum.slurm4s.batch.*
 import io.github.bbuchsbaum.slurm4s.core.*
 
@@ -48,6 +45,9 @@ object AgentDomainJson:
             "environment" -> environment,
             "resultContract" -> Json.fromString("exit-only")
           ) ++ value.array.toVector.map(array => "array" -> encodeArray(array)) ++
+            value.terminationNotice.toVector.map(notice =>
+              "terminationNotice" -> encodeTerminationNotice(notice)
+            ) ++
             Option
               .when(value.retrySafety != RetrySafety.Unknown)(
                 "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
@@ -71,6 +71,7 @@ object AgentDomainJson:
       environment <- decodeEnvironment(cursor)
       array <- optionalArray(cursor)
       retrySafety <- optionalRetrySafety(cursor)
+      terminationNotice <- optionalTerminationNotice(cursor)
       contract <- field[String](cursor, "resultContract")
       _ <- Either.cond(contract == "exit-only", (), "unsupported result contract")
     yield LaunchSpec(
@@ -82,7 +83,8 @@ object AgentDomainJson:
       resources,
       environment,
       array,
-      retrySafety
+      retrySafety,
+      terminationNotice
     )
 
   def encodeJobRefs(value: NonEmptyVector[JobRef]): Json = value.toVector.asJson
@@ -97,6 +99,21 @@ object AgentDomainJson:
 
   def encodeEvidence(value: EvidenceBundle): Json = value.asJson
   def decodeEvidence(json: Json): Either[String, EvidenceBundle] = decode[EvidenceBundle](json)
+  def encodeBoundedEvidence(value: BoundedEvidence): Json = value.asJson
+  def decodeBoundedEvidence(json: Json): Either[String, BoundedEvidence] =
+    decode[BoundedEvidence](json)
+  private[slurm4s] def encodeDiagnostics(value: Diagnostics): Json = value.asJson
+  private[slurm4s] def decodeDiagnostics(json: Json): Either[String, Diagnostics] =
+    decode[Diagnostics](json)
+  private[slurm4s] def encodeWorkloadOutcome(value: WorkloadOutcome): Json = value.asJson
+  private[slurm4s] def decodeWorkloadOutcome(json: Json): Either[String, WorkloadOutcome] =
+    decode[WorkloadOutcome](json)
+  private[slurm4s] def encodeObservationResult(value: ObservationResult): Json = value.asJson
+  private[slurm4s] def decodeObservationResult(json: Json): Either[String, ObservationResult] =
+    decode[ObservationResult](json)
+  private[slurm4s] def encodeAccountingRecord(value: AccountingRecord): Json = value.asJson
+  private[slurm4s] def decodeAccountingRecord(json: Json): Either[String, AccountingRecord] =
+    decode[AccountingRecord](json)
 
   def encodeLogRequest(
       ref: LogRef,
@@ -141,20 +158,26 @@ object AgentDomainJson:
 
   def encodeRemoteTaskRequest(value: RemoteRegisteredTaskRequest): Either[String, Json] =
     for environment <- encodeEnvironment(value.environment)
-    yield Json.obj(
-      "wireVersion" -> Json.fromInt(RemoteTaskWireVersion),
-      "submissionKey" -> Json.fromString(value.submissionKey.value),
-      "name" -> Json.fromString(value.name.value),
-      "operation" -> StructuredJson.encodeRegisteredOperation(value.operation),
-      "inputBase64" -> Json.fromString(Base64.getEncoder.encodeToString(value.inputBytes.toArray)),
-      "resources" -> encodeRemoteResources(value.resources),
-      "environment" -> environment,
-      "maximumResultBytes" -> Json.fromInt(value.maximumResultBytes.value),
-      "declaredOutputs" -> Json.arr(
-        value.declaredOutputs.map(path => Json.fromString(path.value))*
-      ),
-      "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
-    )
+    yield
+      val fields = Vector(
+        "wireVersion" -> Json.fromInt(RemoteTaskWireVersion),
+        "submissionKey" -> Json.fromString(value.submissionKey.value),
+        "name" -> Json.fromString(value.name.value),
+        "operation" -> StructuredJson.encodeRegisteredOperation(value.operation),
+        "inputBase64" -> Json.fromString(
+          Base64.getEncoder.encodeToString(value.inputBytes.toArray)
+        ),
+        "resources" -> encodeRemoteResources(value.resources),
+        "environment" -> environment,
+        "maximumResultBytes" -> Json.fromInt(value.maximumResultBytes.value),
+        "declaredOutputs" -> Json.arr(
+          value.declaredOutputs.map(path => Json.fromString(path.value))*
+        ),
+        "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
+      ) ++ value.terminationNotice.toVector.map(notice =>
+        "terminationNotice" -> encodeTerminationNotice(notice)
+      )
+      Json.obj(fields*)
 
   def decodeRemoteTaskRequest(json: Json): Either[String, RemoteRegisteredTaskRequest] =
     for
@@ -183,6 +206,7 @@ object AgentDomainJson:
       _ <- Either.cond(outputs.distinct.size == outputs.size, (), "declaredOutputs has duplicates")
       retryText <- field[String](cursor, "retrySafety")
       retrySafety <- decodeRetrySafety(retryText)
+      terminationNotice <- optionalTerminationNotice(cursor)
     yield RemoteRegisteredTaskRequest(
       submissionKey,
       name,
@@ -192,7 +216,8 @@ object AgentDomainJson:
       environment,
       maximumResult,
       outputs,
-      retrySafety
+      retrySafety,
+      terminationNotice
     )
 
   def encodeRemoteSubmission(value: RemoteRegisteredSubmission): Either[String, Json] =
@@ -238,30 +263,34 @@ object AgentDomainJson:
 
   def encodeRemoteBatchRequest(value: RemoteRegisteredBatchRequest): Either[String, Json] =
     for environment <- encodeEnvironment(value.environment)
-    yield Json.obj(
-      "wireVersion" -> Json.fromInt(RemoteBatchWireVersion),
-      "submissionKey" -> Json.fromString(value.submissionKey.value),
-      "name" -> Json.fromString(value.name.value),
-      "operation" -> StructuredJson.encodeRegisteredOperation(value.operation),
-      "topology" -> encodeBatchTopology(value.topology),
-      "elements" -> Json.arr(
-        value.elements.toVector.map { element =>
-          Json.obj(
-            "index" -> Json.fromInt(element.index.value),
-            "submissionKey" -> Json.fromString(element.submissionKey.value),
-            "inputBase64" -> Json.fromString(
-              Base64.getEncoder.encodeToString(element.inputBytes.toArray)
+    yield
+      val fields = Vector(
+        "wireVersion" -> Json.fromInt(RemoteBatchWireVersion),
+        "submissionKey" -> Json.fromString(value.submissionKey.value),
+        "name" -> Json.fromString(value.name.value),
+        "operation" -> StructuredJson.encodeRegisteredOperation(value.operation),
+        "topology" -> encodeBatchTopology(value.topology),
+        "elements" -> Json.arr(
+          value.elements.toVector.map { element =>
+            Json.obj(
+              "index" -> Json.fromInt(element.index.value),
+              "submissionKey" -> Json.fromString(element.submissionKey.value),
+              "inputBase64" -> Json.fromString(
+                Base64.getEncoder.encodeToString(element.inputBytes.toArray)
+              )
             )
-          )
-        }*
-      ),
-      "environment" -> environment,
-      "maximumResultBytes" -> Json.fromInt(value.maximumResultBytes.value),
-      "declaredOutputs" -> Json.arr(
-        value.declaredOutputs.map(path => Json.fromString(path.value))*
-      ),
-      "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
-    )
+          }*
+        ),
+        "environment" -> environment,
+        "maximumResultBytes" -> Json.fromInt(value.maximumResultBytes.value),
+        "declaredOutputs" -> Json.arr(
+          value.declaredOutputs.map(path => Json.fromString(path.value))*
+        ),
+        "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
+      ) ++ value.terminationNotice.toVector.map(notice =>
+        "terminationNotice" -> encodeTerminationNotice(notice)
+      )
+      Json.obj(fields*)
 
   def decodeRemoteBatchRequest(json: Json): Either[String, RemoteRegisteredBatchRequest] =
     for
@@ -301,6 +330,7 @@ object AgentDomainJson:
       _ <- Either.cond(outputs.distinct.size == outputs.size, (), "declaredOutputs has duplicates")
       retryText <- field[String](cursor, "retrySafety")
       retrySafety <- decodeRetrySafety(retryText)
+      terminationNotice <- optionalTerminationNotice(cursor)
     yield RemoteRegisteredBatchRequest(
       submissionKey,
       name,
@@ -310,7 +340,8 @@ object AgentDomainJson:
       environment,
       maximumResult,
       outputs,
-      retrySafety
+      retrySafety,
+      terminationNotice
     )
 
   def encodeRemoteBatchSubmission(
@@ -380,26 +411,30 @@ object AgentDomainJson:
     for
       environment <- encodeEnvironment(value.environment)
       program <- encodeScriptProgram(value.program)
-    yield Json.obj(
-      "wireVersion" -> Json.fromInt(RemoteBatchWireVersion),
-      "submissionKey" -> Json.fromString(value.submissionKey.value),
-      "name" -> Json.fromString(value.name.value),
-      "program" -> program,
-      "topology" -> encodeBatchTopology(value.topology),
-      "elements" -> Json.arr(
-        value.elements.toVector.map { element =>
-          Json.obj(
-            "index" -> Json.fromInt(element.index.value),
-            "submissionKey" -> Json.fromString(element.submissionKey.value),
-            "arguments" -> Json.arr(
-              element.arguments.map(argument => Json.fromString(argument.value))*
+    yield
+      val fields = Vector(
+        "wireVersion" -> Json.fromInt(RemoteBatchWireVersion),
+        "submissionKey" -> Json.fromString(value.submissionKey.value),
+        "name" -> Json.fromString(value.name.value),
+        "program" -> program,
+        "topology" -> encodeBatchTopology(value.topology),
+        "elements" -> Json.arr(
+          value.elements.toVector.map { element =>
+            Json.obj(
+              "index" -> Json.fromInt(element.index.value),
+              "submissionKey" -> Json.fromString(element.submissionKey.value),
+              "arguments" -> Json.arr(
+                element.arguments.map(argument => Json.fromString(argument.value))*
+              )
             )
-          )
-        }*
-      ),
-      "environment" -> environment,
-      "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
-    )
+          }*
+        ),
+        "environment" -> environment,
+        "retrySafety" -> Json.fromString(encodeRetrySafety(value.retrySafety))
+      ) ++ value.terminationNotice.toVector.map(notice =>
+        "terminationNotice" -> encodeTerminationNotice(notice)
+      )
+      Json.obj(fields*)
 
   def decodeRemoteScriptBatchRequest(json: Json): Either[String, RemoteScriptBatchRequest] =
     for
@@ -433,6 +468,7 @@ object AgentDomainJson:
       environment <- decodeEnvironment(cursor)
       retryText <- field[String](cursor, "retrySafety")
       retrySafety <- decodeRetrySafety(retryText)
+      terminationNotice <- optionalTerminationNotice(cursor)
     yield RemoteScriptBatchRequest(
       submissionKey,
       name,
@@ -440,7 +476,8 @@ object AgentDomainJson:
       topology,
       nonEmptyElements,
       environment,
-      retrySafety
+      retrySafety,
+      terminationNotice
     )
 
   def encodeRemoteScriptBatchSubmission(value: RemoteScriptBatchSubmission): Json =
@@ -763,6 +800,39 @@ object AgentDomainJson:
             .left
             .map(_.toChain.toVector.map(_.message).mkString("; "))
         yield Some(request)
+
+  private def encodeTerminationNotice(value: TerminationNotice): Json =
+    Json.obj(
+      "signal" -> Json.fromString(value.signal.slurmName),
+      "scope" -> Json.fromString(
+        value.scope match
+          case TerminationNoticeScope.BatchShell => "batch-shell"
+          case TerminationNoticeScope.JobSteps   => "job-steps"
+      ),
+      "leadSeconds" -> Json.fromInt(value.leadSeconds.toInt)
+    )
+
+  private def optionalTerminationNotice(
+      cursor: HCursor
+  ): Either[String, Option[TerminationNotice]] =
+    cursor.downField("terminationNotice").focus match
+      case None                        => Right(None)
+      case Some(value) if value.isNull => Right(None)
+      case Some(value)                 =>
+        for
+          notice <- objectCursor(value, "terminationNotice")
+          signalText <- field[String](notice, "signal")
+          signal <- TerminationNoticeSignal.values
+            .find(_.slurmName == signalText)
+            .toRight(s"unknown termination notice signal: $signalText")
+          scopeText <- field[String](notice, "scope")
+          scope <- scopeText match
+            case "batch-shell" => Right(TerminationNoticeScope.BatchShell)
+            case "job-steps"   => Right(TerminationNoticeScope.JobSteps)
+            case other         => Left(s"unknown termination notice scope: $other")
+          leadRaw <- field[Int](notice, "leadSeconds")
+          lead <- SignalLeadSeconds.from(leadRaw).left.map(_.reason)
+        yield Some(TerminationNotice(signal, scope, lead))
 
   private def encodeBatchTopology(value: BatchTopology): Json =
     Json.obj(
@@ -1714,13 +1784,13 @@ object AgentDomainJson:
     Try(LocalDateTime.parse(raw)).toEither.left.map(_.getMessage)
   }
 
-  /** A JSON array of byte numbers, which is what the derived codecs in this object emitted while
-    * bytes were a `Vector[Byte]` and circe supplied the instance implicitly.
+  /** A JSON array of byte numbers, which is what this object emitted while bytes were a
+    * `Vector[Byte]` and circe supplied the instance implicitly.
     *
-    * Reproducing that shape is the point: these instances feed `deriveEncoder`/`deriveDecoder`, so
-    * anything else would silently change an existing wire format. It is deliberately not base64,
-    * even though every hand-written codec here uses base64 for bytes — that inconsistency predates
-    * this change and belongs to the codec-ownership work, not to a representation swap.
+    * Reproducing that shape is the point: anything else would silently change an existing wire
+    * format. It is deliberately not base64, even though every other owned codec here uses base64
+    * for bytes. Changing it requires a new wire version because request digests and durable attempt
+    * identities include these bytes.
     */
   private given Encoder[ByteVector] = Encoder.encodeVector[Byte].contramap(_.toIndexedSeq.toVector)
   private given Decoder[ByteVector] = Decoder.decodeVector[Byte].map(ByteVector.apply)
@@ -1761,8 +1831,70 @@ object AgentDomainJson:
   private given Decoder[WallTimeMinutes] =
     Decoder.decodeLong.emap(raw => WallTimeMinutes.from(raw).left.map(_.reason))
 
-  private given Encoder[EvidenceSource] = deriveEncoder
-  private given Decoder[EvidenceSource] = deriveDecoder
+  private def tagged(name: String, fields: (String, Json)*): Json =
+    Json.obj(name -> Json.obj(fields*))
+
+  private def taggedCase(
+      cursor: HCursor,
+      names: Vector[String]
+  ): Either[DecodingFailure, (String, HCursor)] =
+    val found = names.flatMap(name => cursor.downField(name).success.map(name -> _))
+    found match
+      case Vector(value) => Right(value)
+      case Vector()      =>
+        Left(DecodingFailure(s"expected one of: ${names.mkString(", ")}", cursor.history))
+      case _ =>
+        Left(DecodingFailure("multiple case discriminators are not allowed", cursor.history))
+
+  private given Encoder[EvidenceSource] = Encoder.instance {
+    case EvidenceSource.CommandStdout(command) =>
+      tagged("CommandStdout", "command" -> command.asJson)
+    case EvidenceSource.CommandStderr(command) =>
+      tagged("CommandStderr", "command" -> command.asJson)
+    case EvidenceSource.CommandLaunch(command) =>
+      tagged("CommandLaunch", "command" -> command.asJson)
+    case EvidenceSource.SchedulerJson(command, dataParser) =>
+      tagged("SchedulerJson", "command" -> command.asJson, "dataParser" -> dataParser.asJson)
+    case EvidenceSource.SchedulerText(command) =>
+      tagged("SchedulerText", "command" -> command.asJson)
+    case EvidenceSource.AgentProtocol  => tagged("AgentProtocol")
+    case EvidenceSource.DurableJournal => tagged("DurableJournal")
+    case EvidenceSource.WorkerEvent    => tagged("WorkerEvent")
+    case EvidenceSource.ResultEnvelope => tagged("ResultEnvelope")
+  }
+  private given Decoder[EvidenceSource] = Decoder.instance { cursor =>
+    taggedCase(
+      cursor,
+      Vector(
+        "CommandStdout",
+        "CommandStderr",
+        "CommandLaunch",
+        "SchedulerJson",
+        "SchedulerText",
+        "AgentProtocol",
+        "DurableJournal",
+        "WorkerEvent",
+        "ResultEnvelope"
+      )
+    ).flatMap {
+      case ("CommandStdout", value) =>
+        value.get[String]("command").map(EvidenceSource.CommandStdout.apply)
+      case ("CommandStderr", value) =>
+        value.get[String]("command").map(EvidenceSource.CommandStderr.apply)
+      case ("CommandLaunch", value) =>
+        value.get[String]("command").map(EvidenceSource.CommandLaunch.apply)
+      case ("SchedulerJson", value) =>
+        (value.get[String]("command"), value.get[String]("dataParser"))
+          .mapN(EvidenceSource.SchedulerJson.apply)
+      case ("SchedulerText", value) =>
+        value.get[String]("command").map(EvidenceSource.SchedulerText.apply)
+      case ("AgentProtocol", _)  => Right(EvidenceSource.AgentProtocol)
+      case ("DurableJournal", _) => Right(EvidenceSource.DurableJournal)
+      case ("WorkerEvent", _)    => Right(EvidenceSource.WorkerEvent)
+      case ("ResultEnvelope", _) => Right(EvidenceSource.ResultEnvelope)
+      case (other, _) => Left(DecodingFailure(s"unknown evidence source: $other", cursor.history))
+    }
+  }
   private given Encoder[BoundedEvidence] = Encoder.instance { value =>
     Json.obj(
       "source" -> value.source.asJson,
@@ -1794,76 +1926,339 @@ object AgentDomainJson:
         )
     yield value
   }
-  private given Encoder[EvidenceBundle] = deriveEncoder
-  private given Decoder[EvidenceBundle] = deriveDecoder
-  private given Encoder[Diagnostic] = deriveEncoder
-  private given Decoder[Diagnostic] = deriveDecoder
+  private given Encoder[EvidenceBundle] =
+    Encoder.forProduct2("primary", "related")(value => (value.primary, value.related))
+  private given Decoder[EvidenceBundle] =
+    Decoder.forProduct2("primary", "related")(EvidenceBundle.apply)
+  private given Encoder[Diagnostic] =
+    Encoder.forProduct3("code", "message", "fields")(value =>
+      (value.code, value.message, value.fields)
+    )
+  private given Decoder[Diagnostic] =
+    Decoder.forProduct3("code", "message", "fields")(Diagnostic.apply)
   private given Encoder[Diagnostics] = Encoder.encodeVector[Diagnostic].contramap(_.toVector)
   private given Decoder[Diagnostics] = Decoder
     .decodeVector[Diagnostic]
     .emap(values => Diagnostics.fromVector(values).left.map(_.reason))
 
-  private given Encoder[MemoryRequest] = deriveEncoder
-  private given Decoder[MemoryRequest] = deriveDecoder
-  private given Encoder[ResourceRequest] = deriveEncoder
-  private given Decoder[ResourceRequest] = deriveDecoder
-  private given Encoder[ScriptSource] = deriveEncoder
-
-  /** Mirrors circe's derived sum shape — `{"Inline":{"name":...,"bytes":[...]}}` and its siblings —
-    * so the submit request's bytes are unchanged, while routing construction through the validating
-    * factory that a derived decoder would bypass.
-    *
-    * The encoder above is still derived, which is what keeps the two from drifting: if the shape
-    * ever changes, the round-trip law and the pinned fixture fail rather than one side silently
-    * reading a format the other stopped writing.
-    */
-  private given Decoder[ScriptSource] = Decoder.instance { cursor =>
-    def decodeInline(nested: ACursor): Decoder.Result[ScriptSource] =
-      for
-        name <- nested.get[String]("name")
-        bytes <- nested.get[ByteVector]("bytes")
-        source <- ScriptSource
-          .inlineScript(name, bytes)
-          .left
-          .map(problem => DecodingFailure(problem.reason, nested.history))
-      yield source
-
-    cursor.keys.map(_.toVector) match
-      case Some(Vector("Inline"))      => decodeInline(cursor.downField("Inline"))
-      case Some(Vector("StagedLocal")) =>
-        cursor.downField("StagedLocal").get[String]("path").map(ScriptSource.StagedLocal.apply)
-      case Some(Vector("ExistingRemote")) =>
-        cursor
-          .downField("ExistingRemote")
-          .get[String]("path")
-          .map(ScriptSource.ExistingRemote.apply)
-      case _ =>
-        Left(DecodingFailure("script source must name exactly one known kind", cursor.history))
+  private given Encoder[MemoryRequest] = Encoder.instance {
+    case MemoryRequest.PerNode(amount) => tagged("PerNode", "amount" -> amount.asJson)
+    case MemoryRequest.PerCpu(amount)  => tagged("PerCpu", "amount" -> amount.asJson)
+    case MemoryRequest.AllNodeMemory   => tagged("AllNodeMemory")
+  }
+  private given Decoder[MemoryRequest] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("PerNode", "PerCpu", "AllNodeMemory")).flatMap {
+      case ("PerNode", value)   => value.get[Mebibytes]("amount").map(MemoryRequest.PerNode.apply)
+      case ("PerCpu", value)    => value.get[Mebibytes]("amount").map(MemoryRequest.PerCpu.apply)
+      case ("AllNodeMemory", _) => Right(MemoryRequest.AllNodeMemory)
+      case (other, _) => Left(DecodingFailure(s"unknown memory request: $other", cursor.history))
+    }
+  }
+  private given Encoder[ResourceRequest] =
+    Encoder.forProduct5("cpusPerTask", "tasks", "nodes", "memory", "wallTime")(value =>
+      (value.cpusPerTask, value.tasks, value.nodes, value.memory, value.wallTime)
+    )
+  private given Decoder[ResourceRequest] =
+    Decoder.forProduct5("cpusPerTask", "tasks", "nodes", "memory", "wallTime")(
+      ResourceRequest.apply
+    )
+  private given Encoder[ScriptSource] = Encoder.instance {
+    case ScriptSource.Inline(name, bytes) =>
+      tagged("Inline", "name" -> name.asJson, "bytes" -> bytes.asJson)
+    case ScriptSource.StagedLocal(path)    => tagged("StagedLocal", "path" -> path.asJson)
+    case ScriptSource.ExistingRemote(path) => tagged("ExistingRemote", "path" -> path.asJson)
   }
 
-  private given Encoder[SpawnFailureKind] = deriveEncoder
-  private given Decoder[SpawnFailureKind] = deriveDecoder
-  private given Encoder[InvocationResult] = deriveEncoder
-  private given Decoder[InvocationResult] = deriveDecoder
-  private given Encoder[JobRef] = deriveEncoder
-  private given Decoder[JobRef] = deriveDecoder
-  private given Encoder[AcceptanceUncertainty] = deriveEncoder
-  private given Decoder[AcceptanceUncertainty] = deriveDecoder
-  private given Encoder[Submission] = deriveEncoder
-  private given Decoder[Submission] = deriveDecoder
-  private given Encoder[SubmissionAttempt] = deriveEncoder
-  private given Decoder[SubmissionAttempt] = deriveDecoder
-  private given Encoder[CancellationResult] = deriveEncoder
-  private given Decoder[CancellationResult] = deriveDecoder
-  private given Encoder[CancellationAttempt] = deriveEncoder
-  private given Decoder[CancellationAttempt] = deriveDecoder
+  private given Decoder[ScriptSource] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Inline", "StagedLocal", "ExistingRemote")).flatMap {
+      case ("Inline", value) =>
+        for
+          name <- value.get[String]("name")
+          bytes <- value.get[ByteVector]("bytes")
+          source <- ScriptSource
+            .inlineScript(name, bytes)
+            .left
+            .map(problem => DecodingFailure(problem.reason, cursor.history))
+        yield source
+      case ("StagedLocal", value) =>
+        value.get[String]("path").map(ScriptSource.StagedLocal.apply)
+      case ("ExistingRemote", value) =>
+        value.get[String]("path").map(ScriptSource.ExistingRemote.apply)
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown script source: $other", cursor.history))
+    }
+  }
 
-  private given Encoder[CapabilitySupport] = deriveEncoder
-  private given Decoder[CapabilitySupport] = deriveDecoder
-  private given Encoder[SchedulerCapabilities] = deriveEncoder
-  private given Decoder[SchedulerCapabilities] = deriveDecoder
-  private given [A: Encoder]: Encoder[SchedulerQueryResult[A]] = deriveEncoder
-  private given [A: Decoder]: Decoder[SchedulerQueryResult[A]] = deriveDecoder
+  private given Encoder[SpawnFailureKind] = Encoder.instance {
+    case SpawnFailureKind.ExecutableMissing       => tagged("ExecutableMissing")
+    case SpawnFailureKind.PermissionDenied        => tagged("PermissionDenied")
+    case SpawnFailureKind.WorkingDirectoryMissing => tagged("WorkingDirectoryMissing")
+    case SpawnFailureKind.EnvironmentInvalid      => tagged("EnvironmentInvalid")
+    case SpawnFailureKind.ResourceUnavailable     => tagged("ResourceUnavailable")
+    case SpawnFailureKind.Unknown                 => tagged("Unknown")
+  }
+  private given Decoder[SpawnFailureKind] = Decoder.instance { cursor =>
+    taggedCase(
+      cursor,
+      Vector(
+        "ExecutableMissing",
+        "PermissionDenied",
+        "WorkingDirectoryMissing",
+        "EnvironmentInvalid",
+        "ResourceUnavailable",
+        "Unknown"
+      )
+    ).flatMap {
+      case ("ExecutableMissing", _)       => Right(SpawnFailureKind.ExecutableMissing)
+      case ("PermissionDenied", _)        => Right(SpawnFailureKind.PermissionDenied)
+      case ("WorkingDirectoryMissing", _) => Right(SpawnFailureKind.WorkingDirectoryMissing)
+      case ("EnvironmentInvalid", _)      => Right(SpawnFailureKind.EnvironmentInvalid)
+      case ("ResourceUnavailable", _)     => Right(SpawnFailureKind.ResourceUnavailable)
+      case ("Unknown", _)                 => Right(SpawnFailureKind.Unknown)
+      case (other, _)                     =>
+        Left(DecodingFailure(s"unknown spawn failure kind: $other", cursor.history))
+    }
+  }
+  private given Encoder[InvocationResult] = Encoder.instance {
+    case InvocationResult.Exited(exitCode, stdout, stderr) =>
+      tagged(
+        "Exited",
+        "exitCode" -> exitCode.asJson,
+        "stdout" -> stdout.asJson,
+        "stderr" -> stderr.asJson
+      )
+    case InvocationResult.SpawnFailed(kind, diagnostics, evidence) =>
+      tagged(
+        "SpawnFailed",
+        "kind" -> kind.asJson,
+        "diagnostics" -> diagnostics.asJson,
+        "evidence" -> evidence.asJson
+      )
+    case InvocationResult.TimedOut(after, stdout, stderr) =>
+      tagged(
+        "TimedOut",
+        "after" -> after.asJson,
+        "stdout" -> stdout.asJson,
+        "stderr" -> stderr.asJson
+      )
+  }
+  private given Decoder[InvocationResult] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Exited", "SpawnFailed", "TimedOut")).flatMap {
+      case ("Exited", value) =>
+        (
+          value.get[Int]("exitCode"),
+          value.get[BoundedEvidence]("stdout"),
+          value.get[BoundedEvidence]("stderr")
+        ).mapN(InvocationResult.Exited.apply)
+      case ("SpawnFailed", value) =>
+        (
+          value.get[SpawnFailureKind]("kind"),
+          value.get[Diagnostics]("diagnostics"),
+          value.get[EvidenceBundle]("evidence")
+        ).mapN(InvocationResult.SpawnFailed.apply)
+      case ("TimedOut", value) =>
+        (
+          value.get[DurationMillis]("after"),
+          value.get[BoundedEvidence]("stdout"),
+          value.get[BoundedEvidence]("stderr")
+        ).mapN(InvocationResult.TimedOut.apply)
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown invocation result: $other", cursor.history))
+    }
+  }
+  private given Encoder[JobRef] =
+    Encoder.forProduct2("jobId", "arrayIndex")(value => (value.jobId, value.arrayIndex))
+  private given Decoder[JobRef] = Decoder.forProduct2("jobId", "arrayIndex")(JobRef.apply)
+  private given Encoder[AcceptanceUncertainty] = Encoder.instance {
+    case AcceptanceUncertainty.ResponseLost           => tagged("ResponseLost")
+    case AcceptanceUncertainty.TransportInterrupted   => tagged("TransportInterrupted")
+    case AcceptanceUncertainty.ResponseUnparseable    => tagged("ResponseUnparseable")
+    case AcceptanceUncertainty.PersistenceInterrupted => tagged("PersistenceInterrupted")
+    case AcceptanceUncertainty.Unclassified           => tagged("Unclassified")
+  }
+  private given Decoder[AcceptanceUncertainty] = Decoder.instance { cursor =>
+    taggedCase(
+      cursor,
+      Vector(
+        "ResponseLost",
+        "TransportInterrupted",
+        "ResponseUnparseable",
+        "PersistenceInterrupted",
+        "Unclassified"
+      )
+    ).flatMap {
+      case ("ResponseLost", _)           => Right(AcceptanceUncertainty.ResponseLost)
+      case ("TransportInterrupted", _)   => Right(AcceptanceUncertainty.TransportInterrupted)
+      case ("ResponseUnparseable", _)    => Right(AcceptanceUncertainty.ResponseUnparseable)
+      case ("PersistenceInterrupted", _) => Right(AcceptanceUncertainty.PersistenceInterrupted)
+      case ("Unclassified", _)           => Right(AcceptanceUncertainty.Unclassified)
+      case (other, _)                    =>
+        Left(DecodingFailure(s"unknown acceptance uncertainty: $other", cursor.history))
+    }
+  }
+  private given Encoder[Submission] = Encoder.instance {
+    case Submission.Accepted(job, evidence) =>
+      tagged("Accepted", "job" -> job.asJson, "evidence" -> evidence.asJson)
+    case Submission.Rejected(diagnostics, evidence) =>
+      tagged("Rejected", "diagnostics" -> diagnostics.asJson, "evidence" -> evidence.asJson)
+    case Submission.AcceptanceUnknown(reason, evidence) =>
+      tagged(
+        "AcceptanceUnknown",
+        "reason" -> reason.asJson,
+        "evidence" -> evidence.asJson
+      )
+  }
+  private given Decoder[Submission] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Accepted", "Rejected", "AcceptanceUnknown")).flatMap {
+      case ("Accepted", value) =>
+        (value.get[JobRef]("job"), value.get[EvidenceBundle]("evidence"))
+          .mapN(Submission.Accepted.apply)
+      case ("Rejected", value) =>
+        (value.get[Diagnostics]("diagnostics"), value.get[EvidenceBundle]("evidence"))
+          .mapN(Submission.Rejected.apply)
+      case ("AcceptanceUnknown", value) =>
+        (
+          value.get[AcceptanceUncertainty]("reason"),
+          value.get[EvidenceBundle]("evidence")
+        ).mapN(Submission.AcceptanceUnknown.apply)
+      case (other, _) => Left(DecodingFailure(s"unknown submission: $other", cursor.history))
+    }
+  }
+  private given Encoder[SubmissionAttempt] = Encoder.instance {
+    case SubmissionAttempt.Completed(value) =>
+      tagged("Completed", "value" -> value.asJson)
+    case SubmissionAttempt.InvocationFailed(result) =>
+      tagged("InvocationFailed", "result" -> result.asJson)
+    case SubmissionAttempt.PreparationFailed(diagnostics) =>
+      tagged("PreparationFailed", "diagnostics" -> diagnostics.asJson)
+  }
+  private given Decoder[SubmissionAttempt] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Completed", "InvocationFailed", "PreparationFailed")).flatMap {
+      case ("Completed", value) =>
+        value.get[Submission]("value").map(SubmissionAttempt.Completed.apply)
+      case ("InvocationFailed", value) =>
+        value.get[InvocationResult]("result").map(SubmissionAttempt.InvocationFailed.apply)
+      case ("PreparationFailed", value) =>
+        value.get[Diagnostics]("diagnostics").map(SubmissionAttempt.PreparationFailed.apply)
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown submission attempt: $other", cursor.history))
+    }
+  }
+  private given Encoder[CancellationResult] = Encoder.instance {
+    case CancellationResult.Acknowledged(evidence) =>
+      tagged("Acknowledged", "evidence" -> evidence.asJson)
+    case CancellationResult.NotFound(evidence) =>
+      tagged("NotFound", "evidence" -> evidence.asJson)
+    case CancellationResult.Rejected(diagnostics, evidence) =>
+      tagged("Rejected", "diagnostics" -> diagnostics.asJson, "evidence" -> evidence.asJson)
+    case CancellationResult.Unknown(diagnostics, evidence) =>
+      tagged("Unknown", "diagnostics" -> diagnostics.asJson, "evidence" -> evidence.asJson)
+  }
+  private given Decoder[CancellationResult] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Acknowledged", "NotFound", "Rejected", "Unknown")).flatMap {
+      case ("Acknowledged", value) =>
+        value.get[EvidenceBundle]("evidence").map(CancellationResult.Acknowledged.apply)
+      case ("NotFound", value) =>
+        value.get[EvidenceBundle]("evidence").map(CancellationResult.NotFound.apply)
+      case ("Rejected", value) =>
+        (value.get[Diagnostics]("diagnostics"), value.get[EvidenceBundle]("evidence"))
+          .mapN(CancellationResult.Rejected.apply)
+      case ("Unknown", value) =>
+        (value.get[Diagnostics]("diagnostics"), value.get[EvidenceBundle]("evidence"))
+          .mapN(CancellationResult.Unknown.apply)
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown cancellation result: $other", cursor.history))
+    }
+  }
+  private given Encoder[CancellationAttempt] = Encoder.instance {
+    case CancellationAttempt.Completed(value) =>
+      tagged("Completed", "value" -> value.asJson)
+    case CancellationAttempt.InvocationFailed(result) =>
+      tagged("InvocationFailed", "result" -> result.asJson)
+  }
+  private given Decoder[CancellationAttempt] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Completed", "InvocationFailed")).flatMap {
+      case ("Completed", value) =>
+        value.get[CancellationResult]("value").map(CancellationAttempt.Completed.apply)
+      case ("InvocationFailed", value) =>
+        value.get[InvocationResult]("result").map(CancellationAttempt.InvocationFailed.apply)
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown cancellation attempt: $other", cursor.history))
+    }
+  }
+
+  private given Encoder[CapabilitySupport] = Encoder.instance {
+    case CapabilitySupport.Supported            => tagged("Supported")
+    case CapabilitySupport.Unsupported          => tagged("Unsupported")
+    case CapabilitySupport.Unknown(diagnostics) =>
+      tagged("Unknown", "diagnostics" -> diagnostics.asJson)
+  }
+  private given Decoder[CapabilitySupport] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Supported", "Unsupported", "Unknown")).flatMap {
+      case ("Supported", _)   => Right(CapabilitySupport.Supported)
+      case ("Unsupported", _) => Right(CapabilitySupport.Unsupported)
+      case ("Unknown", value) =>
+        value.get[Diagnostics]("diagnostics").map(CapabilitySupport.Unknown.apply)
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown capability support: $other", cursor.history))
+    }
+  }
+  private given Encoder[SchedulerCapabilities] =
+    Encoder.forProduct7(
+      "slurmVersion",
+      "cluster",
+      "structuredQueue",
+      "structuredAccounting",
+      "accounting",
+      "arrays",
+      "rawEvidence"
+    )(value =>
+      (
+        value.slurmVersion,
+        value.cluster,
+        value.structuredQueue,
+        value.structuredAccounting,
+        value.accounting,
+        value.arrays,
+        value.rawEvidence
+      )
+    )
+  private given Decoder[SchedulerCapabilities] =
+    Decoder.forProduct7(
+      "slurmVersion",
+      "cluster",
+      "structuredQueue",
+      "structuredAccounting",
+      "accounting",
+      "arrays",
+      "rawEvidence"
+    )(SchedulerCapabilities.apply)
+  private given [A: Encoder]: Encoder[SchedulerQueryResult[A]] = Encoder.instance {
+    case SchedulerQueryResult.Succeeded(value) =>
+      tagged("Succeeded", "value" -> value.asJson)
+    case SchedulerQueryResult.Empty(observedAt, evidence) =>
+      tagged("Empty", "observedAt" -> observedAt.asJson, "evidence" -> evidence.asJson)
+    case SchedulerQueryResult.InvocationFailed(result) =>
+      tagged("InvocationFailed", "result" -> result.asJson)
+    case SchedulerQueryResult.ParseFailed(diagnostics, evidence) =>
+      tagged("ParseFailed", "diagnostics" -> diagnostics.asJson, "evidence" -> evidence.asJson)
+  }
+  private given [A: Decoder]: Decoder[SchedulerQueryResult[A]] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Succeeded", "Empty", "InvocationFailed", "ParseFailed")).flatMap {
+      case ("Succeeded", value) =>
+        value.get[A]("value").map(SchedulerQueryResult.Succeeded.apply)
+      case ("Empty", value) =>
+        (value.get[Instant]("observedAt"), value.get[EvidenceBundle]("evidence"))
+          .mapN(SchedulerQueryResult.Empty.apply)
+      case ("InvocationFailed", value) =>
+        value.get[InvocationResult]("result").map(SchedulerQueryResult.InvocationFailed.apply)
+      case ("ParseFailed", value) =>
+        (value.get[Diagnostics]("diagnostics"), value.get[EvidenceBundle]("evidence"))
+          .mapN(SchedulerQueryResult.ParseFailed.apply)
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown scheduler query result: $other", cursor.history))
+    }
+  }
 
   private given Encoder[SlurmStateFlag] = Encoder.instance {
     case SlurmStateFlag.Unknown(raw) =>
@@ -1955,10 +2350,88 @@ object AgentDomainJson:
           case None => decodeLegacySlurmState(cursor)
         }
   }
-  private given Encoder[Freshness] = deriveEncoder
-  private given Decoder[Freshness] = deriveDecoder
-  private given Encoder[WorkloadOutcome] = deriveEncoder
-  private given Decoder[WorkloadOutcome] = deriveDecoder
+  private given Encoder[Freshness] = Encoder.instance {
+    case Freshness.Current(observedAt) =>
+      tagged("Current", "observedAt" -> observedAt.asJson)
+    case Freshness.Stale(observedAt, age) =>
+      tagged("Stale", "observedAt" -> observedAt.asJson, "age" -> age.asJson)
+    case Freshness.Unknown(lastAttemptAt, diagnostics) =>
+      tagged(
+        "Unknown",
+        "lastAttemptAt" -> lastAttemptAt.asJson,
+        "diagnostics" -> diagnostics.asJson
+      )
+  }
+  private given Decoder[Freshness] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Current", "Stale", "Unknown")).flatMap {
+      case ("Current", value) =>
+        value.get[Instant]("observedAt").map(Freshness.Current.apply)
+      case ("Stale", value) =>
+        (value.get[Instant]("observedAt"), value.get[DurationMillis]("age"))
+          .mapN(Freshness.Stale.apply)
+      case ("Unknown", value) =>
+        (value.get[Instant]("lastAttemptAt"), value.get[Diagnostics]("diagnostics"))
+          .mapN(Freshness.Unknown.apply)
+      case (other, _) => Left(DecodingFailure(s"unknown freshness: $other", cursor.history))
+    }
+  }
+  private given Encoder[WorkloadOutcome] = Encoder.instance {
+    case WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero) =>
+      tagged("Completed", "exitCode" -> Json.fromInt(0))
+    case WorkloadOutcome.Completed(CompletionExitStatus.Undisclosed) =>
+      tagged("Completed", "exitCode" -> Json.Null)
+    case WorkloadOutcome.Failed(exitCode, diagnostics) =>
+      tagged("Failed", "exitCode" -> exitCode.asJson, "diagnostics" -> diagnostics.asJson)
+    case WorkloadOutcome.OutOfMemory       => tagged("OutOfMemory")
+    case WorkloadOutcome.TimeLimitExceeded => tagged("TimeLimitExceeded")
+    case WorkloadOutcome.Cancelled         => tagged("Cancelled")
+    case WorkloadOutcome.NodeFailure       => tagged("NodeFailure")
+    case WorkloadOutcome.Unknown(raw)      => tagged("Unknown", "raw" -> raw.asJson)
+  }
+  private given Decoder[WorkloadOutcome] = Decoder.instance { cursor =>
+    taggedCase(
+      cursor,
+      Vector(
+        "Completed",
+        "Failed",
+        "OutOfMemory",
+        "TimeLimitExceeded",
+        "Cancelled",
+        "NodeFailure",
+        "Unknown"
+      )
+    ).flatMap {
+      case ("Completed", value) =>
+        value
+          .downField("exitCode")
+          .focus
+          .toRight(DecodingFailure("completed outcome requires exitCode", value.history))
+          .flatMap {
+            case json if json.isNull => Right(CompletionExitStatus.Undisclosed)
+            case json if json.asNumber.flatMap(_.toInt).contains(0) =>
+              Right(CompletionExitStatus.ReportedZero)
+            case _ =>
+              Left(
+                DecodingFailure(
+                  "completed outcome exitCode must be zero or null",
+                  value.history
+                )
+              )
+          }
+          .map(WorkloadOutcome.Completed.apply)
+      case ("Failed", value) =>
+        (value.get[Option[Int]]("exitCode"), value.get[Diagnostics]("diagnostics"))
+          .mapN(WorkloadOutcome.Failed.apply)
+      case ("OutOfMemory", _)       => Right(WorkloadOutcome.OutOfMemory)
+      case ("TimeLimitExceeded", _) => Right(WorkloadOutcome.TimeLimitExceeded)
+      case ("Cancelled", _)         => Right(WorkloadOutcome.Cancelled)
+      case ("NodeFailure", _)       => Right(WorkloadOutcome.NodeFailure)
+      case ("Unknown", value)       =>
+        value.get[String]("raw").map(WorkloadOutcome.Unknown.apply)
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown workload outcome: $other", cursor.history))
+    }
+  }
   private given Encoder[SchedulerTimestamp] = Encoder.instance {
     case SchedulerTimestamp.Absolute(value) =>
       Json.obj(
@@ -2047,9 +2520,8 @@ object AgentDomainJson:
     yield JobTiming(start, projectedEndAt, timeLimit)
   }
   private given Encoder[JobObservation] = Encoder.instance { value =>
-    // `flags` and `reportedCluster` are emitted only when actually reported, so an observation
-    // without them keeps the wire shape it had before they existed and the decoder's defaults
-    // cover the rest.
+    // Additive evidence fields are emitted only when present/true, so an observation without them
+    // keeps the wire shape it had before they existed and the decoder's defaults cover the rest.
     Json.obj(
       Vector(
         "job" -> value.job.asJson,
@@ -2060,7 +2532,13 @@ object AgentDomainJson:
         "evidence" -> value.evidence.asJson,
         "timing" -> value.timing.asJson
       ) ++ Option.when(value.flags.nonEmpty)("flags" -> value.flags.asJson)
-        ++ value.reportedCluster.map(cluster => "reportedCluster" -> cluster.asJson)*
+        ++ value.reportedCluster.map(cluster => "reportedCluster" -> cluster.asJson)
+        ++ (value.stateExpressionCompleteness match
+          case StateExpressionCompleteness.Complete =>
+            Vector("stateExpressionTruncated" -> Json.fromBoolean(false))
+          case StateExpressionCompleteness.Truncated =>
+            Vector("stateExpressionTruncated" -> Json.fromBoolean(true))
+          case StateExpressionCompleteness.Unreported => Vector.empty)*
     )
   }
   private given Decoder[JobObservation] = Decoder.instance { cursor =>
@@ -2076,24 +2554,100 @@ object AgentDomainJson:
         .get[Option[Vector[SlurmStateFlag]]]("flags")
         .map(_.getOrElse(Vector.empty))
       reportedCluster <- cursor.get[Option[ClusterName]]("reportedCluster")
+      stateExpressionCompleteness <- cursor
+        .get[Option[Boolean]]("stateExpressionTruncated")
+        .map {
+          case Some(true)  => StateExpressionCompleteness.Truncated
+          case Some(false) => StateExpressionCompleteness.Complete
+          case None        => StateExpressionCompleteness.Unreported
+        }
     yield JobObservation(
-      job,
-      state,
-      freshness,
-      reason,
-      rawFields,
-      evidence,
-      timing,
-      flags,
-      reportedCluster
+      job = job,
+      state = state,
+      freshness = freshness,
+      reason = reason,
+      rawFields = rawFields,
+      evidence = evidence,
+      timing = timing,
+      flags = flags,
+      reportedCluster = reportedCluster,
+      stateExpressionCompleteness = stateExpressionCompleteness
     )
   }
-  private given Encoder[ExitStatus] = deriveEncoder
-  private given Decoder[ExitStatus] = deriveDecoder
-  private given Encoder[AccountingRecord] = deriveEncoder
-  private given Decoder[AccountingRecord] = deriveDecoder
-  private given Encoder[ObservationResult] = deriveEncoder
-  private given Decoder[ObservationResult] = deriveDecoder
+  private given Encoder[ExitStatus] =
+    Encoder.forProduct2("code", "signal")(value => (value.code, value.signal))
+  private given Decoder[ExitStatus] =
+    Decoder.forProduct2("code", "signal")(ExitStatus.apply)
+  private given Encoder[AccountingRecord] =
+    Encoder.forProduct7(
+      "job",
+      "state",
+      "exitStatus",
+      "outcome",
+      "freshness",
+      "rawFields",
+      "evidence"
+    )(value =>
+      (
+        value.job,
+        value.state,
+        value.exitStatus,
+        value.outcome,
+        value.freshness,
+        value.rawFields,
+        value.evidence
+      )
+    )
+  private given Decoder[AccountingRecord] =
+    Decoder.forProduct7(
+      "job",
+      "state",
+      "exitStatus",
+      "outcome",
+      "freshness",
+      "rawFields",
+      "evidence"
+    )(AccountingRecord.apply)
+  private given Encoder[ObservationResult] = Encoder.instance {
+    case ObservationResult.Observed(value) =>
+      tagged("Observed", "value" -> value.asJson)
+    case ObservationResult.NotFound(job, freshness, evidence) =>
+      tagged(
+        "NotFound",
+        "job" -> job.asJson,
+        "freshness" -> freshness.asJson,
+        "evidence" -> evidence.asJson
+      )
+    case ObservationResult.Failed(job, freshness, diagnostics, evidence) =>
+      tagged(
+        "Failed",
+        "job" -> job.asJson,
+        "freshness" -> freshness.asJson,
+        "diagnostics" -> diagnostics.asJson,
+        "evidence" -> evidence.asJson
+      )
+  }
+  private given Decoder[ObservationResult] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Observed", "NotFound", "Failed")).flatMap {
+      case ("Observed", value) =>
+        value.get[JobObservation]("value").map(ObservationResult.Observed.apply)
+      case ("NotFound", value) =>
+        (
+          value.get[JobRef]("job"),
+          value.get[Freshness]("freshness"),
+          value.get[EvidenceBundle]("evidence")
+        ).mapN(ObservationResult.NotFound.apply)
+      case ("Failed", value) =>
+        (
+          value.get[JobRef]("job"),
+          value.get[Freshness]("freshness"),
+          value.get[Diagnostics]("diagnostics"),
+          value.get[EvidenceBundle]("evidence")
+        ).mapN(ObservationResult.Failed.apply)
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown observation result: $other", cursor.history))
+    }
+  }
   private given Encoder[ObservationBatch] = Encoder
     .encodeVector[ObservationResult]
     .contramap(
@@ -2107,15 +2661,43 @@ object AgentDomainJson:
         .map(ObservationBatch.apply)
         .toRight("observations must not be empty")
     )
-  private given Encoder[AccountingBatch] = deriveEncoder
-  private given Decoder[AccountingBatch] = deriveDecoder
+  private given Encoder[AccountingBatch] = Encoder.instance { value =>
+    Json.obj(
+      "records" -> value.records.toVector.asJson,
+      "missing" -> value.missing.asJson
+    )
+  }
+  private given Decoder[AccountingBatch] = Decoder.instance { cursor =>
+    for
+      records <- cursor.get[Vector[AccountingRecord]]("records")
+      nonEmpty <- NonEmptyVector
+        .fromVector(records)
+        .toRight(DecodingFailure("accounting records must not be empty", cursor.history))
+      missing <- cursor.get[Vector[JobRef]]("missing")
+    yield AccountingBatch(nonEmpty, missing)
+  }
 
-  private given Encoder[LogStream] = deriveEncoder
-  private given Decoder[LogStream] = deriveDecoder
-  private given Encoder[LogRef] = deriveEncoder
-  private given Decoder[LogRef] = deriveDecoder
-  private given Encoder[LogCursor] = deriveEncoder
-  private given Decoder[LogCursor] = deriveDecoder
+  private given Encoder[LogStream] = Encoder.instance {
+    case LogStream.Stdout => tagged("Stdout")
+    case LogStream.Stderr => tagged("Stderr")
+  }
+  private given Decoder[LogStream] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Stdout", "Stderr")).flatMap {
+      case ("Stdout", _) => Right(LogStream.Stdout)
+      case ("Stderr", _) => Right(LogStream.Stderr)
+      case (other, _)    => Left(DecodingFailure(s"unknown log stream: $other", cursor.history))
+    }
+  }
+  private given Encoder[LogRef] =
+    Encoder.forProduct4("attemptId", "epoch", "stream", "locator")(value =>
+      (value.attemptId, value.epoch, value.stream, value.locator)
+    )
+  private given Decoder[LogRef] =
+    Decoder.forProduct4("attemptId", "epoch", "stream", "locator")(LogRef.apply)
+  private given Encoder[LogCursor] =
+    Encoder.forProduct2("offset", "fileIdentity")(value => (value.offset, value.fileIdentity))
+  private given Decoder[LogCursor] =
+    Decoder.forProduct2("offset", "fileIdentity")(LogCursor.apply)
   private given Encoder[LogPage] = Encoder.instance { value =>
     Json.obj(
       "bytesBase64" -> Json.fromString(Base64.getEncoder.encodeToString(value.bytes.toArray)),

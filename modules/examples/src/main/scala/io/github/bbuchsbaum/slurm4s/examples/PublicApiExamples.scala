@@ -62,16 +62,12 @@ object JobRequests:
       source: ScriptSource,
       arguments: Vector[String],
       outputPaths: Vector[String],
-      maximumManifestBytes: Int,
       resources: ResourceRequest,
       environment: Map[String, String] = Map.empty
   ): ValidatedNec[ValidationFailure, JobRequest[OutputManifest]] =
-    val contract = (
-      outputPaths.traverse(path => RelativeOutputPath.from(path).toValidatedNec),
-      ByteLimit.from(maximumManifestBytes).toValidatedNec
-    ).tupled.andThen { case (paths, maximum) =>
-      ResultContract.DeclaredOutputs.from(paths, maximum).toValidatedNec
-    }
+    val contract = outputPaths
+      .traverse(path => RelativeOutputPath.from(path).toValidatedNec)
+      .andThen(paths => ResultContract.DeclaredOutputs.from(paths).toValidatedNec)
 
     (
       SubmissionKey.from(submissionKey).toValidatedNec,

@@ -29,7 +29,8 @@ final case class RemoteBatchOptions(
     awaitPolicy: RemoteAwaitPolicy = RemoteAwaitPolicy.default,
     // Elements await in parallel, so without a ceiling a large batch opens one SSH process per
     // element per tick against a shared login node.
-    maximumConcurrentExchanges: PositiveInt = PositiveInt.unsafeFrom(8)
+    maximumConcurrentExchanges: PositiveInt = PositiveInt.unsafeFrom(8),
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 enum RemoteBatchSubmitFailure derives CanEqual:
@@ -246,7 +247,8 @@ private[ssh] object RemoteBatches:
         options.environment,
         options.maximumResultBytes,
         options.declaredOutputs,
-        batch.task.retrySafety
+        batch.task.retrySafety,
+        options.terminationNotice
       )
     yield Prepared(plan, request, contract)
 
@@ -402,7 +404,8 @@ final case class RemoteScriptBatchOptions(
     retrySafety: RetrySafety = RetrySafety.Unknown,
     awaitPolicy: RemoteAwaitPolicy = RemoteAwaitPolicy.default,
     // See RemoteBatchOptions: elements await in parallel, so the ceiling applies here too.
-    maximumConcurrentExchanges: PositiveInt = PositiveInt.unsafeFrom(8)
+    maximumConcurrentExchanges: PositiveInt = PositiveInt.unsafeFrom(8),
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 enum RemoteScriptSourceLocation derives CanEqual:
@@ -648,7 +651,8 @@ private[ssh] object RemoteScriptBatches:
                 plan.topology,
                 elements,
                 options.environment,
-                options.retrySafety
+                options.retrySafety,
+                options.terminationNotice
               )
             )
           }

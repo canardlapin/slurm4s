@@ -7,23 +7,19 @@ import scodec.bits.ByteVector
 
 import java.time.Instant
 
-/** Byte-exact coverage of the scheduler wire shapes that are still derived rather than owned.
+/** Byte-exact coverage of the explicitly owned scheduler wire shapes.
   *
-  * `AgentDomainJson` derives the encoders for `Submission`, `SubmissionAttempt`,
-  * `InvocationResult`, `CancellationResult`, `CancellationAttempt`, `AcceptanceUncertainty`,
-  * `SpawnFailureKind`, `CapabilitySupport`, `SchedulerCapabilities`, and `SchedulerQueryResult`.
-  * Derivation puts Scala case names on the wire, so renaming a case is a protocol change. Nothing
-  * else in the tree observes that: `sbt test`, `mimaReportBinaryIssues`, and `scalafmtCheckAll` all
-  * pass through a rename unchanged.
+  * These v1 tags deliberately retain the historical Scala case-name spelling. The implementation
+  * now writes each discriminator and field explicitly, so a source rename cannot silently change
+  * the protocol.
   *
-  * This fixture closes that window until the codecs are explicitly owned (P6f.12). Every case of
-  * every listed type appears exactly once, so any rename, reshaping, or field change fails here
-  * with a byte diff instead of reaching a deployed agent.
+  * Every case of every listed type appears exactly once, so any reshaping or field change fails
+  * here with a byte diff instead of reaching a deployed agent.
   */
 class AgentSchedulerShapeSuite extends munit.FunSuite:
   private val observedAt = Instant.parse("2026-07-25T12:00:00Z")
 
-  test("every derived scheduler wire shape matches the golden fixture") {
+  test("every owned scheduler wire shape matches the golden fixture") {
     // Regenerating is a protocol decision, never a way to make a failing build pass. Run
     // `sbt -Dslurm4s.regenerateShapeFixture=true protocol/test` only alongside a deliberate,
     // reviewed wire change, and check the resulting diff into the compatibility record.
@@ -42,7 +38,7 @@ class AgentSchedulerShapeSuite extends munit.FunSuite:
     assertEquals(shapes.spaces2, expected.spaces2)
   }
 
-  test("every derived scheduler wire shape survives a decode round trip") {
+  test("every owned scheduler wire shape survives a decode round trip") {
     submissions.foreach { case (label, value) =>
       assertEquals(
         AgentDomainJson.decodeSubmission(AgentDomainJson.encodeSubmission(value)),
@@ -64,6 +60,23 @@ class AgentSchedulerShapeSuite extends munit.FunSuite:
         s"capabilities round trip failed for $label"
       )
     }
+  }
+
+  test("an ambiguous scheduler discriminator is rejected rather than selected by source order") {
+    val ambiguous = Json.obj(
+      "Completed" -> Json.obj("value" -> AgentDomainJson.encodeSubmission(submissions.head._2)),
+      "InvocationFailed" -> Json.obj(
+        "result" -> Json.obj(
+          "Exited" -> Json.obj(
+            "exitCode" -> Json.fromInt(1),
+            "stdout" -> AgentDomainJson.encodeEvidence(bundle),
+            "stderr" -> AgentDomainJson.encodeEvidence(bundle)
+          )
+        )
+      )
+    )
+
+    assert(AgentDomainJson.decodeSubmission(ambiguous).isLeft)
   }
 
   private def shapes: Json =

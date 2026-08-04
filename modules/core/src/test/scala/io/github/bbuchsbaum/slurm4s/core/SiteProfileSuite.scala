@@ -1,5 +1,7 @@
 package io.github.bbuchsbaum.slurm4s.core
 
+import scodec.bits.ByteVector
+
 class SiteProfileSuite extends munit.FunSuite:
   test("site resolution records portable intent and resolved defaults") {
     val account = AccountName.unsafeFrom("research")
@@ -125,6 +127,28 @@ class SiteProfileSuite extends munit.FunSuite:
         "array-concurrency-limit-exceeded"
       )
     )
+  }
+
+  test("site resolution carries the requested termination notice unchanged") {
+    val notice = TerminationNotice(
+      TerminationNoticeSignal.Usr1,
+      TerminationNoticeScope.BatchShell,
+      SignalLeadSeconds.unsafeFrom(120)
+    )
+    val spec = LaunchSpec(
+      SubmissionKey.unsafeFrom("notice-site"),
+      JobName.unsafeFrom("notice"),
+      ScriptSource.unsafeInlineScript("notice.sh", ByteVector.empty),
+      Vector.empty,
+      ResultContract.ExitOnly.descriptor,
+      resources(1, Some(1), None),
+      terminationNotice = Some(notice)
+    )
+    val profile = SiteProfile(site = SiteId.unsafeFrom("notice-hpc"))
+
+    val resolution = profile.resolve(spec, SiteIntent()).toOption.get
+
+    assertEquals(resolution.effective.terminationNotice, Some(notice))
   }
 
   private def memory(value: Long): Mebibytes = Mebibytes.from(value).toOption.get

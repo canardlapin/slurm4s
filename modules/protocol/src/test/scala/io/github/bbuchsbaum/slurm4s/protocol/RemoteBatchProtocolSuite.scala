@@ -20,6 +20,11 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
     Some(MemoryRequest.PerNode(Mebibytes.from(1024).toOption.get)),
     Some(WallTimeMinutes.from(30).toOption.get)
   )
+  private val terminationNotice = TerminationNotice(
+    TerminationNoticeSignal.Usr1,
+    TerminationNoticeScope.JobSteps,
+    SignalLeadSeconds.unsafeFrom(45)
+  )
 
   test("owned batch wire round-trips independent, sharded, and gang topologies") {
     val executions = Vector(
@@ -118,7 +123,8 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
         )
       },
       Map.empty,
-      RetrySafety.NoAutomaticRetry
+      RetrySafety.NoAutomaticRetry,
+      Some(terminationNotice)
     )
     val elements = request.elements.map { element =>
       val attempt = AttemptId.from(s"script-${element.index.value}").toOption.get
@@ -200,7 +206,8 @@ class RemoteBatchProtocolSuite extends munit.FunSuite:
       Map(EnvName.unsafeFrom("LANG") -> "C.UTF-8"),
       ByteLimit.from(1024).toOption.get,
       Vector.empty,
-      RetrySafety.SafeForAutomaticRetry
+      RetrySafety.SafeForAutomaticRetry,
+      Some(terminationNotice)
     )
 
   private def batchResponse(

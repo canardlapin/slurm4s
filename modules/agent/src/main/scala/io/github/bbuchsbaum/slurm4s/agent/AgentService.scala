@@ -84,7 +84,8 @@ object AgentServiceConfig:
       AgentFeature.RegisteredTasks,
       AgentFeature.TypedResults,
       AgentFeature.TypedBatches,
-      AgentFeature.ScriptBatches
+      AgentFeature.ScriptBatches,
+      AgentFeature.TerminationNotices
     )
   )
 

@@ -495,6 +495,25 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
     yield ()
   }
 
+  test("an event stream fails explicitly when its cursor predates retained history") {
+    for
+      underlying <- InMemoryControlStore.create[IO]()
+      calls <- Ref.of[IO, Int](0)
+      controller = ManagedController[IO](
+        gapStore(underlying, EventCursor.from(10L).toOption.get),
+        schedulerWithSubmit(calls, IO.pure(accepted))
+      )
+      result <- controller
+        .eventStream(EventCursor.origin, 1, 10.millis)
+        .compile
+        .drain
+        .attempt
+      _ = result match
+        case Left(_: EventHistoryUnavailable) => ()
+        case other => fail(s"expected an event-history failure, got $other")
+    yield ()
+  }
+
   private def schedulerWithSubmit(
       calls: Ref[IO, Int],
       result: IO[SubmissionAttempt]
@@ -564,6 +583,28 @@ class ManagedControllerSuite extends munit.CatsEffectSuite:
       underlying.attempt(submissionKey)
     def events(after: EventCursor, maximum: Int): IO[EventPage] =
       underlying.events(after, maximum)
+    def pendingOutbox(maximum: Int): IO[Vector[OutboxEntry]] =
+      underlying.pendingOutbox(maximum)
+    def nonTerminal(maximum: Int): IO[Vector[ManagedAttempt]] =
+      underlying.nonTerminal(maximum)
+    def bound(maximum: Int): IO[Vector[ManagedAttempt]] =
+      underlying.bound(maximum)
+
+  private def gapStore(
+      underlying: ControlStore[IO],
+      minimumAvailableAfter: EventCursor
+  ): ControlStore[IO] = new ControlStore[IO]:
+    def transact(command: ControlCommand): IO[Either[ControlFailure, ControlCommit]] =
+      underlying.transact(command)
+    def snapshot: IO[ControlState] = underlying.snapshot
+    def attempt(submissionKey: SubmissionKey): IO[Option[ManagedAttempt]] =
+      underlying.attempt(submissionKey)
+    def events(after: EventCursor, maximum: Int): IO[EventPage] =
+      IO.pure(
+        EventPage.HistoryUnavailable(
+          EventHistoryGap.from(after, minimumAvailableAfter).toOption.get
+        )
+      )
     def pendingOutbox(maximum: Int): IO[Vector[OutboxEntry]] =
       underlying.pendingOutbox(maximum)
     def nonTerminal(maximum: Int): IO[Vector[ManagedAttempt]] =

@@ -80,21 +80,17 @@ jobs:
       - name: Test
         run: sbt '++ ${{ matrix.scala }}' test
 
-      - name: Check binary compatibility
-        if: matrix.java == 'temurin@17' && matrix.os == 'ubuntu-22.04'
-        run: sbt '++ ${{ matrix.scala }}' mimaReportBinaryIssues
-
       - name: Generate API documentation
         if: matrix.java == 'temurin@17' && matrix.os == 'ubuntu-22.04'
         run: sbt '++ ${{ matrix.scala }}' doc
 
       - name: Make target directories
         if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
-        run: mkdir -p modules/observability/target modules/managed/target modules/kernel/target modules/ssh/target modules/local/target modules/agent/target modules/cli/target modules/core/target modules/protocol/target modules/worker/target modules/testkit/target project/target
+        run: mkdir -p modules/observability/target modules/managed/target modules/kernel/target modules/task/target modules/ssh/target modules/local/target modules/agent/target modules/batch/target modules/cli/target modules/core/target modules/protocol/target modules/worker/target modules/testkit/target project/target
 
       - name: Compress target directories
         if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
-        run: tar cf targets.tar modules/observability/target modules/managed/target modules/kernel/target modules/ssh/target modules/local/target modules/agent/target modules/cli/target modules/core/target modules/protocol/target modules/worker/target modules/testkit/target project/target
+        run: tar cf targets.tar modules/observability/target modules/managed/target modules/kernel/target modules/task/target modules/ssh/target modules/local/target modules/agent/target modules/batch/target modules/cli/target modules/core/target modules/protocol/target modules/worker/target modules/testkit/target project/target
 
       - name: Upload target directories
         if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
@@ -190,52 +186,3 @@ jobs:
           SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
           SONATYPE_CREDENTIAL_HOST: ${{ secrets.SONATYPE_CREDENTIAL_HOST }}
         run: sbt tlCiRelease
-
-  dependency-submission:
-    name: Submit Dependencies
-    if: github.event.repository.fork == false && github.event_name != 'pull_request'
-    strategy:
-      matrix:
-        os: [ubuntu-22.04]
-        java: [temurin@17]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout current branch (full)
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
-
-      - name: Setup Java (temurin@17)
-        id: setup-java-temurin-17
-        if: matrix.java == 'temurin@17'
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: 17
-          cache: sbt
-
-      - name: sbt update
-        if: matrix.java == 'temurin@17' && steps.setup-java-temurin-17.outputs.cache-hit == 'false'
-        run: sbt +update
-
-      - name: Setup Java (temurin@21)
-        id: setup-java-temurin-21
-        if: matrix.java == 'temurin@21'
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: 21
-          cache: sbt
-
-      - name: sbt update
-        if: matrix.java == 'temurin@21' && steps.setup-java-temurin-21.outputs.cache-hit == 'false'
-        run: sbt +update
-
-      - name: Submit Dependencies
-        uses: scalacenter/sbt-dependency-submission@v2
-        with:
-          modules-ignore: slurm4s-examples_3 slurm4s-examples_3 slurm4s_3 slurm4s_3
-          configs-ignore: test scala-tool scala-doc-tool test-internal

@@ -91,7 +91,8 @@ final case class RegisteredTaskArrayRequest[I, O](
     environment: Map[EnvName, String],
     elements: NonEmptyVector[RegisteredTaskArrayElement[I]],
     maximumConcurrent: Option[PositiveInt],
-    retrySafety: RetrySafety = RetrySafety.Unknown
+    retrySafety: RetrySafety = RetrySafety.Unknown,
+    terminationNotice: Option[TerminationNotice] = None
 )
 
 final case class PreparedRegisteredArraySubmission[O](
@@ -276,7 +277,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         request.resources,
         request.environment,
         Some(arrayRequest),
-        request.retrySafety
+        request.retrySafety,
+        request.terminationNotice
       )
     yield PreparedRegisteredArraySubmission(
       schedulerRequest,
@@ -304,7 +306,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
             request.environment,
             request.maximumResultBytes,
             request.declaredOutputs,
-            request.retrySafety
+            request.retrySafety,
+            request.terminationNotice
           ),
           attemptEpoch
         ).map(element.index -> _)
@@ -327,7 +330,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         request.topology.resources,
         request.environment,
         request.topology.array,
-        request.retrySafety
+        request.retrySafety,
+        request.terminationNotice
       )
     yield PreparedRemoteRegisteredBatchSubmission(
       schedulerRequest,
@@ -374,7 +378,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         request.topology.resources,
         request.environment,
         request.topology.array,
-        request.retrySafety
+        request.retrySafety,
+        request.terminationNotice
       )
     yield PreparedRemoteScriptBatchSubmission(
       schedulerRequest,
@@ -556,7 +561,8 @@ final class RegisteredTaskLauncher(settings: WorkerLaunchSettings):
         ),
         request.resources,
         request.environment,
-        retrySafety = request.retrySafety
+        retrySafety = request.retrySafety,
+        terminationNotice = request.terminationNotice
       )
     yield PreparedRemoteRegisteredSubmission(
       schedulerRequest,

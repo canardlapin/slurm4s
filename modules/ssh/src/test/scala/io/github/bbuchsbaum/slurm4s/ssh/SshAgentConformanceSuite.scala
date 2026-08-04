@@ -111,6 +111,33 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     yield ()
   }
 
+  test("a requested termination notice is refused locally when the agent did not negotiate it") {
+    val config = AgentServiceConfig.default.copy(
+      features = AgentServiceConfig.default.features - AgentFeature.TerminationNotices
+    )
+    val service = AgentService[IO](deterministicScheduler, deterministicLogs, config = config)
+    val server = AgentStdioServer[IO](
+      ServiceRequestHandler[IO](service, SchedulerRequestHandler[IO](service))
+    )
+    val runner = LoopbackSshRunner(server)
+
+    for
+      connected <- SshAgentApi.connect[IO](wireClient(runner))
+      remote = connected match
+        case AgentCall.Succeeded(value) => value
+        case AgentCall.Failed(failure)  => throw new AssertionError(failure.toString)
+      exchangesAfterHandshake = runner.exchangeCount
+      result <- remote.submitOpaque(request)
+    yield
+      assert(
+        result match
+          case AgentCall.Failed(AgentFailure.ProtocolViolation(message, _)) =>
+            message.contains("termination notices")
+          case _ => false
+      )
+      assertEquals(runner.exchangeCount, exchangesAfterHandshake)
+  }
+
   private def localScenario(scheduler: Scheduler[IO]): IO[SchedulerTrace] =
     for
       capabilities <- scheduler.capabilities
@@ -166,7 +193,7 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     job,
     SlurmState.Completed,
     Some(ExitStatus(0, None)),
-    Some(WorkloadOutcome.Completed(0)),
+    Some(WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero)),
     freshness,
     Map("State" -> "COMPLETED"),
     evidence
@@ -188,7 +215,14 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     Vector("one", "two"),
     ResultContract.ExitOnly.descriptor,
     ResourceRequest.validate(2, 1, None, None, None).toEither.toOption.get,
-    Map(EnvName.unsafeFrom("LANG") -> "C")
+    Map(EnvName.unsafeFrom("LANG") -> "C"),
+    terminationNotice = Some(
+      TerminationNotice(
+        TerminationNoticeSignal.Usr1,
+        TerminationNoticeScope.BatchShell,
+        SignalLeadSeconds.unsafeFrom(90)
+      )
+    )
   )
 
   private val deterministicScheduler: Scheduler[IO] = new Scheduler[IO]:
@@ -196,7 +230,9 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
       IO.pure(SchedulerQueryResult.Succeeded(schedulerCapabilities))
 
     def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
-      IO.pure(SubmissionAttempt.Completed(Submission.Accepted(job, evidence)))
+      if spec.terminationNotice == request.terminationNotice then
+        IO.pure(SubmissionAttempt.Completed(Submission.Accepted(job, evidence)))
+      else IO.raiseError(new AssertionError("termination notice was not preserved"))
 
     def observe(jobs: NonEmptyVector[JobRef]): IO[SchedulerQueryResult[ObservationBatch]] =
       IO.pure(

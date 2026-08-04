@@ -40,10 +40,10 @@ final case class SshLaunch(
 
 /** Whether OpenSSH may consult an interactive authentication method.
   *
-  * Library calls default to [[NonInteractive]] so a missing or refused credential becomes an
-  * ordinary process result instead of waiting on a password or keyboard-interactive prompt.
-  * [[ConfiguredInteractive]] is an explicit compatibility mode: the calling application owns the
-  * controlling terminal and must keep the exchange timeout bounded.
+  * Library calls default to [[SshAuthentication.NonInteractive]] so a missing or refused credential
+  * becomes an ordinary process result instead of waiting on a password or keyboard-interactive
+  * prompt. [[SshAuthentication.ConfiguredInteractive]] is an explicit compatibility mode: the
+  * calling application owns the controlling terminal and must keep the exchange timeout bounded.
   */
 enum SshAuthentication derives CanEqual:
   case NonInteractive

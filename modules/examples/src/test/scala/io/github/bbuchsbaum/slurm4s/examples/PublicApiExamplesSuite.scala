@@ -36,7 +36,6 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
         source,
         Vector("--seed", "1"),
         Vector("results/model.rds"),
-        4096,
         resources
       )
       .toEither
@@ -58,12 +57,11 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
       ScriptSource.ExistingRemote("/cluster/jobs/model.R"),
       Vector.empty,
       Vector("../escape", "also//invalid"),
-      0,
       resources
     )
 
     assert(invalid.isInvalid)
-    assert(invalid.fold(_.toChain.toList.size >= 5, _ => false))
+    assert(invalid.fold(_.toChain.toList.size >= 4, _ => false))
   }
 
   test("local log pages resume from the returned cursor") {

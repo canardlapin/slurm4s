@@ -20,7 +20,8 @@ final case class RemoteRegisteredBatchRequest(
     environment: Map[EnvName, String],
     maximumResultBytes: ByteLimit,
     declaredOutputs: Vector[RelativeOutputPath],
-    retrySafety: RetrySafety
+    retrySafety: RetrySafety,
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 final case class RemoteRegisteredBatchElementSubmission(
@@ -50,7 +51,8 @@ final case class RemoteScriptBatchRequest(
     topology: BatchTopology,
     elements: NonEmptyVector[RemoteScriptBatchElement],
     environment: Map[EnvName, String],
-    retrySafety: RetrySafety
+    retrySafety: RetrySafety,
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 final case class RemoteScriptExitRef(

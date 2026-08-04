@@ -6,6 +6,13 @@ ThisBuild / organizationName := "Bradley Buchsbaum"
 ThisBuild / startYear := Some(2026)
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers := List(tlGitHubDev("bbuchsbaum", "Bradley Buchsbaum"))
+ThisBuild / homepage := Some(url("https://github.com/canardlapin/slurm4s"))
+ThisBuild / scmInfo := Some(
+  ScmInfo(
+    url("https://github.com/canardlapin/slurm4s"),
+    "scm:git:git@github.com:canardlapin/slurm4s.git"
+  )
+)
 ThisBuild / scalaVersion := Versions.scala3
 ThisBuild / crossScalaVersions := Seq(Versions.scala3, Versions.scala3Next)
 // Scala 3 versions share `_3` artifact coordinates, so cross-publishing both lines would try to
@@ -16,6 +23,16 @@ ThisBuild / tlJdkRelease := Some(17)
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"), JavaSpec.temurin("21"))
 ThisBuild / tlCiScalafmtCheck := true
 ThisBuild / tlCiHeaderCheck := false
+// GitHub rejected the generated dependency-submission job with 403 because that API requires a
+// write-capable token. Granting contents:write to the whole generated workflow would give every
+// build and test job repository write access for an optional inventory feature. Keep CI
+// least-privileged; ordinary dependency updates remain visible through the checked-in build and
+// Dependabot can be enabled independently at repository scope.
+ThisBuild / tlCiDependencyGraphJob := false
+// No artifact has been released and no compatibility baseline exists yet. A step named "Check
+// binary compatibility" with mimaPreviousArtifacts = Set() checks nothing and creates false
+// assurance. P7.6 owns the first 0.1 baseline and will enable this gate when it can actually bite.
+ThisBuild / tlCiMimaBinaryIssueCheck := false
 ThisBuild / scalacOptions ++= Seq("-Xmax-inlines:64", "-language:strictEquality")
 // sbt-typelevel defaults this to false. Two plan documents claimed -Werror was already in CI; it
 // was not, and enabling it immediately exposed two non-exhaustive matches over SlurmState that the

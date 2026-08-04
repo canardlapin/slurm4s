@@ -27,6 +27,11 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
     DurationMillis.from(1L).toOption.get,
     DurationMillis.from(1000L).toOption.get
   )
+  private val terminationNotice = TerminationNotice(
+    TerminationNoticeSignal.Usr1,
+    TerminationNoticeScope.BatchShell,
+    SignalLeadSeconds.unsafeFrom(120)
+  )
   private val release = WorkerRelease(
     WorkerReleaseId.from("remote-suite-worker").toOption.get,
     ContentDigest
@@ -329,7 +334,8 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
       JobName.from("remote-increment").toOption.get,
       ResourceRequest.validate(1, 1, None, None, None).toOption.get,
       resultLimit,
-      awaitPolicy = awaitPolicy
+      awaitPolicy = awaitPolicy,
+      terminationNotice = Some(terminationNotice)
     )
 
   private def publishSuccess(
@@ -445,13 +451,24 @@ class RemoteTaskSuite extends munit.CatsEffectSuite:
         }
       )
 
-    SchedulerProgram[IO](
+    val delegate = SchedulerProgram[IO](
       capabilities,
       _ => IO.pure(submission),
       _ => IO.pure(SchedulerQueryResult.Empty(observedAt, evidence)),
       _ => accounting,
       _ => IO.pure(CancellationAttempt.Completed(CancellationResult.Acknowledged(evidence)))
     ).scheduler
+    new Scheduler[IO]:
+      def capabilities: IO[SchedulerQueryResult[SchedulerCapabilities]] = delegate.capabilities
+      def submit(spec: LaunchSpec): IO[SubmissionAttempt] =
+        IO(assertEquals(spec.terminationNotice, Some(terminationNotice))) *> delegate.submit(spec)
+      def observe(
+          jobs: NonEmptyVector[JobRef]
+      ): IO[SchedulerQueryResult[ObservationBatch]] = delegate.observe(jobs)
+      def accounting(
+          jobs: NonEmptyVector[JobRef]
+      ): IO[SchedulerQueryResult[AccountingBatch]] = delegate.accounting(jobs)
+      def cancel(job: JobRef): IO[CancellationAttempt] = delegate.cancel(job)
 
 /** Injects a bounded run of transport failures, then behaves normally.
   *

@@ -74,6 +74,7 @@ enum ControlFailure derives CanEqual:
   case EpochExhausted(submissionKey: SubmissionKey)
   case OutboxInvariant(submissionKey: SubmissionKey, message: String)
   case JournalCorrupt(message: String)
+  case JournalIo(message: String)
   case JournalExhausted(message: String)
   case JournalLocked(path: String)
 

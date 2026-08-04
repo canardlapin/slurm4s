@@ -43,6 +43,7 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     val ordinaryJson = AgentDomainJson.encodeSubmitRequest(ordinary).toOption.get
     assert(!ordinaryJson.hcursor.downField("array").succeeded)
     assert(!ordinaryJson.hcursor.downField("retrySafety").succeeded)
+    assert(!ordinaryJson.hcursor.downField("terminationNotice").succeeded)
     assertEquals(AgentDomainJson.decodeSubmitRequest(ordinaryJson), Right(ordinary))
 
     val retryable = ordinary.copy(retrySafety = RetrySafety.SafeForAutomaticRetry)
@@ -57,6 +58,25 @@ class AgentDomainJsonSuite extends munit.FunSuite:
         .decodeSubmitRequest(retryableJson.mapObject(_.remove("retrySafety")))
         .map(_.retrySafety),
       Right(RetrySafety.Unknown)
+    )
+
+    val notice = TerminationNotice(
+      TerminationNoticeSignal.Xcpu,
+      TerminationNoticeScope.JobSteps,
+      SignalLeadSeconds.unsafeFrom(65535)
+    )
+    val withNotice = ordinary.copy(terminationNotice = Some(notice))
+    val noticeJson = AgentDomainJson.encodeSubmitRequest(withNotice).toOption.get
+    assertEquals(
+      noticeJson.hcursor.downField("terminationNotice").focus.map(_.noSpaces),
+      Some("""{"signal":"XCPU","scope":"job-steps","leadSeconds":65535}""")
+    )
+    assertEquals(AgentDomainJson.decodeSubmitRequest(noticeJson), Right(withNotice))
+    assertEquals(
+      AgentDomainJson
+        .decodeSubmitRequest(noticeJson.mapObject(_.remove("terminationNotice")))
+        .map(_.terminationNotice),
+      Right(None)
     )
   }
 
@@ -82,6 +102,67 @@ class AgentDomainJsonSuite extends munit.FunSuite:
       "inline script bytes travel as a JSON array of signed byte values"
     )
     assertEquals(AgentDomainJson.decodeSubmitRequest(encoded), Right(request))
+  }
+
+  test("non-inline script sources keep the derived wire shapes older peers already read") {
+    val cases = Vector(
+      ScriptSource.StagedLocal("/local/run.sh") ->
+        """{"StagedLocal":{"path":"/local/run.sh"}}""",
+      ScriptSource.ExistingRemote("/remote/run.sh") ->
+        """{"ExistingRemote":{"path":"/remote/run.sh"}}"""
+    )
+
+    cases.zipWithIndex.foreach { case ((source, expected), index) =>
+      val request = LaunchSpec(
+        SubmissionKey.from(s"wire-source-$index").toOption.get,
+        JobName.from(s"wire-source-$index").toOption.get,
+        source,
+        Vector.empty,
+        ResultContract.ExitOnly.descriptor,
+        ResourceRequest.validate(1, 1, None, None, None).toOption.get,
+        Map.empty
+      )
+      val encoded = AgentDomainJson.encodeSubmitRequest(request).toOption.get
+
+      assertEquals(
+        encoded.hcursor.downField("source").focus.map(_.noSpaces),
+        Some(expected)
+      )
+      assertEquals(AgentDomainJson.decodeSubmitRequest(encoded), Right(request))
+    }
+  }
+
+  test("a newer peer may add a field beside any known script-source tag") {
+    val sources = Vector(
+      ScriptSource.unsafeInlineScript("run.sh", ByteVector(1, 2, 3)),
+      ScriptSource.StagedLocal("/local/run.sh"),
+      ScriptSource.ExistingRemote("/remote/run.sh")
+    )
+
+    sources.zipWithIndex.foreach { case (source, index) =>
+      val request = LaunchSpec(
+        SubmissionKey.from(s"wire-source-extension-$index").toOption.get,
+        JobName.from(s"wire-source-extension-$index").toOption.get,
+        source,
+        Vector.empty,
+        ResultContract.ExitOnly.descriptor,
+        ResourceRequest.validate(1, 1, None, None, None).toOption.get,
+        Map.empty
+      )
+      val encoded = AgentDomainJson.encodeSubmitRequest(request).toOption.get
+      val extendedSource = encoded.hcursor
+        .downField("source")
+        .focus
+        .get
+        .mapObject(_.add("fieldFromANewerPeer", Json.fromString("ignored")))
+      val extended = encoded.mapObject(_.add("source", extendedSource))
+
+      assertEquals(
+        AgentDomainJson.decodeSubmitRequest(extended),
+        Right(request),
+        s"an additive field broke ${source.productPrefix}"
+      )
+    }
   }
 
   test("agent submit wire round-trips validated environment names and rejects export injection") {
@@ -179,6 +260,54 @@ class AgentDomainJsonSuite extends munit.FunSuite:
         .decodeObservation(removeField(encoded, "reportedCluster"))
         .map(observedCluster),
       Right(None)
+    )
+  }
+
+  test("observations distinguish complete, truncated, and unreported state expressions") {
+    val observedAt = Instant.parse("2026-07-23T12:00:00Z")
+    val observation = JobObservation(
+      job = JobRef(JobId.from("2004").toOption.get, None),
+      state = SlurmState.Cancelled,
+      freshness = Freshness.Current(observedAt),
+      reason = None,
+      rawFields = Map.empty,
+      evidence = EvidenceBundle(
+        BoundedEvidence.capture(
+          EvidenceSource.CommandStdout("squeue"),
+          observedAt,
+          ByteVector.empty
+        )
+      ),
+      stateExpressionCompleteness = StateExpressionCompleteness.Truncated
+    )
+    val result: SchedulerQueryResult[ObservationBatch] =
+      SchedulerQueryResult.Succeeded(
+        ObservationBatch(NonEmptyVector.one(ObservationResult.Observed(observation)))
+      )
+    val encoded = AgentDomainJson.encodeObservation(result)
+
+    assertEquals(AgentDomainJson.decodeObservation(encoded), Right(result))
+    assertEquals(
+      AgentDomainJson
+        .decodeObservation(removeField(encoded, "stateExpressionTruncated"))
+        .map(observedTruncation),
+      Right(StateExpressionCompleteness.Unreported)
+    )
+    val complete: SchedulerQueryResult[ObservationBatch] =
+      SchedulerQueryResult.Succeeded(
+        ObservationBatch(
+          NonEmptyVector.one(
+            ObservationResult.Observed(
+              observation.copy(
+                stateExpressionCompleteness = StateExpressionCompleteness.Complete
+              )
+            )
+          )
+        )
+      )
+    assertEquals(
+      AgentDomainJson.decodeObservation(AgentDomainJson.encodeObservation(complete)),
+      Right(complete)
     )
   }
 
@@ -299,6 +428,24 @@ class AgentDomainJsonSuite extends munit.FunSuite:
     assertEquals(encoded.hcursor.get[String]("inputBase64").toOption, Some("AH+A/w=="))
     assert(!encoded.noSpaces.contains("[0,127"))
     assert(!encoded.noSpaces.contains("\"PerNode\""))
+    assert(!encoded.hcursor.downField("terminationNotice").succeeded)
+    val withNotice = request.copy(
+      terminationNotice = Some(
+        TerminationNotice(
+          TerminationNoticeSignal.Usr2,
+          TerminationNoticeScope.BatchShell,
+          SignalLeadSeconds.unsafeFrom(30)
+        )
+      )
+    )
+    val noticeJson = AgentDomainJson.encodeRemoteTaskRequest(withNotice).toOption.get
+    assertEquals(AgentDomainJson.decodeRemoteTaskRequest(noticeJson), Right(withNotice))
+    assertEquals(
+      AgentDomainJson
+        .decodeRemoteTaskRequest(noticeJson.mapObject(_.remove("terminationNotice")))
+        .map(_.terminationNotice),
+      Right(None)
+    )
     assert(
       AgentDomainJson
         .decodeRemoteTaskRequest(encoded.mapObject(_.add("wireVersion", Json.fromInt(2))))
@@ -489,6 +636,16 @@ class AgentDomainJsonSuite extends munit.FunSuite:
       case SchedulerQueryResult.Succeeded(batch) =>
         batch.results.head match
           case ObservationResult.Observed(value) => value.reportedCluster
+          case other                             => fail(s"unexpected observation result: $other")
+      case other => fail(s"unexpected query result: $other")
+
+  private def observedTruncation(
+      result: SchedulerQueryResult[ObservationBatch]
+  ): StateExpressionCompleteness =
+    result match
+      case SchedulerQueryResult.Succeeded(batch) =>
+        batch.results.head match
+          case ObservationResult.Observed(value) => value.stateExpressionCompleteness
           case other                             => fail(s"unexpected observation result: $other")
       case other => fail(s"unexpected query result: $other")
 

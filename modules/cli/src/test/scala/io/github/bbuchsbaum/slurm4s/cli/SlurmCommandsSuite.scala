@@ -35,6 +35,29 @@ class SlurmCommandsSuite extends munit.FunSuite:
     assert(command(MemoryRequest.AllNodeMemory).arguments.contains("--mem=0"))
   }
 
+  test("termination notice is one argv value with explicit Slurm scope") {
+    def command(scope: TerminationNoticeScope): SlurmCommand =
+      val notice = TerminationNotice(
+        TerminationNoticeSignal.Usr1,
+        scope,
+        SignalLeadSeconds.unsafeFrom(120)
+      )
+      SlurmCommands.submit(
+        PreparedSubmission(
+          jobRequest(MemoryRequest.AllNodeMemory).copy(terminationNotice = Some(notice)),
+          "/work/script",
+          "/work/out",
+          "/work/err"
+        )
+      )
+
+    val batch = command(TerminationNoticeScope.BatchShell).arguments
+    val steps = command(TerminationNoticeScope.JobSteps).arguments
+
+    assertEquals(batch.filter(_.startsWith("--signal=")), Vector("--signal=B:USR1@120"))
+    assertEquals(steps.filter(_.startsWith("--signal=")), Vector("--signal=USR1@120"))
+  }
+
   test("resolved site settings are emitted as argv and retain explicit environment export") {
     val request = jobRequest(MemoryRequest.PerNode(Mebibytes.from(8192).toOption.get))
       .copy(

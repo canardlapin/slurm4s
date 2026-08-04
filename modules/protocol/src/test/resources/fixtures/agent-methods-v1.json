@@ -1,0 +1,17 @@
+{
+  "methods": [
+    "handshake",
+    "capabilities",
+    "submit-opaque",
+    "submit-registered",
+    "submit-batch",
+    "submit-script-batch",
+    "observe",
+    "accounting",
+    "cancel",
+    "read-log",
+    "read-result",
+    "read-results",
+    "read-script-exit"
+  ]
+}

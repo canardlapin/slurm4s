@@ -10,6 +10,7 @@ import io.github.bbuchsbaum.slurm4s.protocol.AgentFailure
 import io.github.bbuchsbaum.slurm4s.protocol.RemoteResultRead
 import io.github.bbuchsbaum.slurm4s.protocol.AgentDomainJson
 import io.github.bbuchsbaum.slurm4s.protocol.AgentEnvelope
+import io.github.bbuchsbaum.slurm4s.protocol.AgentFailurePayload
 import io.github.bbuchsbaum.slurm4s.protocol.AgentMethod
 import io.github.bbuchsbaum.slurm4s.protocol.AgentResponseStatus
 
@@ -149,7 +150,7 @@ final class SchedulerRequestHandler[F[_]: Monad](service: AgentService[F])
       request.withBody(
         AgentBody.Response(
           AgentResponseStatus.DomainFailure,
-          Json.obj("message" -> Json.fromString(failure.toString))
+          AgentFailurePayload.fromFailure(failure).asJson
         )
       )
 
@@ -167,7 +168,7 @@ final class SchedulerRequestHandler[F[_]: Monad](service: AgentService[F])
       request.withBody(
         AgentBody.Response(
           AgentResponseStatus.DomainFailure,
-          Json.obj("message" -> Json.fromString(failure.toString))
+          AgentFailurePayload.fromFailure(failure).asJson
         )
       )
 
@@ -175,6 +176,6 @@ final class SchedulerRequestHandler[F[_]: Monad](service: AgentService[F])
     request.withBody(
       AgentBody.Response(
         AgentResponseStatus.ProtocolFailure,
-        Json.obj("message" -> Json.fromString(problem))
+        AgentFailurePayload.protocolViolation(problem).asJson
       )
     )

@@ -52,6 +52,14 @@ class CodecLawStrengthSuite extends munit.FunSuite:
     detects[JobObservation]("JobObservation.flags", jobObservation, _.copy(flags = Vector.empty))
   }
 
+  test("the observation law would catch a decoder that drops state-expression truncation") {
+    detects[JobObservation](
+      "JobObservation.stateExpressionCompleteness",
+      jobObservation,
+      _.copy(stateExpressionCompleteness = StateExpressionCompleteness.Unreported)
+    )
+  }
+
   test("the observation law would catch a decoder that drops the timing block") {
     detects[JobObservation](
       "JobObservation.timing",
@@ -76,8 +84,35 @@ class CodecLawStrengthSuite extends munit.FunSuite:
     )
   }
 
+  test("the accounting law distinguishes disclosed and undisclosed completed exits") {
+    val samples = org.scalacheck.Gen.listOfN(Samples, workloadOutcome).sample.toVector.flatten
+    assert(
+      samples.exists {
+        case WorkloadOutcome.Completed(CompletionExitStatus.Undisclosed) => true
+        case _                                                           => false
+      },
+      "the generator never produced an undisclosed completed exit"
+    )
+    assert(
+      samples.exists {
+        case WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero) => true
+        case _                                                            => false
+      },
+      "the generator never produced a disclosed completed exit"
+    )
+  }
+
   test("the diagnostic fields survive generation, so a codec dropping them is visible") {
     detects[Diagnostic]("Diagnostic.fields", diagnostic, _.copy(fields = Map.empty))
+  }
+
+  test("the launch-spec law reaches termination notices instead of only the absent default") {
+    val samples = Vector.fill(Samples)(exitOnlyLaunchSpec.sample).flatten
+    assert(
+      samples.exists(_.terminationNotice.nonEmpty),
+      "no generated launch spec requested notice"
+    )
+    assert(samples.exists(_.terminationNotice.isEmpty), "no generated launch spec omitted notice")
   }
 
   /** `retrySafety` defaults on `DurableResultHandle.from`, which is the same shape of hazard as

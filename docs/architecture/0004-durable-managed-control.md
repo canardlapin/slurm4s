@@ -8,7 +8,7 @@
 
 The optional managed surface is implemented in `slurm4s-managed`. Its authority is a
 `ControlStore[F]` containing canonical submission intent, attempt projection, transactional
-outbox, and an append-only committed event journal. `ManagedController[F]` coordinates that store
+outbox, and a durable committed event journal. `ManagedController[F]` coordinates that store
 with the existing transport-neutral `Scheduler[F]`; it does not make a fiber, SSH connection,
 FS2 stream, or process lifetime authoritative.
 
@@ -46,8 +46,8 @@ attempt merely by returning a valid payload.
 ## Reference journal
 
 `FileJournalControlStore` is the initial durable reference interpreter. It deliberately uses an
-exclusive, append-only journal instead of making SQLite a mandatory dependency at this stage.
-Each transaction is:
+exclusive snapshot-plus-suffix journal instead of making SQLite a mandatory dependency at this
+stage. Each transaction is:
 
 - a four-byte bounded length followed by canonical versioned JSON;
 - tagged with prior and resulting store revisions;
@@ -62,11 +62,18 @@ open it. A crash may leave a partial final frame; that frame was never committed
 only that incomplete tail and reports the byte count. A complete malformed, checksummed, schema,
 revision, or transition mismatch is corruption and stops open rather than being silently repaired.
 
-The live projection retains only a bounded recent-event cache. Cursor reads replay the durable
-journal and can resume from any committed cursor, including a cursor older than that cache. This
-reference is consequently bounded but O(journal size) for old event pages. A SQLite interpreter
-with indexed event pages and explicit migrations may be added behind `ControlStore[F]` when scale
-evidence justifies it; it must satisfy the same reducer and crash laws.
+`JournalLimits.maximumStorageBytes` bounds the checksummed materialized snapshot plus its forced
+command suffix. Compaction atomically publishes the new snapshot before resetting the suffix, so a
+crash leaves either the previous journal, a new snapshot beside the previous prefix, or the new
+snapshot with an empty suffix. All three replay to the last committed state.
+An oversized snapshot-less legacy journal is promoted during open; its first bounded open performs
+the full replay, while later opens start from the materialized projection.
+
+The live projection and snapshot retain a bounded recent-event window. Requests older than that
+window return an explicit `EventHistoryGap`; the FS2 stream fails with
+`EventHistoryUnavailable` instead of skipping ahead. A SQLite interpreter with indexed event pages
+and explicit migrations may be added behind `ControlStore[F]` when scale evidence justifies it; it
+must satisfy the same reducer, retention, and crash laws.
 
 ## Observation and cancellation
 
@@ -95,13 +102,13 @@ submission recovery, cancellation, or scheduler reconciliation.
 - The file journal is a single-writer reference and prioritizes auditable crash behavior over
   indexed query throughput. P5 load evidence will determine whether SQLite becomes the default.
 - Structured result and output acceptance use the epoch-fence seam but are implemented in P4.
-- Retention/compaction requires an explicit checkpoint and migration protocol; this version does
-  not delete committed history.
+- Snapshot compaction is a one-way persistence upgrade: older readers do not understand the
+  snapshot sidecar after the command prefix has been retired.
 
 ## Executable evidence
 
 - File reopen tests cover intent-only, claimed/in-flight, accepted/bound, partial-tail, corrupted
-  record, exclusive-lock, and multi-event cursor edges.
+  record, exclusive-lock, snapshot publication boundaries, bounded size, and retained-cursor gaps.
 - Controller tests prove digest idempotency/conflict before scheduler action, one invocation under
   concurrent dispatch, lost-response no-retry, effect-loss recovery, restart recovery, unique
   acceptance binding, and cancellation restart behavior.

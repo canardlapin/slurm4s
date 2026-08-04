@@ -40,6 +40,25 @@ class AgentMessageCodecSuite extends munit.FunSuite:
     assertEquals(decoded.extensions("future-field"), Some(Json.fromBoolean(true)))
   }
 
+  test("the language-neutral method registry covers every request method") {
+    val fixture = io.circe.parser.parse(resource("/fixtures/agent-methods-v1.json")).toOption.get
+    val wireNames = fixture.hcursor.get[Vector[String]]("methods").toOption.get
+    val expected = AgentMethod.values.toVector.map(_.wireName)
+
+    assertEquals(wireNames, expected)
+    AgentMethod.values.foreach { method =>
+      val body = Json.obj("text" -> Json.fromString("héllø λ"))
+      val encoded = AgentMessageCodec.encode(
+        AgentEnvelope(requestId, ProtocolVersion.v1, AgentBody.Request(method, body))
+      )
+      AgentMessageCodec.decode(encoded).toOption.get.body match
+        case AgentBody.Request(decodedMethod, decodedBody) =>
+          assertEquals(decodedMethod, method)
+          assertEquals(decodedBody, body)
+        case other => fail(s"expected request for ${method.wireName}, received $other")
+    }
+  }
+
   test("reserved message extensions are rejected at construction") {
     val collision = AgentEnvelope.withExtensions(
       requestId,
@@ -80,6 +99,21 @@ class AgentMessageCodecSuite extends munit.FunSuite:
     )
 
     assertEquals(HandshakeJson.decodeResponse(HandshakeJson.response(response)), Right(response))
+  }
+
+  test("handshake feature negotiation ignores names introduced by a newer peer") {
+    val request = Json.obj(
+      "maximumFrameBytes" -> Json.fromInt(16 * 1024),
+      "requestedFeatures" -> Json.arr(
+        Json.fromString("opaque-scripts"),
+        Json.fromString("future-feature")
+      )
+    )
+
+    assertEquals(
+      HandshakeJson.decodeRequest(request).map(_.requestedFeatures),
+      Right(Set(AgentFeature.OpaqueScripts))
+    )
   }
 
   test("handshake rejects a log-page budget larger than its frame can carry") {
@@ -125,3 +159,11 @@ class AgentMessageCodecSuite extends munit.FunSuite:
     assert(payload.size <= frameLimit.value)
     assert(FrameCodec.encode(payload, FrameLimits(frameLimit)).isRight)
   }
+
+  private def resource(path: String): String =
+    scala.io.Source
+      .fromInputStream(
+        Option(getClass.getResourceAsStream(path))
+          .getOrElse(throw new IllegalStateException(s"missing fixture: $path"))
+      )
+      .mkString

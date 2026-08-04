@@ -20,9 +20,9 @@ class WorkloadSuite extends munit.FunSuite:
     val output = RelativeOutputPath.from("results/model.rds").toOption.get
 
     assert(RelativeOutputPath.from("../secret").isLeft)
-    assert(ResultContract.DeclaredOutputs.from(Vector.empty, limit).isLeft)
-    assert(ResultContract.DeclaredOutputs.from(Vector(output), limit).isRight)
-    assert(ResultContract.DeclaredOutputs.from(Vector(output, output), limit).isLeft)
+    assert(ResultContract.DeclaredOutputs.from(Vector.empty).isLeft)
+    assert(ResultContract.DeclaredOutputs.from(Vector(output)).isRight)
+    assert(ResultContract.DeclaredOutputs.from(Vector(output, output)).isLeft)
 
     val codec = new ResultCodec[String]:
       val schemaId: ResultSchemaId = ResultSchemaId.from("example.text.v1").toOption.get

@@ -37,8 +37,10 @@ broader time scan. JSON accounting can be enabled only when a versioned codec ha
 and conformance evidence.
 
 An accounting row is not automatically terminal: pending, running, completing, and unknown states
-carry no `WorkloadOutcome`. A completed row with a non-zero exit is a failure value. Partial
-multi-job responses retain the missing job references rather than silently shrinking the query.
+carry no `WorkloadOutcome`. A completed row with a non-zero exit is a failure value. Successful
+completion retains an optional reported exit code, so an undisclosed status is not fabricated as
+zero. Partial multi-job responses retain the missing job references rather than silently shrinking
+the query.
 
 The [scancel manual](https://slurm.schedmd.com/scancel.html) describes signaling/cancellation and
 its authorization failures. An exit-zero invocation is consequently an acknowledgement, not a

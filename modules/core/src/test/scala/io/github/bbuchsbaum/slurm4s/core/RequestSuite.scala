@@ -29,6 +29,21 @@ class RequestSuite extends munit.FunSuite:
     assert(AttemptEpoch.from(Long.MaxValue).toOption.get.next.isLeft)
   }
 
+  test("termination notice lead time covers exactly Slurm's supported range") {
+    assertEquals(SignalLeadSeconds.from(0).map(_.toInt), Right(0))
+    assertEquals(SignalLeadSeconds.from(65535).map(_.toInt), Right(65535))
+    assert(SignalLeadSeconds.from(-1).isLeft)
+    assert(SignalLeadSeconds.from(65536).isLeft)
+  }
+
+  test("termination notice signals are catchable names, never KILL or STOP") {
+    val names = TerminationNoticeSignal.values.map(_.slurmName).toSet
+    assert(names.contains("USR1"))
+    assert(names.contains("TERM"))
+    assert(!names.contains("KILL"))
+    assert(!names.contains("STOP"))
+  }
+
   test("environment names exclude Slurm export syntax and reserved tokens") {
     Vector(
       "",

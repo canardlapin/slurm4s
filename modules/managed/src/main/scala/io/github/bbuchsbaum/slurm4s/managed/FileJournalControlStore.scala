@@ -6,6 +6,8 @@ import cats.effect.Resource
 import cats.effect.std.Semaphore
 import cats.syntax.all.*
 import io.circe.Json
+import io.github.bbuchsbaum.remoteexec.kernel.AtomicFiles
+import io.github.bbuchsbaum.remoteexec.kernel.byteVectorCanEqual
 import io.github.bbuchsbaum.slurm4s.core.ByteLimit
 import io.github.bbuchsbaum.slurm4s.core.EventCursor
 import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
@@ -33,38 +35,57 @@ import java.security.MessageDigest
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
-final case class JournalLimits(maximumRecordBytes: ByteLimit, recentEventCacheSize: Int)
-    derives CanEqual:
+/** Durable file-store limits.
+  *
+  * `maximumStorageBytes` bounds the snapshot and command suffix together. When the materialized
+  * live projection plus one command cannot fit, the command is refused with
+  * [[ControlFailure.JournalExhausted]] rather than weakening the bound.
+  */
+final case class JournalLimits(
+    maximumRecordBytes: ByteLimit,
+    recentEventCacheSize: Int,
+    maximumStorageBytes: ByteLimit = ByteLimit.unsafeFrom(256 * 1024 * 1024)
+) derives CanEqual:
   require(recentEventCacheSize > 0, "recent event cache size must be positive")
 
 object JournalLimits:
   val default: JournalLimits = JournalLimits(
     ByteLimit.unsafeFrom(32 * 1024 * 1024),
-    recentEventCacheSize = 64
+    recentEventCacheSize = 64,
+    maximumStorageBytes = ByteLimit.unsafeFrom(256 * 1024 * 1024)
   )
 
-final case class JournalRecovery(truncatedUncommittedBytes: Long) derives CanEqual
+final case class JournalRecovery(
+    truncatedUncommittedBytes: Long,
+    replayedRecordCount: Long = 0L,
+    snapshotRevision: Option[StoreRevision] = None
+) derives CanEqual
 
-private[managed] enum JournalCommitBoundary derives CanEqual:
+private[managed] enum JournalPersistenceBoundary derives CanEqual:
   case BeforeAppend
   case AfterForce
   case AfterPublication
+  case BeforeSnapshotPublication
+  case AfterSnapshotPublication
+  case AfterJournalReset
 
-private[managed] trait JournalCommitProbe[F[_]]:
-  def checkpoint(boundary: JournalCommitBoundary): F[Unit]
+private[managed] trait JournalPersistenceProbe[F[_]]:
+  def at(boundary: JournalPersistenceBoundary): F[Unit]
 
-private object JournalCommitProbe:
-  def noop[F[_]: Async]: JournalCommitProbe[F] = new JournalCommitProbe[F]:
-    def checkpoint(boundary: JournalCommitBoundary): F[Unit] = Async[F].unit
+private object JournalPersistenceProbe:
+  def noop[F[_]: Async]: JournalPersistenceProbe[F] = new JournalPersistenceProbe[F]:
+    def at(boundary: JournalPersistenceBoundary): F[Unit] = Async[F].unit
 
 final class FileJournalControlStore[F[_]: Async] private (
+    snapshotPath: Path,
     channel: FileChannel,
     state: Ref[F, ControlState],
+    replayAnchor: Ref[F, ReplayAnchor],
     eventDiskScans: Ref[F, Long],
     semaphore: Semaphore[F],
     limits: JournalLimits,
     val recovery: JournalRecovery,
-    commitProbe: JournalCommitProbe[F]
+    persistenceProbe: JournalPersistenceProbe[F]
 ) extends ControlStore[F]:
   def transact(command: ControlCommand): F[Either[ControlFailure, ControlCommit]] =
     semaphore.permit.use { _ =>
@@ -84,14 +105,19 @@ final class FileJournalControlStore[F[_]: Async] private (
             ) match
               case Left(failure) => Left(failure).pure[F]
               case Right(frame)  =>
-                val compacted = compact(commit.state)
-                Async[F].uncancelable { poll =>
-                  poll(commitProbe.checkpoint(JournalCommitBoundary.BeforeAppend)) *>
-                    Async[F].blocking(append(frame)) *>
-                    commitProbe.checkpoint(JournalCommitBoundary.AfterForce) *>
-                    state.set(compacted) *>
-                    poll(commitProbe.checkpoint(JournalCommitBoundary.AfterPublication)) *>
-                    Right(commit.copy(state = compacted)).pure[F]
+                Async[F].blocking(compactionPlan(current, frame)).flatMap {
+                  case Left(failure) => Left(failure).pure[F]
+                  case Right(plan)   =>
+                    val compacted = trimEventCache(commit.state)
+                    Async[F].uncancelable { poll =>
+                      poll(persistenceProbe.at(JournalPersistenceBoundary.BeforeAppend)) *>
+                        plan.traverse_(publishSnapshot) *>
+                        Async[F].blocking(append(frame)) *>
+                        persistenceProbe.at(JournalPersistenceBoundary.AfterForce) *>
+                        state.set(compacted) *>
+                        poll(persistenceProbe.at(JournalPersistenceBoundary.AfterPublication)) *>
+                        Right(commit.copy(state = compacted)).pure[F]
+                    }
                 }
       }
     }
@@ -103,12 +129,18 @@ final class FileJournalControlStore[F[_]: Async] private (
 
   def events(after: EventCursor, maximum: Int): F[EventPage] =
     val limit = math.max(0, maximum)
-    if limit == 0 then EventPage(Vector.empty, after, endOfJournal = false).pure[F]
-    else
-      state.get.flatMap { current =>
-        if canPageFromCache(current, after) then ControlStore.page(current, after, limit).pure[F]
-        else scanOlderEvents(after, limit)
-      }
+    replayAnchor.get.flatMap { anchor =>
+      if after.value < anchor.minimumAvailableAfter.value then
+        EventPage
+          .HistoryUnavailable(EventHistoryGap.known(after, anchor.minimumAvailableAfter))
+          .pure[F]
+      else if limit == 0 then EventPage.Available(Vector.empty, after, endOfJournal = false).pure[F]
+      else
+        state.get.flatMap { current =>
+          if canPageFromCache(current, after) then ControlStore.page(current, after, limit).pure[F]
+          else scanOlderEvents(after, limit)
+        }
+    }
 
   private[managed] def eventDiskScanCount: F[Long] = eventDiskScans.get
 
@@ -139,6 +171,46 @@ final class FileJournalControlStore[F[_]: Async] private (
       )
     )
 
+  private def compactionPlan(
+      current: ControlState,
+      nextFrame: ByteVector
+  ): Either[ControlFailure, Option[SnapshotPublication]] =
+    val snapshotSize =
+      if Files.exists(snapshotPath, LinkOption.NOFOLLOW_LINKS) then Files.size(snapshotPath)
+      else 0L
+    val projected = snapshotSize + channel.size() + nextFrame.size
+    if projected <= limits.maximumStorageBytes.value.toLong then Right(None)
+    else
+      val retained = trimEventCache(current)
+      val minimum = FileJournalControlStore.minimumAfterOf(retained)
+      JournalSnapshotCodec
+        .encode(
+          ControlSnapshot(retained, minimum),
+          limits.maximumStorageBytes.value.toLong - nextFrame.size
+        )
+        .map(bytes => Some(SnapshotPublication(bytes, retained, minimum)))
+
+  private def publishSnapshot(publication: SnapshotPublication): F[Unit] =
+    persistenceProbe.at(JournalPersistenceBoundary.BeforeSnapshotPublication) *>
+      Async[F].blocking {
+        AtomicFiles.replaceBlocking(snapshotPath, publication.bytes) match
+          case Right(())     => ()
+          case Left(problem) =>
+            throw JournalException(
+              ControlFailure.JournalIo(s"snapshot publication failed: $problem")
+            )
+      } *>
+      persistenceProbe.at(JournalPersistenceBoundary.AfterSnapshotPublication) *>
+      replayAnchor.set(
+        ReplayAnchor(publication.state, publication.minimumAvailableAfter)
+      ) *>
+      Async[F].blocking {
+        channel.truncate(0L)
+        channel.position(0L)
+        channel.force(true)
+      } *>
+      persistenceProbe.at(JournalPersistenceBoundary.AfterJournalReset)
+
   /** Append one already-encoded record and force it to stable storage.
     *
     * A failed write is rolled back to the pre-append offset so the journal never retains a partial
@@ -166,51 +238,68 @@ final class FileJournalControlStore[F[_]: Async] private (
   private def scanOlderEvents(after: EventCursor, maximum: Int): F[EventPage] =
     def scan: F[Option[EventPage]] =
       eventDiskScans.update(_ + 1L) *>
-        Async[F].blocking(scanEvents(after, maximum))
+        replayAnchor.get.flatMap { anchor =>
+          if after.value < anchor.minimumAvailableAfter.value then
+            Some(
+              EventPage.HistoryUnavailable(
+                EventHistoryGap.known(after, anchor.minimumAvailableAfter)
+              )
+            ).pure[F]
+          else
+            Async[F].blocking(scanEvents(anchor.state, after, maximum)).flatMap { result =>
+              replayAnchor.get.map { current =>
+                if current.state.revision == anchor.state.revision then result else None
+              }
+            }
+        }
 
-    scan.flatMap {
+    // Disk scans share the writer semaphore. The suffix is bounded, and serialization prevents a
+    // compaction truncate from turning a valid concurrent read into an unexpected EOF.
+    semaphore.permit.use(_ => scan).flatMap {
       case Some(page) => page.pure[F]
       case None       =>
-        // An unlocked reader can snapshot the file size while an append is still incomplete.
-        // Wait for that writer and retry once. A tail still truncated under the writer semaphore
-        // is durable corruption, not an in-flight record.
-        semaphore.permit.use(_ =>
-          scan.flatMap {
-            case Some(page) => page.pure[F]
-            case None       =>
-              Async[F].raiseError(
-                JournalException(
-                  ControlFailure.JournalCorrupt("journal has an uncommitted tail")
-                )
-              )
-          }
+        Async[F].raiseError(
+          JournalException(
+            ControlFailure.JournalCorrupt("journal has an uncommitted tail")
+          )
         )
     }
 
-  private def scanEvents(after: EventCursor, maximum: Int): Option[EventPage] =
-    var projection = ControlState.empty
+  private def scanEvents(
+      base: ControlState,
+      after: EventCursor,
+      maximum: Int
+  ): Option[EventPage] =
+    var projection = base
     var position = 0L
     val collected = Vector.newBuilder[CommittedEvent]
     var count = 0
     var omitted = false
     val size = channel.size()
+    base.events.foreach { event =>
+      if event.cursor.value > after.value && count < maximum then
+        collected += event
+        count += 1
+      else if event.cursor.value > after.value then omitted = true
+    }
     while position < size && count < maximum do
       JournalCodec.read(channel, position, size, limits.maximumRecordBytes) match
         case JournalRead.Complete(next, record) =>
-          val commit = applyRecord(projection, record)
-          projection = commit.state
-          commit.committedEvents.foreach { event =>
-            if event.cursor.value > after.value && count < maximum then
-              collected += event
-              count += 1
-            else if event.cursor.value > after.value then omitted = true
-          }
-          projection = compact(projection)
+          if record.revision.value > projection.revision.value then
+            val commit = applyRecord(projection, record)
+            projection = commit.state
+            commit.committedEvents.foreach { event =>
+              if event.cursor.value > after.value && count < maximum then
+                collected += event
+                count += 1
+              else if event.cursor.value > after.value then omitted = true
+            }
+            projection = trimEventCache(projection)
           position = next
         case JournalRead.Truncated(_, _) => return None
     val values = collected.result()
     val next = values.lastOption.map(_.cursor).getOrElse(after)
-    Some(EventPage(values, next, endOfJournal = position >= size && !omitted))
+    Some(EventPage.Available(values, next, endOfJournal = position >= size && !omitted))
 
   private def applyRecord(state: ControlState, record: JournalRecord): ControlCommit =
     if record.priorRevision != state.revision then
@@ -229,7 +318,7 @@ final class FileJournalControlStore[F[_]: Async] private (
         )
       case Right(commit) => commit
 
-  private def compact(value: ControlState): ControlState =
+  private def trimEventCache(value: ControlState): ControlState =
     value.copy(events = value.events.takeRight(limits.recentEventCacheSize))
 
   private def writeFully(channel: FileChannel, buffer: ByteBuffer): Unit =
@@ -241,12 +330,12 @@ object FileJournalControlStore:
       path: Path,
       limits: JournalLimits = JournalLimits.default
   ): Resource[F, FileJournalControlStore[F]] =
-    openWithProbe(path, limits, JournalCommitProbe.noop[F])
+    openWithProbe(path, limits, JournalPersistenceProbe.noop[F])
 
   private[managed] def openWithProbe[F[_]: Async](
       path: Path,
       limits: JournalLimits,
-      commitProbe: JournalCommitProbe[F]
+      persistenceProbe: JournalPersistenceProbe[F]
   ): Resource[F, FileJournalControlStore[F]] =
     Resource
       .make(acquire(path, limits))(release)
@@ -254,23 +343,51 @@ object FileJournalControlStore:
         Resource.eval(
           for
             state <- Ref.of[F, ControlState](opened.state)
+            replayAnchor <- Ref.of[F, ReplayAnchor](
+              ReplayAnchor(opened.replayBase, opened.minimumAvailableAfter)
+            )
             eventDiskScans <- Ref.of[F, Long](0L)
             semaphore <- Semaphore[F](1L)
           yield FileJournalControlStore(
+            opened.snapshotPath,
             opened.channel,
             state,
+            replayAnchor,
             eventDiskScans,
             semaphore,
             limits,
             opened.recovery,
-            commitProbe
+            persistenceProbe
           )
         )
       }
 
+  private def publishSnapshotBlocking(
+      path: Path,
+      snapshot: ControlSnapshot,
+      maximumBytes: ByteLimit
+  ): Unit =
+    val bytes = JournalSnapshotCodec
+      .encode(snapshot, maximumBytes.value.toLong)
+      .fold(failure => throw JournalException(failure), identity)
+    AtomicFiles.replaceBlocking(path, bytes) match
+      case Right(())     => ()
+      case Left(problem) =>
+        throw JournalException(
+          ControlFailure.JournalIo(s"snapshot publication failed: $problem")
+        )
+
+  private def minimumAfterOf(value: ControlState): EventCursor =
+    value.events.headOption match
+      case Some(first) if first.cursor.value > 0L =>
+        EventCursor.from(first.cursor.value - 1L).toOption.getOrElse(EventCursor.origin)
+      case _ => EventCursor.origin
+
   private def acquire[F[_]: Async](path: Path, limits: JournalLimits): F[OpenedJournal] =
     Async[F].blocking {
       preparePrivateFile(path)
+      val snapshotPath = snapshotPathOf(path)
+      verifySnapshotPath(snapshotPath)
       val channel = FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE)
       val lock = try channel.tryLock()
       catch case _: OverlappingFileLockException => null
@@ -278,8 +395,39 @@ object FileJournalControlStore:
         channel.close()
         throw JournalException(ControlFailure.JournalLocked(path.toString))
       try
-        val replayed = replay(channel, limits)
-        OpenedJournal(channel, lock, replayed._1, replayed._2)
+        val snapshot = JournalSnapshotCodec.read(snapshotPath, limits.maximumStorageBytes)
+        val base = snapshot.map(_.state).getOrElse(ControlState.empty)
+        val minimum = snapshot.map(_.minimumAvailableAfter).getOrElse(EventCursor.origin)
+        val replayed = replay(channel, base, limits, snapshot.map(_.state.revision))
+        val compactedLegacy =
+          snapshot.isEmpty && channel.size() > limits.maximumStorageBytes.value.toLong
+        val effectiveSnapshot =
+          if compactedLegacy then
+            val recovered = ControlSnapshot(replayed._1, minimumAfterOf(replayed._1))
+            publishSnapshotBlocking(snapshotPath, recovered, limits.maximumStorageBytes)
+            Some(recovered)
+          else snapshot
+        if (compactedLegacy ||
+            snapshot.nonEmpty && replayed._2.replayedRecordCount == 0L) &&
+          channel.size() > 0L
+        then
+          channel.truncate(0L)
+          channel.position(0L)
+          channel.force(true)
+        val effectiveBase = effectiveSnapshot.map(_.state).getOrElse(base)
+        val effectiveMinimum =
+          effectiveSnapshot.map(_.minimumAvailableAfter).getOrElse(minimum)
+        val effectiveRecovery =
+          replayed._2.copy(snapshotRevision = effectiveSnapshot.map(_.state.revision))
+        OpenedJournal(
+          snapshotPath,
+          channel,
+          lock,
+          replayed._1,
+          effectiveBase,
+          effectiveMinimum,
+          effectiveRecovery
+        )
       catch
         case error: Throwable =>
           lock.release()
@@ -295,23 +443,28 @@ object FileJournalControlStore:
 
   private def replay(
       channel: FileChannel,
-      limits: JournalLimits
+      base: ControlState,
+      limits: JournalLimits,
+      snapshotRevision: Option[StoreRevision]
   ): (ControlState, JournalRecovery) =
-    var state = ControlState.empty
+    var state = base
     var position = 0L
     val size = channel.size()
     var truncated = 0L
+    var replayed = 0L
     while position < size do
       JournalCodec.read(channel, position, size, limits.maximumRecordBytes) match
         case JournalRead.Complete(next, record) =>
-          state = applyRecord(state, record, limits)
+          if record.revision.value > state.revision.value then
+            state = applyRecord(state, record, limits)
+            replayed += 1L
           position = next
         case JournalRead.Truncated(start, bytes) =>
           channel.truncate(start)
           channel.force(true)
           truncated = bytes
           position = size
-    (state, JournalRecovery(truncated))
+    (state, JournalRecovery(truncated, replayed, snapshotRevision))
 
   private def applyRecord(
       state: ControlState,
@@ -368,6 +521,20 @@ object FileJournalControlStore:
       Files.setPosixFilePermissions(absolute, PosixFilePermissions.fromString("rw-------"))
     )
 
+  private def snapshotPathOf(path: Path): Path =
+    val absolute = path.toAbsolutePath.normalize()
+    absolute.resolveSibling(s"${absolute.getFileName}.snapshot")
+
+  private def verifySnapshotPath(path: Path): Unit =
+    if Files.exists(path, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(path) then
+      throw JournalException(ControlFailure.JournalCorrupt("snapshot file must not be a symlink"))
+    if Files.exists(path, LinkOption.NOFOLLOW_LINKS) &&
+      !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+    then
+      throw JournalException(
+        ControlFailure.JournalCorrupt("snapshot path must be a regular file")
+      )
+
   private def verifyPrivateDirectory(path: Path): Unit =
     Try(Files.getPosixFilePermissions(path)).foreach { permissions =>
       val forbidden = Set(
@@ -385,10 +552,24 @@ object FileJournalControlStore:
     }
 
 final private case class OpenedJournal(
+    snapshotPath: Path,
     channel: FileChannel,
     lock: FileLock,
     state: ControlState,
+    replayBase: ControlState,
+    minimumAvailableAfter: EventCursor,
     recovery: JournalRecovery
+)
+
+final private case class SnapshotPublication(
+    bytes: ByteVector,
+    state: ControlState,
+    minimumAvailableAfter: EventCursor
+)
+
+final private case class ReplayAnchor(
+    state: ControlState,
+    minimumAvailableAfter: EventCursor
 )
 
 final private case class JournalRecord(
@@ -403,6 +584,64 @@ private enum JournalRead:
 
 final private case class JournalException(failure: ControlFailure)
     extends RuntimeException(failure.toString)
+
+private object JournalSnapshotCodec:
+  private val schema = SchemaId.unsafeFrom("slurm4s.control-snapshot")
+
+  def encode(
+      snapshot: ControlSnapshot,
+      maximumBytes: Long
+  ): Either[ControlFailure, ByteVector] =
+    val state = ControlSnapshotJson.encode(snapshot)
+    val payload = Json.obj(
+      "state" -> state,
+      "stateSha256" -> Json.fromString(checksum(state))
+    )
+    val bytes = VersionedJson.encode(WireEnvelope(ProtocolVersion.v1, schema, payload))
+    Either.cond(
+      maximumBytes > 0L && bytes.size <= maximumBytes,
+      bytes,
+      ControlFailure.JournalExhausted(
+        s"compacted state requires ${bytes.size} bytes but only $maximumBytes remain"
+      )
+    )
+
+  def read(path: Path, maximumBytes: ByteLimit): Option[ControlSnapshot] =
+    if !Files.exists(path, LinkOption.NOFOLLOW_LINKS) then None
+    else
+      val size = Files.size(path)
+      if size <= 0L || size > maximumBytes.value.toLong then
+        throw JournalException(
+          ControlFailure.JournalCorrupt(s"invalid snapshot size $size")
+        )
+      val bytes = ByteVector.view(Files.readAllBytes(path))
+      val decoded = for
+        envelope <- VersionedJson.decode(bytes).left.map(_.toString)
+        _ <- Either.cond(
+          VersionedJson.encode(envelope) == bytes,
+          (),
+          "snapshot bytes are not canonical"
+        )
+        _ <- Either.cond(envelope.schema == schema, (), "wrong snapshot schema")
+        cursor = envelope.payload.hcursor
+        stateJson <- cursor.downField("state").focus.toRight("missing snapshot state")
+        expected <- cursor.get[String]("stateSha256").left.map(_.message)
+        _ <- Either.cond(checksum(stateJson) == expected, (), "snapshot checksum mismatch")
+        snapshot <- ControlSnapshotJson.decode(stateJson)
+      yield snapshot
+      Some(
+        decoded.fold(
+          problem => throw JournalException(ControlFailure.JournalCorrupt(problem)),
+          identity
+        )
+      )
+
+  private def checksum(json: Json): String =
+    MessageDigest
+      .getInstance("SHA-256")
+      .digest(CanonicalJson.bytes(json).toArray)
+      .map(byte => f"${byte & 0xff}%02x")
+      .mkString
 
 private object JournalCodec:
   private val schema = SchemaId.unsafeFrom("slurm4s.control-command")

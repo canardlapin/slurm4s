@@ -287,9 +287,13 @@ final class ManagedController[F[_]: Async](
   ): Stream[F, CommittedEvent] =
     def loop(cursor: EventCursor): Stream[F, CommittedEvent] =
       Stream.eval(store.events(cursor, math.max(1, pageSize))).flatMap { page =>
-        val values = Stream.emits(page.events).covary[F]
-        if page.events.nonEmpty then values ++ loop(page.next)
-        else values ++ Stream.eval(Async[F].sleep(pollInterval)).drain ++ loop(page.next)
+        page match
+          case EventPage.HistoryUnavailable(gap) =>
+            Stream.raiseError[F](EventHistoryUnavailable(gap))
+          case EventPage.Available(events, next, _) =>
+            val values = Stream.emits(events).covary[F]
+            if events.nonEmpty then values ++ loop(next)
+            else values ++ Stream.eval(Async[F].sleep(pollInterval)).drain ++ loop(next)
       }
     loop(after)
 

@@ -175,7 +175,7 @@ class RemoteScriptBatchBudgetSuite extends munit.CatsEffectSuite:
             job = parentJob,
             state = SlurmState.Completed,
             exitStatus = Some(ExitStatus(0, None)),
-            outcome = Some(WorkloadOutcome.Completed(0)),
+            outcome = Some(WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero)),
             freshness = Freshness.Current(observedAt),
             rawFields = Map.empty,
             evidence = evidence

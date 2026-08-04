@@ -130,7 +130,19 @@ object ProtocolGenerators:
       timing <- jobTiming
       flags <- Gen.choose(0, 3).flatMap(Gen.listOfN(_, slurmStateFlag)).map(_.toVector)
       cluster <- Gen.option(clusterName)
-    yield JobObservation(job, state, fresh, reason, fields, evidence, timing, flags, cluster)
+      completeness <- Gen.oneOf(StateExpressionCompleteness.values.toVector)
+    yield JobObservation(
+      job = job,
+      state = state,
+      freshness = fresh,
+      reason = reason,
+      rawFields = fields,
+      evidence = evidence,
+      timing = timing,
+      flags = flags,
+      reportedCluster = cluster,
+      stateExpressionCompleteness = completeness
+    )
 
   val observationResult: Gen[ObservationResult] =
     Gen.oneOf(
@@ -149,7 +161,9 @@ object ProtocolGenerators:
 
   val workloadOutcome: Gen[WorkloadOutcome] =
     Gen.oneOf(
-      Gen.choose(0, 255).map(WorkloadOutcome.Completed.apply),
+      Gen
+        .oneOf(CompletionExitStatus.ReportedZero, CompletionExitStatus.Undisclosed)
+        .map(WorkloadOutcome.Completed.apply),
       Gen.zip(Gen.option(Gen.choose(1, 255)), diagnostics).map(WorkloadOutcome.Failed.apply),
       Gen.const(WorkloadOutcome.OutOfMemory),
       Gen.const(WorkloadOutcome.TimeLimitExceeded),
@@ -486,15 +500,15 @@ object ProtocolGenerators:
       .oneOf(
         Gen.const(
           ResultContractDescriptor
-            .from(ResultMode.ExitOnly, None, ByteLimit.defaultEvidence, Vector.empty)
+            .from(ResultMode.ExitOnly, None, Vector.empty)
         ),
         outputs.map(paths =>
           ResultContractDescriptor
-            .from(ResultMode.DeclaredOutputs, None, ByteLimit.defaultEvidence, paths)
+            .from(ResultMode.DeclaredOutputs, None, paths)
         ),
         Gen.zip(resultSchemaId, Gen.oneOf(Gen.const(Vector.empty), outputs)).map { (schema, paths) =>
           ResultContractDescriptor
-            .from(ResultMode.Structured, Some(schema), ByteLimit.defaultEvidence, paths)
+            .from(ResultMode.Structured, Some(schema), paths)
         }
       )
       .map(_.toOption.get)
@@ -512,7 +526,18 @@ object ProtocolGenerators:
   val envName: Gen[EnvName] =
     Gen.oneOf("SLURM4S_A", "PATH_EXTRA", "MODEL_DIR").map(EnvName.unsafeFrom)
 
-  /** Populates `environment`, `array` and `retrySafety`, all three of which have defaults. */
+  val terminationNotice: Gen[TerminationNotice] =
+    for
+      signal <- Gen.oneOf(TerminationNoticeSignal.values.toVector)
+      scope <- Gen.oneOf(TerminationNoticeScope.values.toVector)
+      lead <- Gen
+        .oneOf(0, 1, 60, 120, 65535)
+        .map(SignalLeadSeconds.unsafeFrom)
+    yield TerminationNotice(signal, scope, lead)
+
+  /** Populates `environment`, `array`, `retrySafety` and `terminationNotice`, all of which have
+    * defaults.
+    */
   def launchSpec(environment: Gen[Map[EnvName, String]]): Gen[LaunchSpec] =
     for
       key <- submissionKey
@@ -524,6 +549,7 @@ object ProtocolGenerators:
       env <- environment
       array <- Gen.option(jobArrayRequest)
       safety <- retrySafety
+      notice <- Gen.option(terminationNotice)
     yield LaunchSpec(
       key,
       name,
@@ -533,7 +559,8 @@ object ProtocolGenerators:
       resources,
       env,
       array,
-      safety
+      safety,
+      notice
     )
 
   val launchSpec: Gen[LaunchSpec] =

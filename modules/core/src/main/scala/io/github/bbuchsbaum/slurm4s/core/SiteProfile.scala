@@ -101,6 +101,7 @@ object NativeOption:
     "parsable",
     "partition",
     "qos",
+    "signal",
     "time"
   )
 
@@ -176,7 +177,8 @@ final case class EffectiveSiteSpec(
     accelerators: Vector[AcceleratorRequest],
     nativeOptions: Vector[NativeOption],
     environmentExport: EnvironmentExportPolicy,
-    features: SiteFeatures
+    features: SiteFeatures,
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 final case class SiteResolution(
@@ -218,7 +220,11 @@ final case class SiteProfile(
     (
       resolve(spec.resources, intent).toValidated,
       spec.array.traverse(validateArray).toValidated
-    ).mapN((resolution, _) => resolution).toEither
+    ).mapN((resolution, _) =>
+      resolution.copy(
+        effective = resolution.effective.copy(terminationNotice = spec.terminationNotice)
+      )
+    ).toEither
 
   def validateArray(
       request: JobArrayRequest

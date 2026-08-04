@@ -2,7 +2,11 @@ package io.github.bbuchsbaum.slurm4s.protocol
 
 import cats.data.NonEmptyVector
 import io.circe.Json
+import io.github.bbuchsbaum.slurm4s.core.AccountingBatch
 import io.github.bbuchsbaum.slurm4s.core.ByteLimit
+import io.github.bbuchsbaum.slurm4s.core.CompletionExitStatus
+import io.github.bbuchsbaum.slurm4s.core.SchedulerQueryResult
+import io.github.bbuchsbaum.slurm4s.core.WorkloadOutcome
 
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
@@ -45,10 +49,10 @@ class CodecRoundTripLawSuite extends munit.ScalaCheckSuite:
     }
   }
 
-  /** The submit request carries three defaulted fields — environment, array and retrySafety — which
-    * is the most exposed instance of the hazard these laws exist for.
+  /** The submit request carries defaulted environment, array, retry-safety, and termination-notice
+    * fields, which makes it the most exposed instance of the hazard these laws exist for.
     */
-  property("a submit request round-trips, including its three defaulted fields") {
+  property("a submit request round-trips, including all defaulted fields") {
     forAll(exitOnlyLaunchSpec) { value =>
       val encoded = AgentDomainJson.encodeSubmitRequest(value)
       assertEquals(encoded.flatMap(AgentDomainJson.decodeSubmitRequest), Right(value))
@@ -86,6 +90,38 @@ class CodecRoundTripLawSuite extends munit.ScalaCheckSuite:
     }
   }
 
+  property("snapshot-facing domain values round-trip through their owned codecs") {
+    forAll(
+      Gen.zip(
+        diagnostics,
+        workloadOutcome,
+        observationResult,
+        accountingRecord
+      )
+    ) { (problems, outcome, observation, accounting) =>
+      assertEquals(
+        AgentDomainJson.decodeDiagnostics(AgentDomainJson.encodeDiagnostics(problems)),
+        Right(problems)
+      )
+      assertEquals(
+        AgentDomainJson.decodeWorkloadOutcome(AgentDomainJson.encodeWorkloadOutcome(outcome)),
+        Right(outcome)
+      )
+      assertEquals(
+        AgentDomainJson.decodeObservationResult(
+          AgentDomainJson.encodeObservationResult(observation)
+        ),
+        Right(observation)
+      )
+      assertEquals(
+        AgentDomainJson.decodeAccountingRecord(
+          AgentDomainJson.encodeAccountingRecord(accounting)
+        ),
+        Right(accounting)
+      )
+    }
+  }
+
   property("an observation query result round-trips every case, not only success") {
     forAll(schedulerQueryResult(observationBatch)) { value =>
       val encoded = AgentDomainJson.encodeObservation(value)
@@ -97,6 +133,30 @@ class CodecRoundTripLawSuite extends munit.ScalaCheckSuite:
     forAll(schedulerQueryResult(accountingBatch)) { value =>
       val encoded = AgentDomainJson.encodeAccounting(value)
       roundTrips(value, encoded, AgentDomainJson.decodeAccounting(encoded))
+    }
+  }
+
+  property("completed accounting requires an explicit zero or null exitCode field") {
+    forAll(accountingRecord) { record =>
+      val value: SchedulerQueryResult[AccountingBatch] =
+        SchedulerQueryResult.Succeeded(
+          AccountingBatch(
+            NonEmptyVector.one(
+              record.copy(
+                outcome = Some(
+                  WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero)
+                )
+              )
+            ),
+            Vector.empty
+          )
+        )
+      val encoded = AgentDomainJson.encodeAccounting(value)
+      val missing = transformCompleted(encoded)(_.remove("exitCode"))
+      val nonZero = transformCompleted(encoded)(_.add("exitCode", Json.fromInt(42)))
+
+      assert(AgentDomainJson.decodeAccounting(missing).isLeft)
+      assert(AgentDomainJson.decodeAccounting(nonZero).isLeft)
     }
   }
 
@@ -162,3 +222,16 @@ class CodecRoundTripLawSuite extends munit.ScalaCheckSuite:
       roundTrips((ref, cursor, bound), encoded, AgentDomainJson.decodeLogRequest(encoded))
     }
   }
+
+  private def transformCompleted(json: Json)(
+      change: io.circe.JsonObject => io.circe.JsonObject
+  ): Json =
+    json.arrayOrObject(
+      json,
+      values => Json.fromValues(values.map(transformCompleted(_)(change))),
+      fields =>
+        Json.obj(fields.toVector.map {
+          case ("Completed", payload) => "Completed" -> payload.mapObject(change)
+          case (name, value)          => name -> transformCompleted(value)(change)
+        }*)
+    )

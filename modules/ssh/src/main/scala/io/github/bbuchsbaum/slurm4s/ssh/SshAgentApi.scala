@@ -30,16 +30,21 @@ final class SshAgentApi[F[_]: Concurrent] private (
     call(AgentMethod.Capabilities, Json.obj(), AgentDomainJson.decodeCapabilities)
 
   def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
-    AgentDomainJson.encodeSubmitRequest(spec) match
-      case Left(problem)  => protocolFailure(problem).pure[F]
-      case Right(payload) =>
-        call(AgentMethod.SubmitOpaque, payload, AgentDomainJson.decodeSubmission)
+    if !supportsTerminationNotice(spec.terminationNotice) then
+      protocolFailure("termination notices were not negotiated").pure[F]
+    else
+      AgentDomainJson.encodeSubmitRequest(spec) match
+        case Left(problem)  => protocolFailure(problem).pure[F]
+        case Right(payload) =>
+          call(AgentMethod.SubmitOpaque, payload, AgentDomainJson.decodeSubmission)
 
   def submitRegistered(
       request: RemoteRegisteredTaskRequest
   ): F[AgentCall[RemoteRegisteredSubmission]] =
     if !handshake.availableFeatures.contains(AgentFeature.RegisteredTasks) then
       protocolFailure("registered tasks were not negotiated").pure[F]
+    else if !supportsTerminationNotice(request.terminationNotice) then
+      protocolFailure("termination notices were not negotiated").pure[F]
     else
       AgentDomainJson.encodeRemoteTaskRequest(request) match
         case Left(problem)  => protocolFailure(problem).pure[F]
@@ -55,6 +60,8 @@ final class SshAgentApi[F[_]: Concurrent] private (
   ): F[AgentCall[RemoteRegisteredBatchSubmission]] =
     if !handshake.availableFeatures.contains(AgentFeature.TypedBatches) then
       protocolFailure("typed batches were not negotiated").pure[F]
+    else if !supportsTerminationNotice(request.terminationNotice) then
+      protocolFailure("termination notices were not negotiated").pure[F]
     else
       AgentDomainJson.encodeRemoteBatchRequest(request) match
         case Left(problem)  => protocolFailure(problem).pure[F]
@@ -70,6 +77,8 @@ final class SshAgentApi[F[_]: Concurrent] private (
   ): F[AgentCall[RemoteScriptBatchSubmission]] =
     if !handshake.availableFeatures.contains(AgentFeature.ScriptBatches) then
       protocolFailure("script batches were not negotiated").pure[F]
+    else if !supportsTerminationNotice(request.terminationNotice) then
+      protocolFailure("termination notices were not negotiated").pure[F]
     else
       AgentDomainJson.encodeRemoteScriptBatchRequest(request) match
         case Left(problem)  => protocolFailure(problem).pure[F]
@@ -224,6 +233,9 @@ final class SshAgentApi[F[_]: Concurrent] private (
   private def protocolFailure[A](problem: String): AgentCall[A] =
     AgentCall.Failed(AgentFailure.ProtocolViolation(problem, None))
 
+  private def supportsTerminationNotice(notice: Option[TerminationNotice]): Boolean =
+    notice.isEmpty || handshake.availableFeatures.contains(AgentFeature.TerminationNotices)
+
 object SshAgentApi:
   def connect[F[_]: Concurrent](
       wire: SshAgentWireClient[F],
@@ -236,7 +248,8 @@ object SshAgentApi:
         AgentFeature.RegisteredTasks,
         AgentFeature.TypedResults,
         AgentFeature.TypedBatches,
-        AgentFeature.ScriptBatches
+        AgentFeature.ScriptBatches,
+        AgentFeature.TerminationNotices
       )
   ): F[AgentCall[SshAgentApi[F]]] =
     Ref.of[F, Long](0L).flatMap { sequence =>

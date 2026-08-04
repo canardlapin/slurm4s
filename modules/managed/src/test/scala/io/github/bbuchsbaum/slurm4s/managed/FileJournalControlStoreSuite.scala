@@ -40,9 +40,9 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
           _ = assert(
             snapshot.attempts(value.submissionKey).phase.isInstanceOf[ManagedPhase.Submitting]
           )
-          _ = assertEquals(page.events.map(_.cursor.value), Vector(1L, 2L))
-          _ = assertEquals(resumed.events.map(_.cursor.value), Vector(2L))
-          _ = assert(page.endOfJournal)
+          _ = assertEquals(page.availableEvents.map(_.cursor.value), Vector(1L, 2L))
+          _ = assertEquals(resumed.availableEvents.map(_.cursor.value), Vector(2L))
+          _ = assert(page.availableEnd)
         yield ()
       }
     }
@@ -65,7 +65,7 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
           events <- store.events(EventCursor.origin, 10)
           _ = assert(recovered.head.exists(_.phase.isInstanceOf[ManagedPhase.AcceptanceUnknown]))
           _ = assertEquals(count, 0)
-          _ = assertEquals(events.events.map(_.cursor.value), Vector(1L, 2L, 3L))
+          _ = assertEquals(events.availableEvents.map(_.cursor.value), Vector(1L, 2L, 3L))
         yield ()
       }
     }
@@ -218,7 +218,7 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
         job,
         SlurmState.Completed,
         Some(ExitStatus(0, None)),
-        Some(WorkloadOutcome.Completed(0)),
+        Some(WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero)),
         Freshness.Current(later),
         Map.empty,
         evidence
@@ -240,11 +240,11 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
             )
           )
           first <- store.events(EventCursor.from(3L).toOption.get, 1)
-          second <- store.events(first.next, 1)
-          _ = assertEquals(first.events.map(_.cursor.value), Vector(4L))
-          _ = assert(!first.endOfJournal)
-          _ = assertEquals(second.events.map(_.cursor.value), Vector(5L))
-          _ = assert(second.endOfJournal)
+          second <- store.events(first.availableNext, 1)
+          _ = assertEquals(first.availableEvents.map(_.cursor.value), Vector(4L))
+          _ = assert(!first.availableEnd)
+          _ = assertEquals(second.availableEvents.map(_.cursor.value), Vector(5L))
+          _ = assert(second.availableEnd)
         yield ()
       }
     }
@@ -269,9 +269,9 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
           scansAfterRecent <- store.eventDiskScanCount
           old <- store.events(EventCursor.origin, 8)
           scansAfterOld <- store.eventDiskScanCount
-          _ = assertEquals(recent.events, snapshot.events)
+          _ = assertEquals(recent.availableEvents, snapshot.events)
           _ = assertEquals(scansAfterRecent, 0L)
-          _ = assertEquals(old.events.head.cursor.value, 1L)
+          _ = assertEquals(old.availableEvents.head.cursor.value, 1L)
           _ = assertEquals(scansAfterOld, 1L)
         yield ()
       }
@@ -291,10 +291,10 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
       seed *> (for
         writerPaused <- Deferred[IO, Unit]
         releaseWriter <- Deferred[IO, Unit]
-        probe = new JournalCommitProbe[IO]:
-          def checkpoint(boundary: JournalCommitBoundary): IO[Unit] =
+        probe = new JournalPersistenceProbe[IO]:
+          def at(boundary: JournalPersistenceBoundary): IO[Unit] =
             boundary match
-              case JournalCommitBoundary.BeforeAppend =>
+              case JournalPersistenceBoundary.BeforeAppend =>
                 writerPaused.complete(()).void *> releaseWriter.get
               case _ => IO.unit
         _ <- FileJournalControlStore
@@ -306,7 +306,7 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
                 .start
               _ <- writerPaused.get
               page <- store.events(EventCursor.origin, 10).timeout(500.millis)
-              _ = assertEquals(page.events.map(_.cursor.value), Vector(1L))
+              _ = assertEquals(page.availableEvents.map(_.cursor.value), Vector(1L))
               _ <- releaseWriter.complete(())
               _ <- writer.joinWithNever
             yield ()
@@ -316,15 +316,21 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
   }
 
   test("cancellation before append leaves no record and the next revision remains replayable") {
-    exerciseCommitCancellation(JournalCommitBoundary.BeforeAppend, firstCommitSurvives = false)
+    exerciseCommitCancellation(
+      JournalPersistenceBoundary.BeforeAppend,
+      firstCommitSurvives = false
+    )
   }
 
   test("cancellation after force publishes the committed state before it is observed") {
-    exerciseCommitCancellation(JournalCommitBoundary.AfterForce, firstCommitSurvives = true)
+    exerciseCommitCancellation(JournalPersistenceBoundary.AfterForce, firstCommitSurvives = true)
   }
 
   test("cancellation after publication preserves unique revisions across restart") {
-    exerciseCommitCancellation(JournalCommitBoundary.AfterPublication, firstCommitSurvives = true)
+    exerciseCommitCancellation(
+      JournalPersistenceBoundary.AfterPublication,
+      firstCommitSurvives = true
+    )
   }
 
   test("an epoch retry remains atomic under cancellation and replays with its new outbox") {
@@ -350,9 +356,9 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
         reached <- Deferred[IO, Unit]
         release <- Deferred[IO, Unit]
         armed <- Ref.of[IO, Boolean](false)
-        probe = new JournalCommitProbe[IO]:
-          def checkpoint(boundary: JournalCommitBoundary): IO[Unit] =
-            if boundary != JournalCommitBoundary.AfterForce then IO.unit
+        probe = new JournalPersistenceProbe[IO]:
+          def at(boundary: JournalPersistenceBoundary): IO[Unit] =
+            if boundary != JournalPersistenceBoundary.AfterForce then IO.unit
             else
               armed.get.ifM(
                 reached.complete(()).void *> release.get,
@@ -474,7 +480,7 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
     )
 
   private def exerciseCommitCancellation(
-      boundary: JournalCommitBoundary,
+      boundary: JournalPersistenceBoundary,
       firstCommitSurvives: Boolean
   ): IO[Unit] =
     temporaryDirectory.use { directory =>
@@ -483,16 +489,28 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
       for
         reached <- Deferred[IO, Unit]
         release <- Deferred[IO, Unit]
+        cancellationStarted <- Deferred[IO, Unit]
+        cancellationObserved <- Deferred[IO, Unit]
         visited <- Ref.of[IO, Boolean](false)
-        probe = blockingProbe(boundary, reached, release, visited)
+        probe = blockingProbe(
+          boundary,
+          reached,
+          release,
+          cancellationObserved,
+          visited
+        )
         expectedRevision <- FileJournalControlStore
           .openWithProbe[IO](path, JournalLimits.default, probe)
           .use { store =>
             for
               transaction <- store.transact(ControlCommand.RecordIntent(value)).start
               _ <- reached.get
-              cancellation <- transaction.cancel.start
-              _ <- IO.cede.replicateA_(8)
+              cancellation <-
+                (cancellationStarted.complete(()).void *> transaction.cancel).start
+              _ <- cancellationStarted.get
+              _ <-
+                if boundary == JournalPersistenceBoundary.AfterForce then IO.cede.replicateA_(8)
+                else cancellationObserved.get
               _ <- release.complete(()).void
               _ <- cancellation.join
               outcome <- transaction.join
@@ -516,7 +534,7 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
           for
             snapshot <- reopened.snapshot
             page <- reopened.events(EventCursor.origin, 10)
-            cursors = page.events.map(_.cursor.value)
+            cursors = page.availableEvents.map(_.cursor.value)
             _ = assertEquals(snapshot.revision.value, expectedRevision)
             _ = assertEquals(cursors, (1L to expectedRevision).toVector)
             _ = assertEquals(cursors.distinct, cursors)
@@ -526,19 +544,33 @@ class FileJournalControlStoreSuite extends munit.CatsEffectSuite:
       yield ()
     }
 
+  extension (page: EventPage)
+    private def available: (Vector[CommittedEvent], EventCursor, Boolean) = page match
+      case EventPage.Available(events, next, endOfJournal) =>
+        (events, next, endOfJournal)
+      case EventPage.HistoryUnavailable(gap) =>
+        fail(s"expected an available event page, got $gap")
+
+    private def availableEvents: Vector[CommittedEvent] = available._1
+    private def availableNext: EventCursor = available._2
+    private def availableEnd: Boolean = available._3
+
   private def blockingProbe(
-      target: JournalCommitBoundary,
+      target: JournalPersistenceBoundary,
       reached: Deferred[IO, Unit],
       release: Deferred[IO, Unit],
+      cancellationObserved: Deferred[IO, Unit],
       visited: Ref[IO, Boolean]
-  ): JournalCommitProbe[IO] = new JournalCommitProbe[IO]:
-    def checkpoint(boundary: JournalCommitBoundary): IO[Unit] =
+  ): JournalPersistenceProbe[IO] = new JournalPersistenceProbe[IO]:
+    def at(boundary: JournalPersistenceBoundary): IO[Unit] =
       if boundary != target then IO.unit
       else
         visited
           .modify(alreadyVisited => true -> !alreadyVisited)
           .flatMap(firstVisit =>
-            if firstVisit then reached.complete(()).void *> release.get
+            if firstVisit then
+              reached.complete(()).void *>
+                release.get.onCancel(cancellationObserved.complete(()).void)
             else IO.unit
           )
 

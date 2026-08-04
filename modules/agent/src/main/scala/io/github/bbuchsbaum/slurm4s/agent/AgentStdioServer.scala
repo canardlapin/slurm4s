@@ -6,10 +6,10 @@ import cats.syntax.all.*
 import fs2.Chunk
 import fs2.Pipe
 import fs2.Stream
-import io.circe.Json
 import io.github.bbuchsbaum.slurm4s.protocol.AgentBody
 import io.github.bbuchsbaum.slurm4s.protocol.AgentCall
 import io.github.bbuchsbaum.slurm4s.protocol.AgentEnvelope
+import io.github.bbuchsbaum.slurm4s.protocol.AgentFailurePayload
 import io.github.bbuchsbaum.slurm4s.protocol.AgentMessageCodec
 import io.github.bbuchsbaum.slurm4s.protocol.AgentResponseStatus
 import io.github.bbuchsbaum.slurm4s.protocol.FrameCodec
@@ -49,7 +49,13 @@ final class ServiceRequestHandler[F[_]: Concurrent](
                   HandshakeJson.response(response)
                 )
               )
-            case AgentCall.Failed(failure) => protocolFailure(request, failure.toString)
+            case AgentCall.Failed(failure) =>
+              request.withBody(
+                AgentBody.Response(
+                  AgentResponseStatus.ProtocolFailure,
+                  AgentFailurePayload.fromFailure(failure).asJson
+                )
+              )
           }
     case AgentBody.Request(_, _)  => delegate.handle(request)
     case AgentBody.Response(_, _) =>
@@ -59,7 +65,7 @@ final class ServiceRequestHandler[F[_]: Concurrent](
     request.withBody(
       AgentBody.Response(
         AgentResponseStatus.ProtocolFailure,
-        Json.obj("message" -> Json.fromString(message))
+        AgentFailurePayload.protocolViolation(message).asJson
       )
     )
 
@@ -114,11 +120,9 @@ final class AgentStdioServer[F[_]: Concurrent](
     request.withBody(
       AgentBody.Response(
         AgentResponseStatus.InternalFailure,
-        Json.obj(
-          "code" -> Json.fromString("agent-handler-failed"),
-          "message" -> Json.fromString("the remote agent could not complete the request"),
-          "causeClass" -> Json.fromString(causeClass)
-        )
+        AgentFailurePayload
+          .handlerFailure("the remote agent could not complete the request", causeClass)
+          .asJson
       )
     )
 

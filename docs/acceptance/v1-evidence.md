@@ -10,8 +10,15 @@
 > verification-only lane, changed under P8.B4 and recorded in
 > [ADR 0001](../architecture/0001-foundation-boundaries.md). The measurements below are the
 > 2026-07-22 snapshot and are left as recorded; they are not restated for the current baseline.
-> A later run on 2026-08-03 reported 428 tests passing on Scala 3.3.8, but that run was `sbt test`
-> alone, not a full execution of this gate, and it does not re-close any row here.
+> On 2026-08-03 the expanded gate ran 516 tests successfully on each of Scala 3.3.8 and 3.8.4,
+> locally published every publishable artifact, and packaged the worker. That run used JDK 25 and
+> exposed that the script did not enforce its stated JDK 17 prerequisite, so it is implementation
+> evidence rather than accepted release evidence. The current gate now requires an explicit
+> JDK-17 `JAVA_HOME`; a conforming rerun remains pending.
+> A later current-tree verification on the same date passed 542 tests on each Scala lane, generated
+> API documentation for both lanes, and passed formatting. It also used JDK 25 because no JDK 17 is
+> installed on the verification host, so it strengthens implementation evidence but does not close
+> the release gate.
 
 This is a live audit of `PRD.html` sections 15–20 against the current source tree. A tracker state,
 test name, synthetic fixture, or green local build is not accepted as proof by itself. Each claim
@@ -40,7 +47,7 @@ Status vocabulary:
 | F-07 | Local complete | `LocalLogReaderSuite`, `SshAgentConformanceSuite`, `FailureDiagnosisSuite` | Log availability remains site-dependent and explicit. |
 | F-08 | External pending | Capability probes in `SlurmCliVerticalSuite`; `SiteProfileSuite`; agent handshake tests | Real site capability/policy discovery is still unavailable. |
 | F-09 | Local complete | `FrameCodecSuite`, `AgentStdioServerSuite`, `SshFailureClassificationSuite`, `SshAgentConformanceSuite` | This proves framed system-OpenSSH semantics with deterministic transports, not site installation permission. |
-| F-10 | Local complete | `FileJournalControlStoreSuite`, `ManagedControllerSuite`, ADR 0004 | The file journal is the single-writer reference interpreter. |
+| F-10 | Local complete | `FileJournalControlStoreSuite`, `JournalCompactionSuite`, `JournalReplayLawSuite`, `ManagedControllerSuite`, ADR 0004 | The bounded snapshot-plus-suffix journal is the single-writer reference interpreter. |
 | F-11 | Local complete | Digest conflict, lost response, acceptance search, restart, and epoch-fence cases across managed tests | Exactly-once scheduler execution is not claimed. |
 | F-12 | Local complete | `WorkloadSuite`, opaque declared-output inspection in `WorkerRuntimeSuite` | Declared files still require independent filesystem observation. |
 | F-13 | Local complete | `StructuredResultCodecSuite`, Python byte-exact fixture, Python/R producers, Scala worker runtime | R is a reference example rather than a golden CI fixture. |
@@ -56,7 +63,7 @@ Status vocabulary:
 | --- | --- | --- | --- |
 | Q-01 | Local complete | Disjoint failure ADTs, managed stale/unavailable transitions, `FailureDiagnosisSuite` | Log recognizers remain suspected and cannot override stronger evidence. |
 | Q-02 | Local complete | Resource/finalizer tests in local, SSH, managed journal, and worker modules; explicit `ByteLimit`/batch bounds | Native filesystem correctness still depends on OS guarantees reported by each interpreter. |
-| Q-03 | Local complete | Journal reopen/crash-tail/cursor tests and controller restart recovery | Compaction and multi-writer storage are intentionally absent. |
+| Q-03 | Local complete | Journal reopen, torn-tail, snapshot-compaction boundary, retained-cursor gap, and controller restart tests | Multi-writer storage is intentionally absent; atomic rename durability remains filesystem-dependent. |
 | Q-04 | External pending | `docs/compatibility.md`, versioned codecs/fixtures, one actual 25.05.6 capture | Supported Slurm range cannot be certified until the second family and site receipts exist. |
 | Q-05 | Local complete | Bounded process/frame/log/result APIs; coalesced observation and slow-consumer tests | Real controller limits remain a site acceptance concern. |
 | Q-06 | Local complete | Fixed SSH argv/system authority, private state, limited agent operations, fail-closed `ManagedRequestPolicy`, ADR 0008 | Arbitrary environment values are rejected by default; explicitly admitted public values and opaque workload content remain caller responsibility. |
@@ -73,10 +80,11 @@ Run:
 tools/acceptance/v1-local-gate.sh
 ```
 
-The gate checks shell syntax, verifies the fail-closed fake-Slurm acceptance harness, validates
-that every F-01…F-18 and Q-01…Q-10 row remains present, runs formatting, executes the complete
-test suite on the current baseline, and packages the worker. `SLURM4S_CACHE_ROOT` may point sbt and
-Coursier at a writable cache root.
+The gate requires an explicit JDK-17 `JAVA_HOME`, checks shell syntax, verifies the fail-closed
+fake-Slurm acceptance harness, validates that every F-01…F-18 and Q-01…Q-10 row remains present,
+runs formatting, executes the complete suite on both supported Scala lines, locally publishes
+every publishable artifact, and packages the worker. `SLURM4S_CACHE_ROOT` may point sbt and Coursier
+at a writable cache root.
 
 At this snapshot, formatting passed, all **154 tests** passed, and `worker/packageBin` succeeded.
 JDK 25 emitted Scala 3.7.4's terminally deprecated `sun.misc.Unsafe` warning; bytecode and Java

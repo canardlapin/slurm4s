@@ -30,6 +30,11 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
   private val resultLimit = ByteLimit.from(1024).toOption.get
   private val envelopeLimit = ByteLimit.from(65536).toOption.get
   private val outputLimit = ByteLimit.from(4096).toOption.get
+  private val terminationNotice = TerminationNotice(
+    TerminationNoticeSignal.Usr1,
+    TerminationNoticeScope.BatchShell,
+    SignalLeadSeconds.unsafeFrom(120)
+  )
 
   test("task failure persistence codes are stable") {
     val operation = ExampleTask(Vector.empty).operation.descriptor
@@ -500,7 +505,8 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         JobName.from("typed-scheduler-submit").toOption.get,
         payload,
         ResourceRequest.validate(1, 1, None, None, None).toEither.toOption.get,
-        retrySafety = RetrySafety.SafeForAutomaticRetry
+        retrySafety = RetrySafety.SafeForAutomaticRetry,
+        terminationNotice = Some(terminationNotice)
       )
       val executable = root.resolve("worker-distribution")
       for
@@ -542,6 +548,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
             prepared.schedulerRequest.retrySafety,
             RetrySafety.SafeForAutomaticRetry
           )
+          assertEquals(prepared.schedulerRequest.terminationNotice, Some(terminationNotice))
           assertEquals(retried.invocation.attemptEpoch.value, 2L)
           assertEquals(retried.resultHandle.attemptEpoch.value, 2L)
           assertNotEquals(retried.invocationPath, prepared.invocationPath)
@@ -583,7 +590,8 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
           )
         ),
         maximumConcurrent = Some(PositiveInt.from("maximumConcurrent", 1).toOption.get),
-        retrySafety = RetrySafety.NoAutomaticRetry
+        retrySafety = RetrySafety.NoAutomaticRetry,
+        terminationNotice = Some(terminationNotice)
       )
       val executable = root.resolve("worker-distribution")
       for
@@ -613,6 +621,7 @@ class WorkerRuntimeSuite extends munit.CatsEffectSuite:
         case RegisteredArraySubmissionResult.Submitted(prepared, SubmissionAttempt.Completed(_)) =>
           assertEquals(prepared.schedulerRequest.array, Some(prepared.arrayRequest))
           assertEquals(prepared.schedulerRequest.retrySafety, RetrySafety.NoAutomaticRetry)
+          assertEquals(prepared.schedulerRequest.terminationNotice, Some(terminationNotice))
           assert(
             prepared.elements.toVector.forall(
               _.invocation.retrySafety == RetrySafety.NoAutomaticRetry

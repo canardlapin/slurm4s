@@ -28,11 +28,13 @@ Atomic publication requires private `CREATE_NEW` temporary files, content force 
 and `ATOMIC_MOVE`; unsupported atomic rename is data and there is no copy/delete fallback.
 `ContentDigest` is the single digest identity returned by atomic publication.
 
-slurm4s temporarily exposes explicitly documented source-compatibility names in
-`slurm4s.core.SharedKernel`. New provider-neutral code must import
-`io.github.bbuchsbaum.remoteexec.kernel` directly. These pre-1.0 aliases carry no independent
-semantics and may be removed after downstream migration; wire encodings do not include Scala
-package names and therefore do not change.
+slurm4s deliberately re-exports the kernel contracts that appear throughout its public API from
+`io.github.bbuchsbaum.slurm4s.core`. This is a curated facade, not temporary ownership: a slurm4s
+caller should not need a second wildcard import to name a submission key, diagnostic, byte limit,
+or result codec. The aliases preserve exact kernel type identity and add no independent semantics.
+Provider-neutral code still imports `io.github.bbuchsbaum.remoteexec.kernel` directly, and
+implementation-only kernel mechanics are not re-exported. Wire encodings do not include Scala
+package names.
 
 ## Consequences
 

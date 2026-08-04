@@ -1,0 +1,19 @@
+{
+  "fixtureSchemaVersion": 1,
+  "fixtureId": "synthetic-squeue-state-truncation-v1",
+  "clusterCapture": false,
+  "generatedAt": "2026-08-03T00:00:00Z",
+  "contract": "squeue state-expression truncation remains distinguishable from a complete flag list",
+  "streams": {
+    "stdout": {
+      "file": "stdout.json",
+      "bytes": 96,
+      "sha256": "e757f1360eaa059bc2deae7259b71a1f9d510dab3430f3925514a5bce72a9f6e"
+    }
+  },
+  "coverage": [
+    "trailing-plus state expression",
+    "complete state expression",
+    "additive observation evidence"
+  ]
+}

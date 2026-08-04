@@ -80,10 +80,26 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     }
   }
 
-  test("exit 126 is agent absence even without a recognizable message") {
-    val absent = SshProcessOutcome.Exited(
+  test("exit 126 after request write preserves uncertainty without an agent marker") {
+    val ambiguous = SshProcessOutcome.Exited(
       126,
       requestWriteCompleted = true,
+      emptyEvidence(EvidenceSource.CommandStdout("ssh")),
+      textEvidence("")
+    )
+
+    client(ambiguous).roundTrip(request).map { result =>
+      failure(result) match
+        case AgentFailure.TransportDisconnected(afterRequestWrite, _, _) =>
+          assert(afterRequestWrite)
+        case other => fail(s"expected a transport disconnect, observed $other")
+    }
+  }
+
+  test("exit 126 before request write is definite agent absence") {
+    val absent = SshProcessOutcome.Exited(
+      126,
+      requestWriteCompleted = false,
       emptyEvidence(EvidenceSource.CommandStdout("ssh")),
       textEvidence("")
     )
@@ -102,6 +118,31 @@ class SshFailureClassificationSuite extends munit.CatsEffectSuite:
     )
     client(success(response)).roundTrip(request).map { result =>
       assert(failure(result).isInstanceOf[AgentFailure.RemoteCliFailure])
+    }
+  }
+
+  test("a typed failure payload reconstructs its ADT case instead of the response-status default") {
+    val response = request.withBody(
+      AgentBody.Response(
+        AgentResponseStatus.DomainFailure,
+        AgentFailurePayload
+          .fromFailure(
+            AgentFailure.TransportDisconnected(
+              afterRequestWrite = true,
+              "agent lost its scheduler connection",
+              None
+            )
+          )
+          .asJson
+      )
+    )
+
+    client(success(response)).roundTrip(request).map { result =>
+      failure(result) match
+        case AgentFailure.TransportDisconnected(afterRequestWrite, diagnostic, Some(_)) =>
+          assert(afterRequestWrite)
+          assertEquals(diagnostic, "agent lost its scheduler connection")
+        case other => fail(s"expected the typed transport failure, observed $other")
     }
   }
 

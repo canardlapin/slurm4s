@@ -3,6 +3,7 @@ package io.github.bbuchsbaum.slurm4s.managed
 import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all.*
+import io.github.bbuchsbaum.slurm4s.core.EventCursor
 import io.github.bbuchsbaum.slurm4s.core.codec.CanonicalJson
 import io.github.bbuchsbaum.slurm4s.protocol.AgentDomainJson
 
@@ -61,6 +62,15 @@ class JournalReplayLawSuite extends munit.CatsEffectSuite:
             replayed,
             live,
             s"replaying ${commands.size} commands did not reproduce the state that wrote them"
+          )
+          val minimum = live.events.headOption
+            .flatMap(event => EventCursor.from(event.cursor.value - 1L).toOption)
+            .getOrElse(EventCursor.origin)
+          val snapshot = ControlSnapshot(live, minimum)
+          assertEquals(
+            ControlSnapshotJson.decode(ControlSnapshotJson.encode(snapshot)),
+            Right(snapshot),
+            "the materialized snapshot codec did not preserve the replayed projection"
           )
           (live, accepted)
         }

@@ -9,6 +9,11 @@ produced from 3.8.4. Moving the publication line requires an explicit compatibil
 full gate. Compiler, Cats, Cats Effect, FS2, Circe, and protocol-version changes require their own
 tracked change and cannot arrive as an incidental dependency refresh.
 
+`slurm4s-core` intentionally re-exports the provider-neutral kernel types used by its public
+signatures. Those aliases preserve exact `remote-exec-kernel` type identity and are part of the
+slurm4s source-compatibility surface; provider-neutral libraries should import the kernel package
+directly.
+
 Publishing from the LTS line is deliberate. A Scala 3 compiler reads TASTy from its own or an
 earlier minor line, so publishing from a later line would exclude every 3.3 LTS consumer. Because
 all Scala 3 versions share `_3` artifact coordinates, cross-publishing both lines would attempt to
@@ -21,6 +26,8 @@ The exact compiler releases are recorded by the official
 
 The project follows early SemVer before 1.0 and SemVer after 1.0. Source compatibility is a goal;
 wire, persisted-state, event-journal, and fixture compatibility are explicit contracts.
+The executable publication procedure and the current pre-baseline limitations are recorded in
+[release.md](release.md).
 
 ## Wire and persisted JSON
 
@@ -28,17 +35,28 @@ wire, persisted-state, event-journal, and fixture compatibility are explicit con
 - Readers reject unknown major versions before interpreting payload bytes.
 - Minor releases may add fields. Generic envelopes retain unknown top-level fields.
 - Required-field removal or semantic reinterpretation requires a new major version or schema.
-- Canonical bytes are UTF-8 JSON with lexicographically sorted object keys, no insignificant
-  whitespace, stable numeric/string representation, and exactly one trailing LF.
+- Canonical JSON is UTF-8 with lexicographically sorted object keys, no insignificant whitespace,
+  and stable numeric/string representation. `VersionedJson` documents end with exactly one
+  trailing LF; embedded canonical objects such as managed requests and journal checksums do not.
 - Codecs are named and manually reviewed. Automatic derivation alone is not a durable contract.
 - Golden fixtures are byte-exact and carry provenance as described in `docs/fixtures/README.md`.
 
 The agent transport adds a four-byte network-order length prefix around canonical JSON. Both
 peers apply a negotiated frame ceiling before payload allocation. Request IDs are correlation
 bound, protocol-major mismatch is rejected, and minor additions may be retained as extensions.
-The named `AgentDomainJson` codec owns the P2 opaque-script scheduler schema. Its derived internal
-components are exercised through full local/agent differential round trips; changing their JSON
-shape is a wire change and requires compatibility evidence, not a mechanical refactor.
+Unknown handshake feature names are ignored so feature negotiation itself remains extensible;
+semantic additions such as termination notices are sent only after explicit negotiation.
+Failure responses carry an additive `code` plus the fields needed to reconstruct the public
+`AgentFailure` case, including bounded remote evidence when the failure has it. Readers still
+accept legacy message-only bodies and degrade unknown future codes according to the enclosing
+response status. A recognized code with missing required fields is malformed, not a legacy
+fallback, and SSH transport evidence is used only when the payload supplied no remote evidence.
+The named `AgentDomainJson` codec owns the P2 opaque-script scheduler schema, including every sum
+type discriminator and product field. The v1 scheduler response tags intentionally retain their
+historical Scala case-name spelling, but they are now string literals in explicit codecs rather
+than compiler-derived names. Full local/agent differential round trips and the
+`agent-scheduler-shapes-v1.json` fixture pin those bytes. Changing their JSON shape is a wire change
+and requires compatibility evidence, not a mechanical refactor.
 
 The SSH client invokes the user's system OpenSSH and preserves its configured authentication,
 host-key, proxy, and connection-sharing policies. The remote command and no-TTY policy are fixed.
@@ -55,9 +73,21 @@ incomplete final frame is uncommitted and may be truncated during open.
 
 Changing command JSON shape, canonical request bytes, digest semantics, reducer meaning, cursor
 assignment, or revision behavior is a persistence-format change. Additive minor evolution still
-requires replay fixtures and migration evidence. No in-place migration or journal compaction is
-implemented yet; a future SQLite or compacted interpreter must first reproduce the same command
-replay and committed-event cursor laws.
+requires replay fixtures and migration evidence.
+
+The file store bounds snapshot-plus-suffix storage with
+`JournalLimits.maximumStorageBytes`. Compaction atomically publishes a checksummed
+`slurm4s.control-snapshot` projection, then resets the forced command suffix under the same writer
+lock. Recovery accepts legacy journals without a snapshot and can also recover the deliberate
+intermediate state where a new snapshot exists beside the old prefix. Startup replays only records
+newer than the snapshot revision. Opening an oversized legacy journal under a bounded configuration
+promotes its replayed projection to a snapshot immediately, so subsequent read-only opens do not
+remain O(all history).
+
+Compaction retains the configured recent event window, not infinite event history. An event request
+whose cursor predates that window returns `EventHistoryGap`; `ManagedController.eventStream` fails
+with `EventHistoryUnavailable` rather than silently skipping events. This is a one-way persistence
+upgrade for older slurm4s readers, which do not understand the snapshot sidecar.
 
 ## Structured workload protocol
 
@@ -75,6 +105,11 @@ sizes and SHA-256 digests, worker-release identity, and completion time. A succe
 must have a value; a failed envelope must not. Readers reject unknown major versions, wrong
 schemas, oversized envelope/value bytes, malformed Base64, duplicate output paths, and invalid
 status/value combinations.
+
+`ResultContractDescriptor` carries only mode, schema, and declared paths. Result byte limits live
+on structured contracts and durable handles, then are enforced by envelope readers; there is no
+second descriptor limit that callers can set without effect. Declared-output contracts likewise
+make no separate manifest-size promise: envelope and output-capture budgets own those bounds.
 
 `modules/protocol/src/test/resources/fixtures/python-result-envelope-v1.json` is the byte-exact
 cross-language fixture. The standard-library Python producer creates it and the Scala codec
@@ -102,7 +137,14 @@ requires captured evidence from real Slurm releases and sites.
 Each fixture records the command, Slurm version, cluster/plugin context, locale, capture time,
 redaction history, and expected normalized result. Parsers request an explicit supported Slurm
 JSON data-parser version. Unknown states, reasons, flags, fields, and warnings are preserved.
-Parse failure produces failed observation evidence; it never implies workload failure.
+Successful accounting uses `CompletionExitStatus.ReportedZero` only when Slurm disclosed an
+explicit zero; `Undisclosed` records a successful state without inventing an exit code. The v1 wire
+field remains required and accepts only `0` or `null`.
+A trailing `+` on a state expression is preserved as
+`JobObservation.stateExpressionCompleteness = Truncated`, so the typed flag list is not mistaken
+for complete. A current parser reports `Complete` when no truncation marker is present; older agent
+payloads that lack the additive field decode as `Unreported`, not as known complete. Parse failure
+produces failed observation evidence; it never implies workload failure.
 
 Compatibility gates before v1 include captured evidence from at least two supported Slurm
 major-release families, local and SSH-agent differential conformance, and real-site smoke

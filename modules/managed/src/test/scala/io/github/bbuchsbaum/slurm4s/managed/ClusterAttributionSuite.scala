@@ -54,7 +54,7 @@ class ClusterAttributionSuite extends munit.FunSuite:
       job,
       SlurmState.Completed,
       Some(ExitStatus(0, None)),
-      Some(WorkloadOutcome.Completed(0)),
+      Some(WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero)),
       Freshness.Current(later),
       Map.empty,
       evidence

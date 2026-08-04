@@ -54,6 +54,7 @@ trait TaskContext[F[_]]:
   def scratch: Resource[F, ScratchDirectory]
   def progress(event: ProgressEvent): F[Unit]
   def logger: TaskLogger[F]
+  def drainNotice: Option[DrainNoticeSource[F]] = None
 
 trait NativeTaskContext[F[_]] extends TaskContext[F]:
   def nativeRoot: Path

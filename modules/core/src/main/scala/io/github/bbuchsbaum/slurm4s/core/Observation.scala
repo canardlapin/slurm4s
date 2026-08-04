@@ -155,6 +155,11 @@ object JobTiming:
   val unknown: JobTiming =
     JobTiming(None, None, ObservedTimeLimit.Unknown(None))
 
+enum StateExpressionCompleteness derives CanEqual:
+  case Complete
+  case Truncated
+  case Unreported
+
 final case class JobObservation(
     job: JobRef,
     state: SlurmState,
@@ -166,7 +171,9 @@ final case class JobObservation(
     flags: Vector[SlurmStateFlag] = Vector.empty,
     // Evidence, deliberately not identity: `squeue` names the local cluster on every row, so
     // folding it into JobRef made a bound attempt fail to match its own observation.
-    reportedCluster: Option[ClusterName] = None
+    reportedCluster: Option[ClusterName] = None,
+    stateExpressionCompleteness: StateExpressionCompleteness =
+      StateExpressionCompleteness.Unreported
 ) derives CanEqual:
   def terminality: Terminality = Terminality.of(state)
 

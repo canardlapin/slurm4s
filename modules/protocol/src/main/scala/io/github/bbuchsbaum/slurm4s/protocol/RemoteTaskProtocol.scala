@@ -21,7 +21,8 @@ final case class RemoteRegisteredTaskRequest(
     environment: Map[EnvName, String],
     maximumResultBytes: ByteLimit,
     declaredOutputs: Vector[RelativeOutputPath],
-    retrySafety: RetrySafety
+    retrySafety: RetrySafety,
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 /** Durable, path-free locator interpreted relative to the agent's private worker workspace. */

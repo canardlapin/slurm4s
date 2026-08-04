@@ -80,6 +80,33 @@ class CanonicalJsonLawSuite extends munit.ScalaCheckSuite:
     }
   }
 
+  test("equal numbers have one rendering regardless of decimal or exponent spelling") {
+    val values = Vector("1", "1.0", "1.00", "1e0", "10e-1").map(text =>
+      parser.parse(text).fold(problem => fail(problem.message), identity)
+    )
+    values.foreach(value => assertEquals(value, values.head))
+    assertEquals(values.map(CanonicalJson.print).distinct, Vector("1"))
+
+    val nested = Vector(
+      parser.parse("""{"value":1230}""").toOption.get,
+      parser.parse("""{"value":1.2300e3}""").toOption.get,
+      parser.parse("""{"value":12300e-1}""").toOption.get
+    )
+    nested.foreach(value => assertEquals(value, nested.head))
+    assertEquals(nested.map(CanonicalJson.print).distinct.size, 1)
+
+    val tens = Vector("10", "10.0", "1e1", "100e-1").map(text =>
+      parser.parse(text).fold(problem => fail(problem.message), identity)
+    )
+    assertEquals(tens.map(CanonicalJson.print).distinct, Vector("10"))
+  }
+
+  test("negative zero and zero share canonical bytes") {
+    val zero = parser.parse("0").toOption.get
+    val negativeZero = parser.parse("-0.000e20").toOption.get
+    assertEquals(CanonicalJson.bytes(negativeZero), CanonicalJson.bytes(zero))
+  }
+
   /** An explicit null must stay distinguishable from an absent field. Dropping nulls would make
     * `{"a":null}` and `{}` share a digest, and the wire codecs use presence to mean something.
     */

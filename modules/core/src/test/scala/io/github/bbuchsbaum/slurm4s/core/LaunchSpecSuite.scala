@@ -23,7 +23,7 @@ class LaunchSpecSuite extends munit.FunSuite:
 
   test("lowering preserves the declared result contract rather than replacing it") {
     val outputs = ResultContract.DeclaredOutputs
-      .from(Vector(RelativeOutputPath.unsafeFrom("results/out.txt")), ByteLimit.defaultEvidence)
+      .from(Vector(RelativeOutputPath.unsafeFrom("results/out.txt")))
       .toOption
       .get
     val spec = LaunchSpec.fromRequest(script(outputs)).toOption.get

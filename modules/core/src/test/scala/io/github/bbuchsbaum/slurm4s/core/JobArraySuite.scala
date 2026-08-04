@@ -60,7 +60,6 @@ class JobArraySuite extends munit.FunSuite:
     val contract = ResultContractDescriptor(
       ResultMode.Structured,
       Some(schema),
-      ByteLimit.defaultEvidence,
       Vector.empty
     )
     ArrayElementIdentity(

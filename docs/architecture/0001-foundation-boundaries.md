@@ -31,7 +31,7 @@ raised its minimum sbt version beyond this build baseline; that migration must b
 | Concern | Authority | Non-authoritative convenience |
 | --- | --- | --- |
 | Allocation and scheduler facts | Bounded Slurm evidence with source and observation time | A cache, inferred log message, or lost connection |
-| Managed submission intent | Durable control store and append-only journal | A fiber, SSH channel, `Ref`, `Queue`, or live stream |
+| Managed submission intent | Durable control store and checksummed snapshot-plus-suffix journal | A fiber, SSH channel, `Ref`, `Queue`, or live stream |
 | Workload meaning | Payload descriptor, launch bundle, operation identity, result contract | Generated shell text or Slurm job name |
 | Typed result | Validated, bounded envelope bound to attempt epoch and schema | Exit zero, stdout, or the Scala type expected by a caller |
 | Live delivery | Cursor-backed durable pages exposed as bounded FS2 streams | An unbounded topic or process pipe after disconnect |

@@ -17,7 +17,8 @@ class NativeOptionOwnershipSuite extends munit.FunSuite:
       "cpus-per-task",
       "mem",
       "time",
-      "gres"
+      "gres",
+      "signal"
     )
     val admitted = reserved.filter(name => NativeOption.from(name, "value").isRight)
 

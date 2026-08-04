@@ -58,6 +58,7 @@ class RemoteRegisteredTaskLauncherSuite extends munit.CatsEffectSuite:
         assertEquals(invocation.operation, request.operation)
         assertEquals(invocation.inputBytes, request.inputBytes)
         assertEquals(invocation.retrySafety, request.retrySafety)
+        assertEquals(prepared.schedulerRequest.terminationNotice, request.terminationNotice)
         assertEquals(
           DurableResultHandleCodec.decode(handleBytes, RemoteTaskWireLimits.MaximumHandleBytes),
           Right(prepared.resultHandle)
@@ -171,5 +172,12 @@ class RemoteRegisteredTaskLauncherSuite extends munit.CatsEffectSuite:
     Map.empty,
     resultLimit,
     Vector.empty,
-    RetrySafety.SafeForAutomaticRetry
+    RetrySafety.SafeForAutomaticRetry,
+    Some(
+      TerminationNotice(
+        TerminationNoticeSignal.Usr2,
+        TerminationNoticeScope.JobSteps,
+        SignalLeadSeconds.unsafeFrom(75)
+      )
+    )
   )

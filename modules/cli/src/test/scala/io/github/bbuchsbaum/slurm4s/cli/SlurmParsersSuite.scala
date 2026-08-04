@@ -229,6 +229,31 @@ class SlurmParsersSuite extends munit.FunSuite:
     )
   }
 
+  test("completed accounting distinguishes an explicit zero from an undisclosed exit") {
+    val expected = NonEmptyVector.one(JobRef(JobId.from("1001").toOption.get, None))
+    val explicit = SacctParsable2
+      .parse(evidence("1001|COMPLETED|0:0|None\n"), expected)
+      .toOption
+      .get
+      .head
+    val undisclosed = SacctParsable2
+      .parse(evidence("1001|COMPLETED||None\n"), expected)
+      .toOption
+      .get
+      .head
+
+    assertEquals(explicit.exitStatus, Some(ExitStatus(0, None)))
+    assertEquals(
+      explicit.outcome,
+      Some(WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero))
+    )
+    assertEquals(undisclosed.exitStatus, None)
+    assertEquals(
+      undisclosed.outcome,
+      Some(WorkloadOutcome.Completed(CompletionExitStatus.Undisclosed))
+    )
+  }
+
   test("nonterminal accounting rows carry no terminal workload outcome") {
     val expected = NonEmptyVector.one(JobRef(JobId.from("1001").toOption.get, None))
     val running = SacctParsable2.parse(evidence("1001|RUNNING|0:0|None\n"), expected)
@@ -287,6 +312,28 @@ class SlurmParsersSuite extends munit.FunSuite:
     )
   }
 
+  test("structured queue preserves whether the state expression was truncated") {
+    val truncatedJob = JobRef(JobId.from("2006").toOption.get, None)
+    val completeJob = JobRef(JobId.from("2007").toOption.get, None)
+    val directory = "/fixtures/squeue-state-truncation-v1"
+    val bytes = resourceBytes(s"$directory/stdout.json")
+    val raw = String(bytes, StandardCharsets.UTF_8)
+    val observations = SqueueJsonV0043
+      .parse(evidence(raw), NonEmptyVector.of(truncatedJob, completeJob))
+      .toOption
+      .get
+    val provenance = io.circe.parser.parse(resource(s"$directory/provenance.json")).toOption.get
+    val stdout = provenance.hcursor.downField("streams").downField("stdout")
+
+    assertEquals(observations.map(_.state), Vector(SlurmState.Cancelled, SlurmState.Cancelled))
+    assertEquals(
+      observations.map(_.stateExpressionCompleteness),
+      Vector(StateExpressionCompleteness.Truncated, StateExpressionCompleteness.Complete)
+    )
+    assertEquals(stdout.get[Long]("bytes"), Right(bytes.length.toLong))
+    assertEquals(stdout.get[String]("sha256"), Right(sha256(bytes)))
+  }
+
   test("array observations and partial failures never alias sibling elements") {
     val parent = JobId.from("9100").toOption.get
     val first = JobRef(parent, Some(ArrayIndex.from(0).toOption.get))
@@ -306,7 +353,10 @@ class SlurmParsersSuite extends munit.FunSuite:
 
     assertEquals(queue.map(_.job), Vector(first, second))
     assertEquals(accounting.map(_.job), Vector(first, second))
-    assertEquals(accounting.head.outcome, Some(WorkloadOutcome.Completed(0)))
+    assertEquals(
+      accounting.head.outcome,
+      Some(WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero))
+    )
     assertEquals(accounting(1).outcome, Some(WorkloadOutcome.OutOfMemory))
   }
 

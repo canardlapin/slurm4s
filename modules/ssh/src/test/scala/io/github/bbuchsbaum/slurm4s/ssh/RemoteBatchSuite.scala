@@ -49,6 +49,11 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
     DurationMillis.from(1L).toOption.get,
     DurationMillis.from(1000L).toOption.get
   )
+  private val terminationNotice = TerminationNotice(
+    TerminationNoticeSignal.Usr2,
+    TerminationNoticeScope.JobSteps,
+    SignalLeadSeconds.unsafeFrom(90)
+  )
 
   private val temporaryRoot = FunFixture[Path](
     setup = _ => Files.createTempDirectory("remote-batch-suite"),
@@ -117,6 +122,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
             request.resources.memory,
             Some(MemoryRequest.PerNode(Mebibytes.from(5L * 1024L).toOption.get))
           )
+          assertEquals(request.terminationNotice, Some(terminationNotice))
         case None => fail("the target scheduler did not receive the batch")
   }
 
@@ -195,7 +201,8 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
           SubmissionKey.from("remote-script-grid-27").toOption.get,
           JobName.from("remote-script-grid").toOption.get,
           options.perTask,
-          awaitPolicy = awaitPolicy
+          awaitPolicy = awaitPolicy,
+          terminationNotice = Some(terminationNotice)
         )
       )
       exitCodes <- handle.elements.traverse { element =>
@@ -209,6 +216,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
         LogCursor.start,
         ByteLimit.from(1024).toOption.get
       )
+      schedulerRequest <- submittedRequest.get
     yield
       assertEquals(grid.size, 27L)
       assert(exitCodes.forall(_ == 0))
@@ -224,6 +232,7 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
             "--alpha\n0.1\n--method\nridge\n--seed\n1\n"
           )
         case other => fail(s"expected a remote script stdout page, received $other")
+      assertEquals(schedulerRequest.flatMap(_.terminationNotice), Some(terminationNotice))
   }
 
   private def createRuntime(
@@ -287,7 +296,8 @@ class RemoteBatchSuite extends munit.CatsEffectSuite:
       Some(WallTimeMinutes.from(30).toOption.get)
     ),
     resultLimit,
-    awaitPolicy = awaitPolicy
+    awaitPolicy = awaitPolicy,
+    terminationNotice = Some(terminationNotice)
   )
 
   private def publishSuccess(

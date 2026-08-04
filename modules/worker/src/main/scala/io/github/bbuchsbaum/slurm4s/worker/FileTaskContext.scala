@@ -38,7 +38,8 @@ object FileTaskContext:
       workspace: FileTaskWorkspace,
       declaredInputs: Map[InputName, Path],
       reportProgress: ProgressEvent => IO[Unit] = _ => IO.unit,
-      taskLogger: TaskLogger[IO] = TaskLogger.noop
+      taskLogger: TaskLogger[IO] = TaskLogger.noop,
+      drainNoticeSource: Option[DrainNoticeSource[IO]] = None
   ): Resource[IO, TaskContext[IO]] =
     Resource.eval(IO.blocking(initialize(workspace))).map { roots =>
       new TaskContext[IO]:
@@ -49,13 +50,15 @@ object FileTaskContext:
         val scratch: Resource[IO, ScratchDirectory] = scratchResource(roots.scratch)
         def progress(event: ProgressEvent): IO[Unit] = reportProgress(event)
         val logger: TaskLogger[IO] = taskLogger
+        override val drainNotice: Option[DrainNoticeSource[IO]] = drainNoticeSource
     }
 
   def native(
       workspace: FileTaskWorkspace,
       declaredInputs: Map[InputName, Path],
       reportProgress: ProgressEvent => IO[Unit] = _ => IO.unit,
-      taskLogger: TaskLogger[IO] = TaskLogger.noop
+      taskLogger: TaskLogger[IO] = TaskLogger.noop,
+      drainNoticeSource: Option[DrainNoticeSource[IO]] = None
   ): Resource[IO, NativeTaskContext[IO]] =
     Resource.eval(IO.blocking(initialize(workspace))).map { roots =>
       new NativeTaskContext[IO]:
@@ -66,6 +69,7 @@ object FileTaskContext:
         val scratch: Resource[IO, ScratchDirectory] = scratchResource(roots.scratch)
         def progress(event: ProgressEvent): IO[Unit] = reportProgress(event)
         val logger: TaskLogger[IO] = taskLogger
+        override val drainNotice: Option[DrainNoticeSource[IO]] = drainNoticeSource
     }
 
   final private case class Roots(root: Path, output: Path, scratch: Path)

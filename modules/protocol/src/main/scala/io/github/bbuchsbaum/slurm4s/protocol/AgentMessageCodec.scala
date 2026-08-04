@@ -190,7 +190,6 @@ object HandshakeJson:
         for
           accumulated <- result
           name <- value.asString.toRight("feature names must be strings")
-          feature <- AgentFeature.fromWireName(name).toRight(s"unknown feature: $name")
-        yield accumulated + feature
+        yield AgentFeature.fromWireName(name).fold(accumulated)(accumulated + _)
       }
     }

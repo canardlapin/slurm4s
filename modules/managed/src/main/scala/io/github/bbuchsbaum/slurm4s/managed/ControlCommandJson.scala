@@ -236,7 +236,7 @@ private[managed] object ControlCommandJson:
       case Some(other)                      => Left(s"unknown retrySafety: $other")
     }
 
-  private def encodeRetryAuthorization(value: RetryAuthorization): Json = value match
+  private[managed] def encodeRetryAuthorization(value: RetryAuthorization): Json = value match
     case RetryAuthorization.Manual(reason) =>
       Json.obj(
         "kind" -> Json.fromString("manual"),
@@ -248,7 +248,9 @@ private[managed] object ControlCommandJson:
         "reason" -> Json.fromString(reason.value)
       )
 
-  private def decodeRetryAuthorization(json: Json): Either[String, RetryAuthorization] =
+  private[managed] def decodeRetryAuthorization(
+      json: Json
+  ): Either[String, RetryAuthorization] =
     for
       cursor <- Either.cond(json.isObject, json.hcursor, "retry authorization must be an object")
       kind <- string(cursor, "kind")

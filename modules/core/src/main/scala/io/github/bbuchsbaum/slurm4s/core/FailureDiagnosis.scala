@@ -449,15 +449,14 @@ object FailureDiagnosis:
       None
 
   private def outcomeCause(value: WorkloadOutcome): Option[FailureCause] = value match
-    case WorkloadOutcome.Completed(exitCode) if exitCode != 0 =>
-      Some(FailureCause.ProgramFailed(Some(exitCode), Vector.empty))
+    case WorkloadOutcome.Completed(_)                  => None
     case WorkloadOutcome.Failed(exitCode, diagnostics) =>
       Some(FailureCause.ProgramFailed(exitCode, codes(diagnostics)))
     case WorkloadOutcome.OutOfMemory       => Some(FailureCause.OutOfMemory)
     case WorkloadOutcome.TimeLimitExceeded => Some(FailureCause.TimeLimitExceeded)
     case WorkloadOutcome.Cancelled         => Some(FailureCause.Cancelled)
     case WorkloadOutcome.NodeFailure       => Some(FailureCause.NodeFailure)
-    case _                                 => None
+    case WorkloadOutcome.Unknown(_)        => None
 
   private def logCause(value: LogHintKind): FailureCause = value match
     case LogHintKind.PythonTraceback => FailureCause.RuntimeError("python")

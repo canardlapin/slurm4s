@@ -155,7 +155,10 @@ object SqueueJsonV0043:
                   evidence = EvidenceBundle(stdout),
                   timing = timing,
                   flags = report.flags,
-                  reportedCluster = reportedCluster
+                  reportedCluster = reportedCluster,
+                  stateExpressionCompleteness =
+                    if report.truncated then StateExpressionCompleteness.Truncated
+                    else StateExpressionCompleteness.Complete
                 )
               }
             }
@@ -382,8 +385,11 @@ object SacctParsable2:
       reason: String
   ): Option[WorkloadOutcome] =
     state match
-      case SlurmState.Completed if exit.forall(_.code == 0) =>
-        Some(WorkloadOutcome.Completed(0))
+      case SlurmState.Completed if exit.isEmpty =>
+        Some(WorkloadOutcome.Completed(CompletionExitStatus.Undisclosed))
+      case SlurmState.Completed
+          if exit.exists(status => status.code == 0 && status.signal.isEmpty) =>
+        Some(WorkloadOutcome.Completed(CompletionExitStatus.ReportedZero))
       case SlurmState.Completed   => Some(failedOutcome(exit, reason, "non-zero-exit"))
       case SlurmState.Failed      => Some(failedOutcome(exit, reason, "workload-failed"))
       case SlurmState.Preempted   => Some(failedOutcome(exit, reason, "workload-preempted"))
@@ -541,13 +547,20 @@ object SlurmStateParser:
       truncated = expression.endsWith("+")
     )
 
-  /** Parse an array-valued `job_state`, whose first element is the base state. */
+  /** Parse an array-valued `job_state`, whose first element is the state expression and whose
+    * remaining elements are flags.
+    */
   def reportOf(tokens: Vector[String]): ReportedState =
-    fromTokens(
-      tokens.map(_.trim.toUpperCase(Locale.ROOT)).filter(_.nonEmpty),
-      tokens.mkString(","),
-      truncated = false
-    )
+    val normalized = tokens.map(_.trim).filter(_.nonEmpty)
+    normalized.headOption match
+      case None => ReportedState(SlurmState.Unknown(tokens.mkString(",")), Vector.empty, false)
+      case Some(head) =>
+        val first = report(head)
+        ReportedState(
+          first.state,
+          first.flags ++ normalized.drop(1).map(value => flag(value.toUpperCase(Locale.ROOT))),
+          first.truncated
+        )
 
   private def fromTokens(
       tokens: Vector[String],

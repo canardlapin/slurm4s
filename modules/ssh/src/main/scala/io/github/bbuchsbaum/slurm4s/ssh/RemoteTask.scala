@@ -74,7 +74,8 @@ final case class RemoteTaskOptions(
     maximumResultBytes: ByteLimit,
     declaredOutputs: Vector[RelativeOutputPath] = Vector.empty,
     environment: Map[EnvName, String] = Map.empty,
-    awaitPolicy: RemoteAwaitPolicy = RemoteAwaitPolicy.default
+    awaitPolicy: RemoteAwaitPolicy = RemoteAwaitPolicy.default,
+    terminationNotice: Option[TerminationNotice] = None
 ) derives CanEqual
 
 enum RemoteSubmitFailure derives CanEqual:
@@ -289,7 +290,7 @@ final class RemoteTaskHandle[F[_]: Async, A] private[ssh] (
               .find(record => record.job == value)
               .flatMap(record =>
                 record.outcome.map {
-                  case WorkloadOutcome.Completed(0) =>
+                  case WorkloadOutcome.Completed(_) =>
                     RemoteExecutionResult.Completed(
                       ExecutionResult.Indeterminate(
                         Diagnostics.one(
@@ -344,7 +345,8 @@ private[ssh] object RemoteTasks:
               options.environment,
               options.maximumResultBytes,
               options.declaredOutputs,
-              call.task.retrySafety
+              call.task.retrySafety,
+              options.terminationNotice
             )
             remote.submitRegistered(request).map {
               case AgentCall.Failed(failure)       => Left(RemoteSubmitFailure.Agent(failure))

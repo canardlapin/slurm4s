@@ -85,6 +85,7 @@ enum AgentFeature(val wireName: String) derives CanEqual:
   case TypedResults extends AgentFeature("typed-results")
   case TypedBatches extends AgentFeature("typed-batches")
   case ScriptBatches extends AgentFeature("script-batches")
+  case TerminationNotices extends AgentFeature("termination-notices")
 
 object AgentFeature:
   def fromWireName(raw: String): Option[AgentFeature] = values.find(_.wireName == raw)

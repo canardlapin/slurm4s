@@ -1,9 +1,14 @@
 package io.github.bbuchsbaum.slurm4s.core
 
-/** Source-compatible names for contracts now owned by `remote-exec-kernel`.
+/** The curated slurm4s facade for contracts implemented by `remote-exec-kernel`.
   *
-  * New provider-neutral code should import `io.github.bbuchsbaum.remoteexec.kernel` directly. These
-  * aliases keep slurm4s's pre-1.0 public surface source-compatible while downstream users migrate.
+  * These aliases are intentional public API: slurm4s methods use the types pervasively, and callers
+  * should not need a second wildcard import merely to name their arguments or results. They add no
+  * Slurm-specific semantics and preserve type identity with the kernel definitions. Code intended
+  * to be provider-neutral should still import `io.github.bbuchsbaum.remoteexec.kernel` directly.
+  *
+  * Keep this list narrow. A kernel type belongs here only when it appears in slurm4s's public
+  * surface; implementation-only kernel mechanics must be imported at their use sites.
   */
 type ValidationFailure = io.github.bbuchsbaum.remoteexec.kernel.ValidationFailure
 val ValidationFailure = io.github.bbuchsbaum.remoteexec.kernel.ValidationFailure
