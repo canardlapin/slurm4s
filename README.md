@@ -66,6 +66,8 @@ real-site evidence gap and reproducible smoke procedure are recorded in
 [`docs/acceptance/p5-site-scale.md`](docs/acceptance/p5-site-scale.md).
 The executable typed-task API is introduced in
 [`docs/examples/typed-task.md`](docs/examples/typed-task.md).
+Typed pre-deadline signals and the worker drain-notice seam are documented in
+[`docs/termination-notices.md`](docs/termination-notices.md).
 
 Published assembly façades keep routine setup out of application code:
 
