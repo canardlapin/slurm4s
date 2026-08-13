@@ -2,13 +2,7 @@ package io.github.bbuchsbaum.slurm4s.protocol
 
 import io.circe.Json
 import io.circe.JsonObject
-import io.github.bbuchsbaum.slurm4s.core.ByteLimit
-import io.github.bbuchsbaum.slurm4s.core.FileIdentity
-import io.github.bbuchsbaum.slurm4s.core.LogCursor
-import io.github.bbuchsbaum.slurm4s.core.LogOffset
-import io.github.bbuchsbaum.slurm4s.core.LogPage
-import io.github.bbuchsbaum.slurm4s.core.LogReadResult
-import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
+import io.github.bbuchsbaum.slurm4s.core.*
 import io.github.bbuchsbaum.slurm4s.core.codec.CodecFailure
 
 import scodec.bits.ByteVector
@@ -95,7 +89,8 @@ class AgentMessageCodecSuite extends munit.FunSuite:
       frameLimit,
       Set(AgentFeature.PagedLogs, AgentFeature.OpaqueScripts),
       "test-build",
-      AgentFrameBudget.maximumLogPageBytes(frameLimit)
+      AgentFrameBudget.maximumLogPageBytes(frameLimit),
+      None
     )
 
     assertEquals(HandshakeJson.decodeResponse(HandshakeJson.response(response)), Right(response))
@@ -131,6 +126,29 @@ class AgentMessageCodecSuite extends munit.FunSuite:
     assert(HandshakeJson.decodeResponse(json).left.exists(_.contains("safe frame budget")))
   }
 
+  test("handshake rejects a queue-page budget larger than its frame can carry") {
+    val frameLimit = ByteLimit.from(512 * 1024).toOption.get
+    val maximum = AgentFrameBudget.maximumQueuePage(frameLimit).get
+    val json = Json.obj(
+      "agentProtocol" -> Json.obj(
+        "major" -> Json.fromInt(1),
+        "minor" -> Json.fromInt(0)
+      ),
+      "maximumFrameBytes" -> Json.fromInt(frameLimit.value),
+      "maximumLogPageBytes" -> Json.Null,
+      "maximumQueuePageItems" -> Json.fromInt(maximum.maximumItems + 1),
+      "availableFeatures" -> Json.arr(Json.fromString("queue-listing")),
+      "agentBuild" -> Json.fromString("invalid-agent")
+    )
+
+    assert(HandshakeJson.decodeResponse(json).left.exists(_.contains("safe frame budget")))
+  }
+
+  test("small frames do not advertise queue listing") {
+    val frameLimit = ByteLimit.from(64 * 1024).toOption.get
+    assertEquals(AgentFrameBudget.maximumQueuePage(frameLimit), None)
+  }
+
   test("the largest advertised log page fits its response frame with maximum-width metadata") {
     val frameLimit = ByteLimit.from(64 * 1024).toOption.get
     val pageLimit = AgentFrameBudget.maximumLogPageBytes(frameLimit).get
@@ -149,6 +167,61 @@ class AgentMessageCodecSuite extends munit.FunSuite:
               ),
               endOfFile = false,
               Instant.parse("9999-12-31T23:59:59.999999999Z")
+            )
+          )
+        )
+      )
+    )
+    val payload = AgentMessageCodec.encode(response)
+
+    assert(payload.size <= frameLimit.value)
+    assert(FrameCodec.encode(payload, FrameLimits(frameLimit)).isRight)
+  }
+
+  test("the largest advertised queue page fits its response frame at the owned wire budget") {
+    val frameLimit = ByteLimit.maximumCommandCapture
+    val pageLimit = AgentFrameBudget.maximumQueuePage(frameLimit).get
+    val flags = Vector.tabulate(64)(index => SlurmStateFlag.Unknown(s"F$index" + "x" * 120))
+    val jobs = Vector.tabulate(pageLimit.maximumItems) { index =>
+      QueueJob(
+        JobRef(JobId.unsafeFrom((index + 1).toString), Some(ArrayIndex.unsafeFrom(index))),
+        Some(JobName.unsafeFrom("n" * 128)),
+        Some(UserName.unsafeFrom("u" * 255)),
+        Some(PartitionName.unsafeFrom("p" * 255)),
+        SlurmState.Unknown("s" * 128),
+        flags,
+        Some("r" * 512),
+        JobTiming.unknown,
+        Some(ClusterName.unsafeFrom("c" * 255)),
+        StateExpressionCompleteness.Complete
+      )
+    }
+    val evidence = EvidenceBundle(
+      BoundedEvidence.capture(
+        EvidenceSource.CommandStdout("squeue"),
+        Instant.parse("9999-12-31T23:59:59.999999999Z"),
+        ByteVector.fill(ByteLimit.defaultEvidence.value.toLong)(0xff.toByte)
+      ),
+      Vector(
+        BoundedEvidence.capture(
+          EvidenceSource.CommandStderr("squeue"),
+          Instant.parse("9999-12-31T23:59:59.999999999Z"),
+          ByteVector.fill(ByteLimit.defaultEvidence.value.toLong)(0xff.toByte)
+        )
+      )
+    )
+    val response = AgentEnvelope(
+      RequestId.unsafeFrom("r" * 200),
+      ProtocolVersion.v1,
+      AgentBody.Response(
+        AgentResponseStatus.Ok,
+        AgentDomainJson.encodeQueueResult(
+          SchedulerQueryResult.Succeeded(
+            QueuePage(
+              jobs,
+              QueuePageCompleteness.Complete,
+              Freshness.Current(Instant.MAX),
+              evidence
             )
           )
         )

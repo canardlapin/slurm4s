@@ -95,8 +95,18 @@ final class RemoteSlurm[F[_]: Async] private[ssh] (
           invocationFailure(failure).map(CancellationAttempt.InvocationFailed(_))
       }
 
+  val queue: QueueReader[F] = new QueueReader[F]:
+    def listJobs(query: QueueQuery, page: Page): F[SchedulerQueryResult[QueuePage]] =
+      RemoteSlurm.this.listJobs(query, page).flatMap(queryResult)
+
   def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
     connected(_.capabilities)
+
+  def listJobs(
+      query: QueueQuery,
+      page: Page
+  ): F[AgentCall[SchedulerQueryResult[QueuePage]]] =
+    connected(_.listJobs(query, page))
 
   def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
     connected(_.submitOpaque(spec))

@@ -50,6 +50,44 @@ class SlurmParsersSuite extends munit.FunSuite:
     assert(observations.head.rawFields.contains("state_reason"))
   }
 
+  test("queue discovery parses compact per-element rows without expected job refs") {
+    val raw =
+      """{"jobs":[
+        |{"job_id":7000,"array_job_id":7000,"array_task_id":2,"name":"train","user_name":"brad","partition":"gpu","job_state":["RUNNING","COMPLETING"],"state_reason":"None","cluster":"alpha"},
+        |{"job_id":6000,"name":"prep","user_name":"brad","partition":"cpu","job_state":["PENDING"],"state_reason":"Resources"}
+        |]}""".stripMargin
+    val jobs = SqueueJsonV0043.list(evidence(raw)).toOption.get
+
+    assertEquals(jobs.map(_.job.jobId.value), Vector("7000", "6000"))
+    assertEquals(jobs.head.job.arrayIndex.map(_.value), Some(2))
+    assertEquals(jobs.head.name.map(_.value), Some("train"))
+    assertEquals(jobs.head.user.map(_.value), Some("brad"))
+    assertEquals(jobs.head.partition.map(_.value), Some("gpu"))
+    assertEquals(jobs.head.state, SlurmState.Running)
+    assertEquals(jobs.head.flags, Vector(SlurmStateFlag.Completing))
+    assertEquals(jobs.head.reportedCluster.map(_.value), Some("alpha"))
+  }
+
+  test("queue discovery refuses grouped arrays after requesting per-element rows") {
+    val raw =
+      """{"jobs":[{"job_id":7000,"array_job_id":7000,"array_task_string":"1-3","job_state":["PENDING"]}]}"""
+
+    assertEquals(
+      SqueueJsonV0043.list(evidence(raw)).left.toOption.map(_.toVector.map(_.code)),
+      Some(Vector("grouped-array-in-listing"))
+    )
+  }
+
+  test("queue discovery refuses duplicate job identities") {
+    val raw =
+      """{"jobs":[{"job_id":7000,"job_state":["RUNNING"]},{"job_id":7000,"job_state":["RUNNING"]}]}"""
+
+    assertEquals(
+      SqueueJsonV0043.list(evidence(raw)).left.toOption.map(_.toVector.map(_.code)),
+      Some(Vector("duplicate-squeue-job"))
+    )
+  }
+
   test("edge fixtures preserve unknown data and isolate an unrelated malformed row") {
     val directory = "/fixtures/slurm-parser-edge-v1"
     val focused =

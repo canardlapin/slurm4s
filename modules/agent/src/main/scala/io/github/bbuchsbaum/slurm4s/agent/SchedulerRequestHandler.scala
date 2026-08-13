@@ -19,6 +19,13 @@ final class SchedulerRequestHandler[F[_]: Monad](service: AgentService[F])
   def handle(request: AgentEnvelope): F[AgentEnvelope] = request.body match
     case AgentBody.Request(AgentMethod.Capabilities, _) =>
       service.api.capabilities.map(response(request, _, AgentDomainJson.encodeCapabilities))
+    case AgentBody.Request(AgentMethod.ListJobs, payload) =>
+      AgentDomainJson.decodeQueueRequest(payload) match
+        case Left(problem)        => protocolFailure(request, problem).pure[F]
+        case Right((query, page)) =>
+          service.api
+            .listJobs(query, page)
+            .map(response(request, _, AgentDomainJson.encodeQueueResult))
     case AgentBody.Request(AgentMethod.SubmitOpaque, payload) =>
       decodeAndRun(
         request,

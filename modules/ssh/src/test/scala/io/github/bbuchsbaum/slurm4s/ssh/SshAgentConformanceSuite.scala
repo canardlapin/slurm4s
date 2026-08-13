@@ -111,6 +111,52 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     yield ()
   }
 
+  test("queue listing crosses the framed agent and oversized pages stay local") {
+    val queue = new QueueReader[IO]:
+      def listJobs(
+          query: QueueQuery,
+          page: Page
+      ): IO[SchedulerQueryResult[QueuePage]] =
+        IO.pure(
+          SchedulerQueryResult.Succeeded(
+            QueuePage.from(
+              Vector(queueJob),
+              page,
+              freshness,
+              evidence
+            )
+          )
+        )
+    val service = AgentService[IO](
+      deterministicScheduler,
+      deterministicLogs,
+      queue = Some(queue)
+    )
+    val server = AgentStdioServer[IO](
+      ServiceRequestHandler[IO](service, SchedulerRequestHandler[IO](service))
+    )
+    val runner = LoopbackSshRunner(server)
+
+    for
+      connected <- SshAgentApi.connect[IO](wireClient(runner))
+      remote = connected.asInstanceOf[AgentCall.Succeeded[SshAgentApi[IO]]].value
+      maximum = remote.handshake.maximumQueuePage.get
+      _ = assert(remote.remoteCapabilities.queueListing)
+      listed <- remote.listJobs(QueueQuery.currentUser, Page.default)
+      exchangesAfterListing = runner.exchangeCount
+      oversized <- remote.listJobs(
+        QueueQuery.currentUser,
+        Page.from(maximum.maximumItems + 1).toOption.get
+      )
+      _ = listed match
+        case AgentCall.Succeeded(SchedulerQueryResult.Succeeded(page)) =>
+          assertEquals(page.jobs, Vector(queueJob))
+        case other => fail(s"expected a remote queue page, received $other")
+      _ = assert(oversized.isInstanceOf[AgentCall.Failed[?]])
+      _ = assertEquals(runner.exchangeCount, exchangesAfterListing)
+    yield ()
+  }
+
   test("a requested termination notice is refused locally when the agent did not negotiate it") {
     val config = AgentServiceConfig.default.copy(
       features = AgentServiceConfig.default.features - AgentFeature.TerminationNotices
@@ -188,6 +234,18 @@ class SshAgentConformanceSuite extends munit.CatsEffectSuite:
     Some("None"),
     Map("State" -> "RUNNING"),
     evidence
+  )
+  private val queueJob = QueueJob(
+    job,
+    Some(JobName.unsafeFrom("queued-job")),
+    Some(UserName.unsafeFrom("brad")),
+    Some(PartitionName.unsafeFrom("compute")),
+    SlurmState.Running,
+    Vector.empty,
+    Some("None"),
+    JobTiming.unknown,
+    None,
+    StateExpressionCompleteness.Complete
   )
   private val accountingRecord = AccountingRecord(
     job,

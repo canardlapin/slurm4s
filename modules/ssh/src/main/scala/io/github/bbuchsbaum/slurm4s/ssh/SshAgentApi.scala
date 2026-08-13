@@ -17,17 +17,50 @@ final class SshAgentApi[F[_]: Concurrent] private (
     val pagedLogs =
       handshake.availableFeatures.contains(AgentFeature.PagedLogs) &&
         handshake.maximumLogPageBytes.nonEmpty
+    val queueListing =
+      handshake.availableFeatures.contains(AgentFeature.QueueListing) &&
+        handshake.maximumQueuePage.nonEmpty
     RemoteCapabilities(
       mode = RemoteMode.Agent,
       protocolFrames = true,
       pagedLogs = pagedLogs,
       durableControl = false,
-      degradationReasons = Option.when(!pagedLogs)("agent did not negotiate paged logs").toVector :+
-        "durable control requires the P3 controller"
+      degradationReasons = Option.when(!pagedLogs)("agent did not negotiate paged logs").toVector ++
+        Option.when(!queueListing)("agent did not negotiate queue listing").toVector :+
+        "durable control requires the P3 controller",
+      queueListing = queueListing
     )
 
   def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
     call(AgentMethod.Capabilities, Json.obj(), AgentDomainJson.decodeCapabilities)
+
+  def listJobs(
+      query: QueueQuery,
+      page: Page
+  ): F[AgentCall[SchedulerQueryResult[QueuePage]]] =
+    if !handshake.availableFeatures.contains(AgentFeature.QueueListing) then
+      protocolFailure("queue listing was not negotiated").pure[F]
+    else
+      handshake.maximumQueuePage match
+        case Some(maximum) if page.maximumItems <= maximum.maximumItems =>
+          call(
+            AgentMethod.ListJobs,
+            AgentDomainJson.encodeQueueRequest(query, page),
+            json =>
+              AgentDomainJson.decodeQueueResult(json).flatMap {
+                case SchedulerQueryResult.Succeeded(value) if value.jobs.size > page.maximumItems =>
+                  Left(
+                    s"queue response contained ${value.jobs.size} jobs for a ${page.maximumItems}-item page"
+                  )
+                case result => Right(result)
+              }
+          )
+        case Some(maximum) =>
+          protocolFailure(
+            s"requested queue page ${page.maximumItems} exceeds negotiated maximum ${maximum.maximumItems}"
+          ).pure[F]
+        case None =>
+          protocolFailure("queue listing was not negotiated").pure[F]
 
   def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
     if !supportsTerminationNotice(spec.terminationNotice) then
@@ -249,7 +282,8 @@ object SshAgentApi:
         AgentFeature.TypedResults,
         AgentFeature.TypedBatches,
         AgentFeature.ScriptBatches,
-        AgentFeature.TerminationNotices
+        AgentFeature.TerminationNotices,
+        AgentFeature.QueueListing
       )
   ): F[AgentCall[SshAgentApi[F]]] =
     Ref.of[F, Long](0L).flatMap { sequence =>
@@ -282,6 +316,8 @@ object DirectSshCompatibility:
     degradationReasons = Vector(
       "remote agent is unavailable",
       "direct SSH cannot promise reconnectable protocol sessions",
-      "direct SSH cannot provide agent-paged logs"
-    )
+      "direct SSH cannot provide agent-paged logs",
+      "direct SSH cannot provide bounded queue listing"
+    ),
+    queueListing = false
   )

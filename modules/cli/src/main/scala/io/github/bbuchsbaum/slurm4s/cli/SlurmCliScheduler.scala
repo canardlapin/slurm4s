@@ -11,7 +11,8 @@ final class SlurmCliScheduler[F[_]: Monad](
     executor: CommandExecutor[F],
     planner: SubmissionPlanner[F],
     settings: SlurmCliSettings
-) extends Scheduler[F]:
+) extends Scheduler[F]
+    with QueueReader[F]:
 
   def capabilities: F[SchedulerQueryResult[SchedulerCapabilities]] =
     for
@@ -125,6 +126,36 @@ final class SlurmCliScheduler[F[_]: Monad](
               case SchedulerQueryResult.Empty(observedAt, evidence) =>
                 SchedulerQueryResult.Empty(observedAt, evidence)
     }
+
+  def listJobs(query: QueueQuery, page: Page): F[SchedulerQueryResult[QueuePage]] =
+    executor
+      .execute(SlurmCommands.listJobs(query, settings.dataParser), settings.commandPolicy)
+      .map { result =>
+        result match
+          case InvocationResult.Exited(0, stdout, stderr) =>
+            VersionedSqueueParsers.list(settings.dataParser, stdout) match
+              case Right(Vector()) =>
+                SchedulerQueryResult.Empty(
+                  stdout.observedAt,
+                  retainedBundle(stdout, stderr)
+                )
+              case Right(jobs) =>
+                val evidence = retainedBundle(stdout, stderr)
+                SchedulerQueryResult.Succeeded(
+                  QueuePage.from(
+                    jobs,
+                    page,
+                    Freshness.Current(stdout.observedAt),
+                    evidence
+                  )
+                )
+              case Left(diagnostics) =>
+                SchedulerQueryResult.ParseFailed(
+                  diagnostics,
+                  retainedBundle(stdout, stderr)
+                )
+          case failed => SchedulerQueryResult.InvocationFailed(failed)
+      }
 
   /** Combine parsed observations with the requested jobs the response did not mention.
     *

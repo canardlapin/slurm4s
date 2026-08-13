@@ -104,3 +104,18 @@ class TestkitSuite extends munit.CatsEffectSuite:
       assertEquals(observed, Vector(call))
       assertEquals(remaining, Vector.empty)
   }
+
+  test("scripted queue discovery matches query and page as a separate capability") {
+    val call = QueueReadCall(QueueQuery.currentUser, Page.from(7).toOption.get)
+    val result: SchedulerQueryResult[QueuePage] =
+      SchedulerQueryResult.Empty(observedAt, evidence)
+
+    for
+      reader <- ScriptedQueueReader.create[IO](Vector(ExpectedQueueRead(call, result)))
+      actual <- reader.listJobs(call.query, call.page)
+      _ <- reader.assertDrained
+      observed <- reader.observed
+    yield
+      assertEquals(actual, result)
+      assertEquals(observed, Vector(call))
+  }

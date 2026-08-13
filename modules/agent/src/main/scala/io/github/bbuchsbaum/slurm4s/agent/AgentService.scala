@@ -16,6 +16,10 @@ import io.github.bbuchsbaum.slurm4s.core.LogReadResult
 import io.github.bbuchsbaum.slurm4s.core.LogRef
 import io.github.bbuchsbaum.slurm4s.core.ObservationBatch
 import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
+import io.github.bbuchsbaum.slurm4s.core.Page
+import io.github.bbuchsbaum.slurm4s.core.QueuePage
+import io.github.bbuchsbaum.slurm4s.core.QueueQuery
+import io.github.bbuchsbaum.slurm4s.core.QueueReader
 import io.github.bbuchsbaum.slurm4s.core.Scheduler
 import io.github.bbuchsbaum.slurm4s.core.SchedulerCapabilities
 import io.github.bbuchsbaum.slurm4s.core.SchedulerQueryResult
@@ -85,7 +89,8 @@ object AgentServiceConfig:
       AgentFeature.TypedResults,
       AgentFeature.TypedBatches,
       AgentFeature.ScriptBatches,
-      AgentFeature.TerminationNotices
+      AgentFeature.TerminationNotices,
+      AgentFeature.QueueListing
     )
   )
 
@@ -93,7 +98,8 @@ final class AgentService[F[_]: Applicative](
     scheduler: Scheduler[F],
     logs: AgentLogReader[F],
     registeredTasks: Option[AgentRegisteredTaskService[F]] = None,
-    config: AgentServiceConfig = AgentServiceConfig.default
+    config: AgentServiceConfig = AgentServiceConfig.default,
+    queue: Option[QueueReader[F]] = None
 ):
   def handshake(
       clientProtocol: ProtocolVersion,
@@ -116,6 +122,7 @@ final class AgentService[F[_]: Applicative](
       val maximumLogPageBytes = AgentFrameBudget.maximumLogPageBytes(negotiatedFrameBytes)
       val maximumTypedResultBytes =
         AgentFrameBudget.maximumTypedResultBytes(negotiatedFrameBytes)
+      val maximumQueuePage = AgentFrameBudget.maximumQueuePage(negotiatedFrameBytes)
       val negotiatedFeatures =
         request.requestedFeatures
           .intersect(config.features)
@@ -134,6 +141,9 @@ final class AgentService[F[_]: Applicative](
           .removedAll(
             Option.when(registeredTasks.isEmpty)(AgentFeature.ScriptBatches)
           )
+          .removedAll(
+            Option.when(queue.isEmpty || maximumQueuePage.isEmpty)(AgentFeature.QueueListing)
+          )
       AgentCall
         .Succeeded(
           HandshakeResponse(
@@ -141,7 +151,10 @@ final class AgentService[F[_]: Applicative](
             maximumFrameBytes = negotiatedFrameBytes,
             availableFeatures = negotiatedFeatures,
             agentBuild = config.build,
-            maximumLogPageBytes = maximumLogPageBytes
+            maximumLogPageBytes = maximumLogPageBytes,
+            maximumQueuePage = Option
+              .when(negotiatedFeatures.contains(AgentFeature.QueueListing))(maximumQueuePage)
+              .flatten
           )
         )
         .pure[F]
@@ -150,10 +163,46 @@ final class AgentService[F[_]: Applicative](
     AgentFrameBudget.maximumLogPageBytes(config.maximumFrameBytes)
   private val maximumTypedResultBytes =
     AgentFrameBudget.maximumTypedResultBytes(config.maximumFrameBytes)
+  private val maximumQueuePage = AgentFrameBudget.maximumQueuePage(config.maximumFrameBytes)
 
   private[agent] val api: AgentApi[F] = new AgentApi[F]:
     def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
       scheduler.capabilities.map(AgentCall.Succeeded.apply)
+
+    def listJobs(
+        query: QueueQuery,
+        page: Page
+    ): F[AgentCall[SchedulerQueryResult[QueuePage]]] =
+      maximumQueuePage match
+        case Some(maximum) if page.maximumItems <= maximum.maximumItems =>
+          queue.fold(
+            AgentCall
+              .Failed(
+                AgentFailure.ProtocolViolation(
+                  "queue listing is not configured on this agent",
+                  None
+                )
+              )
+              .pure[F]
+          )(_.listJobs(query, page).map(AgentCall.Succeeded.apply))
+        case Some(maximum) =>
+          AgentCall
+            .Failed(
+              AgentFailure.ProtocolViolation(
+                s"requested queue page ${page.maximumItems} exceeds maximum ${maximum.maximumItems}",
+                None
+              )
+            )
+            .pure[F]
+        case None =>
+          AgentCall
+            .Failed(
+              AgentFailure.ProtocolViolation(
+                "the configured agent frame limit cannot carry a queue page",
+                None
+              )
+            )
+            .pure[F]
 
     def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
       scheduler.submit(spec).map(AgentCall.Succeeded.apply)
@@ -293,7 +342,8 @@ final class InProcessAgentClient[F[_]: Async] private (
     connected: Ref[F, Boolean],
     delegate: AgentApi[F],
     maximumLogPageBytes: Option[ByteLimit],
-    maximumTypedResultBytes: Option[ByteLimit]
+    maximumTypedResultBytes: Option[ByteLimit],
+    maximumQueuePage: Option[Page]
 ) extends AgentApi[F]:
   private def whileConnected[A](operation: F[AgentCall[A]]): F[AgentCall[A]] =
     connected.get.ifM(
@@ -313,6 +363,29 @@ final class InProcessAgentClient[F[_]: Async] private (
 
   def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
     whileConnected(delegate.capabilities)
+
+  def listJobs(
+      query: QueueQuery,
+      page: Page
+  ): F[AgentCall[SchedulerQueryResult[QueuePage]]] =
+    maximumQueuePage match
+      case Some(maximum) if page.maximumItems <= maximum.maximumItems =>
+        whileConnected(delegate.listJobs(query, page))
+      case Some(maximum) =>
+        AgentCall
+          .Failed(
+            AgentFailure.ProtocolViolation(
+              s"requested queue page ${page.maximumItems} exceeds negotiated maximum ${maximum.maximumItems}",
+              None
+            )
+          )
+          .pure[F]
+      case None =>
+        AgentCall
+          .Failed(
+            AgentFailure.ProtocolViolation("queue listing was not negotiated", None)
+          )
+          .pure[F]
 
   def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]] =
     whileConnected(delegate.submitOpaque(spec))
@@ -415,7 +488,8 @@ object InProcessAgentClient:
                 ref,
                 service.api,
                 response.maximumLogPageBytes,
-                AgentFrameBudget.maximumTypedResultBytes(response.maximumFrameBytes)
+                AgentFrameBudget.maximumTypedResultBytes(response.maximumFrameBytes),
+                response.maximumQueuePage
               )
             )
           )

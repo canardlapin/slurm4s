@@ -19,7 +19,7 @@ tests are the implementation authority.
 | Module | Boundary |
 | --- | --- |
 | `remote-exec-kernel` | Provider-neutral validated IDs, codecs, diagnostics/freshness, retry provenance, failure reports, and atomic filesystem mechanics |
-| `slurm4s-core` | Slurm requests, scheduler evidence/outcomes, result contracts, and reducers; depends downward on the neutral kernel |
+| `slurm4s-core` | Slurm requests, bounded queue discovery, scheduler evidence/outcomes, result contracts, and reducers; depends downward on the neutral kernel |
 | `slurm4s-cli` | Fixed command vectors, version-scoped parsers, capability probes, truthful scheduler interpreter |
 | `slurm4s-local` | Cats Effect/FS2 process execution, private script staging, cursor-based local logs |
 | `slurm4s-protocol` | Bounded framing, versioned messages, handshake, typed scheduler wire codecs |
@@ -55,6 +55,10 @@ The local CLI implementation is described in
 [`docs/architecture/0002-local-cli-vertical.md`](docs/architecture/0002-local-cli-vertical.md).
 The remote authority, framing, reconnect, and failure decisions are described in
 [`docs/architecture/0003-agent-over-openssh.md`](docs/architecture/0003-agent-over-openssh.md).
+Bounded current-user queue discovery and its deliberately non-cursor `Page` are described in
+[`docs/architecture/0013-bounded-queue-discovery.md`](docs/architecture/0013-bounded-queue-discovery.md).
+The proposed local coding-agent application and rooted remote-workspace boundary are specified in
+[`docs/plans/2026-08-13-hpc-agent-layer.md`](docs/plans/2026-08-13-hpc-agent-layer.md).
 Durable submission, journal, recovery, observation, and cancellation semantics are described in
 [`docs/architecture/0004-durable-managed-control.md`](docs/architecture/0004-durable-managed-control.md).
 Declared outputs, structured envelopes, registered Scala tasks, and typed reattachment are

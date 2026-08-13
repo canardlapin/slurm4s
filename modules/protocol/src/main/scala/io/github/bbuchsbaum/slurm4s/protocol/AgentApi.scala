@@ -12,6 +12,7 @@ import io.github.bbuchsbaum.slurm4s.core.*
   */
 trait AgentApi[F[_]]:
   def capabilities: F[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]]
+  def listJobs(query: QueueQuery, page: Page): F[AgentCall[SchedulerQueryResult[QueuePage]]]
   def submitOpaque(spec: LaunchSpec): F[AgentCall[SubmissionAttempt]]
   def submitRegistered(
       request: RemoteRegisteredTaskRequest

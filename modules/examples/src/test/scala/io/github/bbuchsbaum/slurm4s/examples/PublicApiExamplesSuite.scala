@@ -180,6 +180,11 @@ class PublicApiExamplesSuite extends munit.CatsEffectSuite:
     new AgentApi[IO]:
       def capabilities: IO[AgentCall[SchedulerQueryResult[SchedulerCapabilities]]] =
         IO.pure(AgentCall.Failed(failure))
+      def listJobs(
+          query: QueueQuery,
+          page: Page
+      ): IO[AgentCall[SchedulerQueryResult[QueuePage]]] =
+        IO.pure(AgentCall.Failed(failure))
       def submitOpaque(spec: LaunchSpec): IO[AgentCall[SubmissionAttempt]] =
         IO.pure(AgentCall.Failed(failure))
       def submitRegistered(

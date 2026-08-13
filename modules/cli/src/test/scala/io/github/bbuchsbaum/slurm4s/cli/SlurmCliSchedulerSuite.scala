@@ -159,6 +159,38 @@ class SlurmCliSchedulerSuite extends munit.CatsEffectSuite:
     }
   }
 
+  test("queue listing sorts and truncates one successful bounded capture") {
+    val raw =
+      """{"jobs":[{"job_id":5002,"job_state":["RUNNING"]},{"job_id":5001,"job_state":["PENDING"]}]}"""
+    val scheduler = SlurmCliScheduler[IO](
+      fixedExecutor(InvocationResult.Exited(0, bytes(raw), bytes(""))),
+      recordingPlanner(),
+      settings
+    )
+
+    scheduler.listJobs(QueueQuery.currentUser, Page.from(1).toOption.get).map {
+      case SchedulerQueryResult.Succeeded(page) =>
+        assertEquals(page.jobs.map(_.job.jobId.value), Vector("5001"))
+        assertEquals(page.completeness, QueuePageCompleteness.Truncated(2))
+        assertEquals(page.freshness, Freshness.Current(page.evidence.primary.observedAt))
+      case other => fail(s"expected a bounded queue page, got $other")
+    }
+  }
+
+  test("an empty queue remains distinct from a successful page") {
+    val scheduler = SlurmCliScheduler[IO](
+      fixedExecutor(InvocationResult.Exited(0, bytes("""{"jobs":[]}"""), bytes(""))),
+      recordingPlanner(),
+      settings
+    )
+
+    scheduler.listJobs(QueueQuery.currentUser, Page.default).map { result =>
+      result match
+        case SchedulerQueryResult.Empty(_, _) => ()
+        case other                            => fail(s"expected an empty queue, got $other")
+    }
+  }
+
   test("site preflight rejection performs no staging or command invocation") {
     val request = jobRequest.copy(
       array = Some(

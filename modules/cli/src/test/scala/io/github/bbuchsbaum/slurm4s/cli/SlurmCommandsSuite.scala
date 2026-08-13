@@ -126,6 +126,35 @@ class SlurmCommandsSuite extends munit.FunSuite:
     assertEquals(SlurmCommands.focused(element).arguments.last, "9000_2")
   }
 
+  test("queue listing is current-user, per-element, filtered, and shell-free") {
+    val query = QueueQuery
+      .currentUser(
+        Vector(JobName.unsafeFrom("beta"), JobName.unsafeFrom("alpha")),
+        Vector(PartitionName.unsafeFrom("gpu")),
+        Vector(QueueStateFilter.Running, QueueStateFilter.Pending)
+      )
+      .toOption
+      .get
+    val command = SlurmCommands.listJobs(
+      query,
+      DataParserVersion.from("v0.0.43").toOption.get
+    )
+
+    assertEquals(command.executable, SlurmExecutable.Squeue)
+    assertEquals(
+      command.arguments,
+      Vector(
+        "--json=v0.0.43",
+        "--me",
+        "--array",
+        "--name=alpha,beta",
+        "--partition=gpu",
+        "--states=PENDING,RUNNING"
+      )
+    )
+    assertEquals(command.environment, Map.empty)
+  }
+
   private def jobRequest(memory: MemoryRequest): LaunchSpec =
     LaunchSpec(
       submissionKey = SubmissionKey.from("submit-command-test").toOption.get,

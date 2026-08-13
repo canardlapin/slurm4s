@@ -69,7 +69,8 @@ object AgentMain extends IOApp:
     val service = AgentService[IO](
       scheduler,
       AgentLogReader(localLogs.read),
-      registeredTasks
+      registeredTasks,
+      queue = Some(scheduler)
     )
     val handler = ServiceRequestHandler[IO](service, SchedulerRequestHandler[IO](service))
     val server = AgentStdioServer[IO](handler, FrameLimits(config.maximumFrameBytes))

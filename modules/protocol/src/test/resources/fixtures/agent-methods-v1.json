@@ -2,6 +2,7 @@
   "methods": [
     "handshake",
     "capabilities",
+    "list-jobs",
     "submit-opaque",
     "submit-registered",
     "submit-batch",

@@ -97,6 +97,35 @@ object AgentDomainJson:
   def encodeJobRef(value: JobRef): Json = value.asJson
   def decodeJobRef(json: Json): Either[String, JobRef] = decode[JobRef](json)
 
+  def encodeQueueRequest(query: QueueQuery, page: Page): Json =
+    Json.obj(
+      "names" -> Json.arr(query.names.map(value => Json.fromString(value.value))*),
+      "partitions" -> Json.arr(query.partitions.map(value => Json.fromString(value.value))*),
+      "states" -> Json.arr(query.states.map(value => Json.fromString(value.slurmName))*),
+      "maximumItems" -> Json.fromInt(page.maximumItems)
+    )
+
+  def decodeQueueRequest(json: Json): Either[String, (QueueQuery, Page)] =
+    for
+      cursor <- objectCursor(json, "queue request")
+      names <- field[Vector[String]](cursor, "names")
+        .flatMap(_.traverse(raw => JobName.from(raw).left.map(_.reason)))
+      partitions <- field[Vector[String]](cursor, "partitions")
+        .flatMap(_.traverse(raw => PartitionName.from(raw).left.map(_.reason)))
+      stateNames <- field[Vector[String]](cursor, "states")
+      states <- stateNames.traverse(raw =>
+        QueueStateFilter.values
+          .find(_.slurmName == raw)
+          .toRight(s"unsupported queue state filter: $raw")
+      )
+      query <- QueueQuery.currentUser(names, partitions, states).left.map(_.reason)
+      maximumItems <- field[Int](cursor, "maximumItems")
+      page <- Page.from(maximumItems).left.map(_.reason)
+    yield query -> page
+
+  def encodeQueueResult(value: SchedulerQueryResult[QueuePage]): Json = value.asJson
+  def decodeQueueResult(json: Json): Either[String, SchedulerQueryResult[QueuePage]] = decode(json)
+
   def encodeEvidence(value: EvidenceBundle): Json = value.asJson
   def decodeEvidence(json: Json): Either[String, EvidenceBundle] = decode[EvidenceBundle](json)
   def encodeBoundedEvidence(value: BoundedEvidence): Json = value.asJson
@@ -1806,6 +1835,12 @@ object AgentDomainJson:
   private given Decoder[JobId] = stringDecoder(JobId.from)
   private given Encoder[ClusterName] = stringEncoder(_.value)
   private given Decoder[ClusterName] = stringDecoder(ClusterName.from)
+  private given Encoder[UserName] = stringEncoder(_.value)
+  private given Decoder[UserName] = stringDecoder(UserName.from)
+  private given Encoder[JobName] = stringEncoder(_.value)
+  private given Decoder[JobName] = stringDecoder(JobName.from)
+  private given Encoder[PartitionName] = stringEncoder(_.value)
+  private given Decoder[PartitionName] = stringDecoder(PartitionName.from)
   private given Encoder[FileIdentity] = stringEncoder(_.value)
   private given Decoder[FileIdentity] = stringDecoder(FileIdentity.from)
 
@@ -2519,6 +2554,101 @@ object AgentDomainJson:
       timeLimit <- cursor.get[ObservedTimeLimit]("timeLimit")
     yield JobTiming(start, projectedEndAt, timeLimit)
   }
+  private given Encoder[QueueJob] = Encoder.instance { value =>
+    Json.obj(
+      Vector(
+        "job" -> value.job.asJson,
+        "name" -> value.name.asJson,
+        "user" -> value.user.asJson,
+        "partition" -> value.partition.asJson,
+        "state" -> value.state.asJson,
+        "flags" -> value.flags.asJson,
+        "reason" -> value.reason.asJson,
+        "timing" -> value.timing.asJson
+      ) ++ value.reportedCluster.map(cluster => "reportedCluster" -> cluster.asJson)
+        ++ (value.stateExpressionCompleteness match
+          case StateExpressionCompleteness.Complete =>
+            Vector("stateExpressionTruncated" -> Json.fromBoolean(false))
+          case StateExpressionCompleteness.Truncated =>
+            Vector("stateExpressionTruncated" -> Json.fromBoolean(true))
+          case StateExpressionCompleteness.Unreported => Vector.empty)*
+    )
+  }
+  private given Decoder[QueueJob] = Decoder.instance { cursor =>
+    for
+      job <- cursor.get[JobRef]("job")
+      name <- cursor.get[Option[JobName]]("name")
+      user <- cursor.get[Option[UserName]]("user")
+      partition <- cursor.get[Option[PartitionName]]("partition")
+      state <- cursor.get[SlurmState]("state")
+      flags <- cursor.get[Option[Vector[SlurmStateFlag]]]("flags").map(_.getOrElse(Vector.empty))
+      reason <- cursor.get[Option[String]]("reason")
+      timing <- cursor.get[Option[JobTiming]]("timing").map(_.getOrElse(JobTiming.unknown))
+      reportedCluster <- cursor.get[Option[ClusterName]]("reportedCluster")
+      completeness <- cursor.get[Option[Boolean]]("stateExpressionTruncated").map {
+        case Some(true)  => StateExpressionCompleteness.Truncated
+        case Some(false) => StateExpressionCompleteness.Complete
+        case None        => StateExpressionCompleteness.Unreported
+      }
+    yield QueueJob(
+      job,
+      name,
+      user,
+      partition,
+      state,
+      flags,
+      reason,
+      timing,
+      reportedCluster,
+      completeness
+    )
+  }
+  private given Encoder[QueuePageCompleteness] = Encoder.instance {
+    case QueuePageCompleteness.Complete                => tagged("Complete")
+    case QueuePageCompleteness.Truncated(totalMatched) =>
+      tagged("Truncated", "totalMatched" -> Json.fromInt(totalMatched))
+  }
+  private given Decoder[QueuePageCompleteness] = Decoder.instance { cursor =>
+    taggedCase(cursor, Vector("Complete", "Truncated")).flatMap {
+      case ("Complete", _)      => Right(QueuePageCompleteness.Complete)
+      case ("Truncated", value) =>
+        value.get[Int]("totalMatched").flatMap { total =>
+          Either.cond(
+            total >= 1,
+            QueuePageCompleteness.Truncated(total),
+            DecodingFailure("totalMatched must be positive", cursor.history)
+          )
+        }
+      case (other, _) =>
+        Left(DecodingFailure(s"unknown queue-page completeness: $other", cursor.history))
+    }
+  }
+  private given Encoder[QueuePage] = Encoder.forProduct4(
+    "jobs",
+    "completeness",
+    "freshness",
+    "evidence"
+  )(value => (value.jobs, value.completeness, value.freshness, value.evidence))
+  private given Decoder[QueuePage] =
+    Decoder
+      .forProduct4(
+        "jobs",
+        "completeness",
+        "freshness",
+        "evidence"
+      )(QueuePage.apply)
+      .emap { page =>
+        if page.jobs.isEmpty then Left("a successful queue page must contain at least one job")
+        else if page.jobs.size > Page.MaximumItems then
+          Left(s"a queue page must contain at most ${Page.MaximumItems} jobs")
+        else if page.jobs.map(_.job).distinct.size != page.jobs.size then
+          Left("a queue page must not contain duplicate job identities")
+        else
+          page.completeness match
+            case QueuePageCompleteness.Truncated(totalMatched) if totalMatched <= page.jobs.size =>
+              Left("a truncated queue page must omit at least one matched job")
+            case _ => Right(page)
+      }
   private given Encoder[JobObservation] = Encoder.instance { value =>
     // Additive evidence fields are emitted only when present/true, so an observation without them
     // keeps the wire shape it had before they existed and the decoder's defaults cover the rest.

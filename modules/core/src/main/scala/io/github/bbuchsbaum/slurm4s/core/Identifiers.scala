@@ -10,6 +10,9 @@ type JobId = JobId.Type
 object ClusterName extends TextIdentifier("clusterName", 255)
 type ClusterName = ClusterName.Type
 
+object UserName extends TextIdentifier("userName", 255)
+type UserName = UserName.Type
+
 object InputName extends TextIdentifier("inputName", 255)
 type InputName = InputName.Type
 

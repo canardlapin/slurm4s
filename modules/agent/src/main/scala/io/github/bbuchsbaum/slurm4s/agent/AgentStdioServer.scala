@@ -97,6 +97,21 @@ final class AgentStdioServer[F[_]: Concurrent](
         }
         .evalMap { response =>
           FrameCodec.encode(AgentMessageCodec.encode(response), limits) match
+            case Left(io.github.bbuchsbaum.slurm4s.protocol.FrameFailure.FrameTooLarge(_, _)) =>
+              val refused = response.withBody(
+                AgentBody.Response(
+                  AgentResponseStatus.ProtocolFailure,
+                  AgentFailurePayload
+                    .protocolViolation(
+                      "the agent response exceeded the negotiated frame; request a smaller page or payload"
+                    )
+                    .asJson
+                )
+              )
+              FrameCodec
+                .encode(AgentMessageCodec.encode(refused), limits)
+                .leftMap(failure => AgentWireException(failure.toString))
+                .liftTo[F]
             case Left(failure) =>
               Concurrent[F].raiseError[ByteVector](AgentWireException(failure.toString))
             case Right(frame) => frame.pure[F]

@@ -94,6 +94,106 @@ object SqueueJsonV0043:
       parsed <- jobs.toVector.traverse(parseJob(_, stdout, expected))
     yield parsed.flatten
 
+  /** Parse discovery rows without an expected `JobRef` set.
+    *
+    * The listing command always requests `squeue --array`, so a grouped array expression is a
+    * protocol mismatch rather than permission to return one row that ambiguously denotes many jobs.
+    * Command evidence is retained once by the enclosing [[QueuePage]], not copied into each compact
+    * row.
+    */
+  def list(stdout: BoundedEvidence): Either[Diagnostics, Vector[QueueJob]] =
+    for
+      text <- EvidenceText.decode(stdout.bytes)
+      json <- parser
+        .parse(text)
+        .left
+        .map(error => diagnostics("invalid-squeue-json", error.message))
+      jobs <- json.hcursor
+        .downField("jobs")
+        .focus
+        .flatMap(_.asArray)
+        .toRight(diagnostics("invalid-squeue-json", "jobs must be an array"))
+      parsed <- jobs.toVector.traverse(parseListedJob)
+      _ <- Either.cond(
+        parsed.map(_.job).distinct.size == parsed.size,
+        (),
+        diagnostics("duplicate-squeue-job", "queue listing contains duplicate job identities")
+      )
+    yield parsed
+
+  private def parseListedJob(json: Json): Either[Diagnostics, QueueJob] =
+    for
+      fields <- json.asObject.toRight(
+        diagnostics("invalid-squeue-job", "job entry must be an object")
+      )
+      jobText <- stringOrNumber(fields, "job_id")
+        .orElse(stringOrNumber(fields, "job_id_raw"))
+        .toRight(diagnostics("invalid-squeue-job", "job_id is required"))
+      parsed <- parseJobIdentity(jobText)
+      arrayJobText <- noValUnsigned(fields, "array_job_id")
+      arrayTaskText <- noValUnsigned(fields, "array_task_id")
+      baseText = arrayJobText.filter(_ != "0").getOrElse(parsed._1)
+      explicitIndex = arrayTaskText.flatMap(_.toIntOption)
+      arrayIndex <- explicitIndex
+        .traverse(raw =>
+          ArrayIndex
+            .from(raw)
+            .left
+            .map(problem => diagnostics("invalid-array-index", problem.reason))
+        )
+        .map(_.orElse(parsed._2))
+      _ <- Either.cond(
+        arrayIndex.nonEmpty || fields("array_task_string").flatMap(_.asString).forall(_.isEmpty),
+        (),
+        diagnostics(
+          "grouped-array-in-listing",
+          "squeue returned a grouped array row even though per-element rows were requested"
+        )
+      )
+      jobId <- JobId
+        .from(baseText)
+        .left
+        .map(problem => diagnostics("invalid-squeue-job-id", problem.reason))
+      report <- stateReport(fields)
+        .toRight(diagnostics("invalid-squeue-job", "job_state is required"))
+      name <- optionalIdentifier(fields, "name", JobName.from)
+      user <- optionalIdentifier(fields, "user_name", UserName.from)
+      partition <- optionalIdentifier(fields, "partition", PartitionName.from)
+    yield QueueJob(
+      job = JobRef(jobId, arrayIndex),
+      name = name,
+      user = user,
+      partition = partition,
+      state = report.state,
+      flags = report.flags,
+      reason = fields("state_reason")
+        .flatMap(_.asString)
+        .orElse(fields("reason").flatMap(_.asString)),
+      timing = SlurmTiming.fromJson(fields, report.state),
+      reportedCluster = fields("cluster")
+        .flatMap(_.asString)
+        .flatMap(ClusterName.from(_).toOption),
+      stateExpressionCompleteness =
+        if report.truncated then StateExpressionCompleteness.Truncated
+        else StateExpressionCompleteness.Complete
+    )
+
+  private def optionalIdentifier[A](
+      fields: JsonObject,
+      name: String,
+      construct: String => Either[ValidationFailure, A]
+  ): Either[Diagnostics, Option[A]] =
+    fields(name) match
+      case None                        => Right(None)
+      case Some(value) if value.isNull => Right(None)
+      case Some(value)                 =>
+        value.asString
+          .toRight(diagnostics("invalid-squeue-job", s"$name must be a string"))
+          .flatMap(raw =>
+            construct(raw).left.map(problem => diagnostics("invalid-squeue-job", problem.reason))
+          )
+          .map(Some(_))
+
   private def parseJob(
       json: Json,
       stdout: BoundedEvidence,
@@ -255,6 +355,23 @@ object VersionedSqueueParsers:
   ): Either[Diagnostics, Vector[JobObservation]] =
     version.value match
       case "v0.0.43"   => SqueueJsonV0043.parse(stdout, expected)
+      case unsupported =>
+        Left(
+          Diagnostics.one(
+            Diagnostic(
+              "unsupported-data-parser",
+              "no squeue codec is registered for the requested data_parser",
+              Map("requested" -> unsupported)
+            )
+          )
+        )
+
+  def list(
+      version: DataParserVersion,
+      stdout: BoundedEvidence
+  ): Either[Diagnostics, Vector[QueueJob]] =
+    version.value match
+      case "v0.0.43"   => SqueueJsonV0043.list(stdout)
       case unsupported =>
         Left(
           Diagnostics.one(

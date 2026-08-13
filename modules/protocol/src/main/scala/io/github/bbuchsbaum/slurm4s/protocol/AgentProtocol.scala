@@ -5,6 +5,7 @@ import io.circe.JsonObject
 import io.github.bbuchsbaum.remoteexec.kernel.TextIdentifier
 import io.github.bbuchsbaum.slurm4s.core.BoundedEvidence
 import io.github.bbuchsbaum.slurm4s.core.ByteLimit
+import io.github.bbuchsbaum.slurm4s.core.Page
 import io.github.bbuchsbaum.slurm4s.core.ProtocolVersion
 
 object RequestId extends TextIdentifier("requestId", 200)
@@ -13,6 +14,7 @@ type RequestId = RequestId.Type
 enum AgentMethod(val wireName: String) derives CanEqual:
   case Handshake extends AgentMethod("handshake")
   case Capabilities extends AgentMethod("capabilities")
+  case ListJobs extends AgentMethod("list-jobs")
   case SubmitOpaque extends AgentMethod("submit-opaque")
   case SubmitRegistered extends AgentMethod("submit-registered")
   case SubmitBatch extends AgentMethod("submit-batch")
@@ -86,6 +88,7 @@ enum AgentFeature(val wireName: String) derives CanEqual:
   case TypedBatches extends AgentFeature("typed-batches")
   case ScriptBatches extends AgentFeature("script-batches")
   case TerminationNotices extends AgentFeature("termination-notices")
+  case QueueListing extends AgentFeature("queue-listing")
 
 object AgentFeature:
   def fromWireName(raw: String): Option[AgentFeature] = values.find(_.wireName == raw)
@@ -100,7 +103,8 @@ final case class HandshakeResponse(
     maximumFrameBytes: ByteLimit,
     availableFeatures: Set[AgentFeature],
     agentBuild: String,
-    maximumLogPageBytes: Option[ByteLimit]
+    maximumLogPageBytes: Option[ByteLimit],
+    maximumQueuePage: Option[Page] = None
 ) derives CanEqual
 
 object AgentFrameBudget:
@@ -112,6 +116,8 @@ object AgentFrameBudget:
     */
   val LogResponseOverheadBytes: Int = 8 * 1024
   val TypedResultResponseOverheadBytes: Int = 128 * 1024
+  val QueueResponseOverheadBytes: Int = 192 * 1024
+  val QueueJobBudgetBytes: Int = 16 * 1024
 
   /** Maximum raw log bytes whose base64 representation plus the reserved envelope overhead fits in
     * one frame. `None` means the frame is too small to advertise paged-log support.
@@ -131,6 +137,18 @@ object AgentFrameBudget:
     val rawCapacity = (base64Capacity / 4) * 3
     ByteLimit.from(math.min(rawCapacity, ByteLimit.maximumCommandCapture.value)).toOption
 
+  /** Conservative queue-row ceiling for one response frame.
+    *
+    * The fixed reserve covers two default-sized evidence captures after base64 expansion plus the
+    * response envelope. Each compact row then receives a deliberately generous wire allowance. The
+    * frame encoder remains the final authority: unusually large scheduler text is refused as an
+    * explicit protocol failure rather than disconnecting the session.
+    */
+  def maximumQueuePage(maximumFrameBytes: ByteLimit): Option[Page] =
+    val rowCapacity =
+      (maximumFrameBytes.value - QueueResponseOverheadBytes) / QueueJobBudgetBytes
+    Page.from(math.min(rowCapacity, Page.MaximumItems)).toOption
+
 enum RemoteMode derives CanEqual:
   case Agent
   case DirectCompatibility
@@ -140,7 +158,8 @@ final case class RemoteCapabilities(
     protocolFrames: Boolean,
     pagedLogs: Boolean,
     durableControl: Boolean,
-    degradationReasons: Vector[String]
+    degradationReasons: Vector[String],
+    queueListing: Boolean = false
 ) derives CanEqual
 
 enum AgentFailure derives CanEqual:

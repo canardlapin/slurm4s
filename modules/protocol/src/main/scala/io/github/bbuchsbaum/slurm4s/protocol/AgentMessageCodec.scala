@@ -129,6 +129,9 @@ object HandshakeJson:
       "maximumLogPageBytes" -> value.maximumLogPageBytes
         .map(limit => Json.fromInt(limit.value))
         .getOrElse(Json.Null),
+      "maximumQueuePageItems" -> value.maximumQueuePage
+        .map(page => Json.fromInt(page.maximumItems))
+        .getOrElse(Json.Null),
       "availableFeatures" -> Json.fromValues(
         value.availableFeatures.toVector
           .sortBy(_.wireName)
@@ -161,6 +164,15 @@ object HandshakeJson:
             )
             .map(Some(_))
       features <- decodeFeatures(root("availableFeatures"))
+      maximumQueuePage <- root("maximumQueuePageItems") match
+        case None                        => Right(None)
+        case Some(value) if value.isNull => Right(None)
+        case Some(value)                 =>
+          value.asNumber
+            .flatMap(_.toInt)
+            .toRight("maximumQueuePageItems must be an integer or null")
+            .flatMap(raw => io.github.bbuchsbaum.slurm4s.core.Page.from(raw).left.map(_.reason))
+            .map(Some(_))
       build <- root("agentBuild").flatMap(_.asString).toRight("agentBuild must be a string")
       _ <- Either.cond(
         maximumLogPage.forall(
@@ -169,7 +181,26 @@ object HandshakeJson:
         (),
         "maximumLogPageBytes exceeds the safe frame budget"
       )
-    yield HandshakeResponse(protocol, limit, features, build, maximumLogPage)
+      _ <- Either.cond(
+        maximumQueuePage.forall(
+          _.maximumItems <= AgentFrameBudget.maximumQueuePage(limit).fold(0)(_.maximumItems)
+        ),
+        (),
+        "maximumQueuePageItems exceeds the safe frame budget"
+      )
+      _ <- Either.cond(
+        !features.contains(AgentFeature.QueueListing) || maximumQueuePage.nonEmpty,
+        (),
+        "queue-listing requires a safe maximumQueuePageItems"
+      )
+    yield HandshakeResponse(
+      protocol,
+      limit,
+      features,
+      build,
+      maximumLogPage,
+      maximumQueuePage
+    )
 
   private def decodeProtocol(json: Option[Json]): Either[String, ProtocolVersion] =
     for

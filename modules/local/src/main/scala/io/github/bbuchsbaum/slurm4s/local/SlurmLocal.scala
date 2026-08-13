@@ -47,8 +47,9 @@ object SlurmLocalConfig:
 final class SlurmLocal[F[_]] private[local] (
     val scheduler: SlurmCliScheduler[F],
     val logs: LocalLogReader[F]
-) extends Scheduler[F]:
-  export scheduler.{accounting, cancel, capabilities, observe, submit}
+) extends Scheduler[F]
+    with QueueReader[F]:
+  export scheduler.{accounting, cancel, capabilities, listJobs, observe, submit}
 
 object SlurmLocal:
   def default[F[_]: Async](

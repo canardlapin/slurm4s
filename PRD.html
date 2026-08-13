@@ -691,7 +691,7 @@
         <div class="architecture" role="img" aria-label="Layered architecture from application APIs through scheduler interpreters">
           <div class="arch-row">
             <div class="arch-box"><strong>Typed execution API</strong><small>Payload[A], ResultContract[A], SubmittedJob[A]</small></div>
-            <div class="arch-box"><strong>Raw scheduler API</strong><small>submit, observe, accounting, cancel, capabilities</small></div>
+            <div class="arch-box"><strong>Raw scheduler API</strong><small>submit, observe, list jobs, accounting, cancel, capabilities</small></div>
           </div>
           <div class="arch-arrow">↓</div>
           <div class="arch-row">
@@ -773,6 +773,10 @@ ResultSchemaId          durable return-value contract</code></pre>
   def observe(jobs: NonEmptyVector[JobRef]): F[ObservationBatch]
   def accounting(jobs: NonEmptyVector[JobRef]): F[AccountingBatch]
   def cancel(job: JobRef): F[CancellationResult]
+
+trait QueueReader[F[_]]:
+  def listJobs(query: QueueQuery, page: Page):
+    F[SchedulerQueryResult[QueuePage]]
 
 trait SlurmExecutor[F[_]]:
   def submit[A](payload: Payload[A], resources: ResourceRequest):
@@ -1067,6 +1071,7 @@ enum MemoryRequest:
               <tr><td class="req-id">F-16</td><td><span class="priority p1">P1</span></td><td>Coalesce scheduler observations per site with bounded adaptive polling and no per-job command loop.</td><td>Virtual-clock load and fairness tests.</td></tr>
               <tr><td class="req-id">F-17</td><td><span class="priority p2">P2</span></td><td>Lower compatible workloads into job arrays without losing per-element identity, logs, outcome, or result contract.</td><td>Array element attribution and partial-failure tests.</td></tr>
               <tr><td class="req-id">F-18</td><td><span class="priority p2">P2</span></td><td>Offer optional <code>slurmrestd</code> parity behind the same scheduler algebra.</td><td>CLI/REST differential conformance tests on an enabled site.</td></tr>
+              <tr><td class="req-id">F-19</td><td><span class="priority p1">P1</span></td><td>List the current user's active jobs through a separately negotiated, filtered, item-bounded queue capability without claiming snapshot pagination.</td><td>Command, parser, truncation, frame-budget, and local/remote conformance tests.</td></tr>
             </tbody>
           </table>
         </div>

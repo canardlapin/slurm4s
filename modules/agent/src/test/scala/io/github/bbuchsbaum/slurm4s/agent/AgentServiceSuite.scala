@@ -182,6 +182,48 @@ class AgentServiceSuite extends munit.CatsEffectSuite:
       assertEquals(count, 1)
   }
 
+  test("handshake advertises and service enforces the safe queue-page budget") {
+    val frameLimit = ByteLimit.from(512 * 1024).toOption.get
+    val pageLimit = AgentFrameBudget.maximumQueuePage(frameLimit).get
+    for
+      reads <- Ref.of[IO, Int](0)
+      reader = new QueueReader[IO]:
+        def listJobs(
+            query: QueueQuery,
+            page: Page
+        ): IO[SchedulerQueryResult[QueuePage]] =
+          reads
+            .update(_ + 1)
+            .as(
+              SchedulerQueryResult.Empty(Instant.EPOCH, evidence)
+            )
+      service = AgentService[IO](
+        schedulerWithoutCounters,
+        logReader,
+        config = AgentServiceConfig.default.copy(maximumFrameBytes = frameLimit),
+        queue = Some(reader)
+      )
+      handshake <- service.handshake(
+        ProtocolVersion.v1,
+        HandshakeRequest(frameLimit, Set(AgentFeature.QueueListing))
+      )
+      _ = handshake match
+        case AgentCall.Succeeded(value) =>
+          assertEquals(value.maximumQueuePage, Some(pageLimit))
+          assert(value.availableFeatures.contains(AgentFeature.QueueListing))
+        case other => fail(s"expected queue-listing negotiation, received $other")
+      accepted <- service.api.listJobs(QueueQuery.currentUser, pageLimit)
+      oversized <- service.api.listJobs(
+        QueueQuery.currentUser,
+        Page.from(Page.MaximumItems).toOption.get
+      )
+      count <- reads.get
+    yield
+      assert(accepted.isInstanceOf[AgentCall.Succeeded[?]])
+      assert(oversized.isInstanceOf[AgentCall.Failed[?]])
+      assertEquals(count, 1)
+  }
+
   private def connected(service: AgentService[IO]): IO[InProcessAgentClient[IO]] =
     InProcessAgentClient.connect[IO](service).flatMap {
       case AgentCall.Succeeded(client) => IO.pure(client)

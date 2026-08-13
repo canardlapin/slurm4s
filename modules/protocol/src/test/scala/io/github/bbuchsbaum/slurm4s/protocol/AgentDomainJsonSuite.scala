@@ -11,6 +11,65 @@ import java.nio.charset.StandardCharsets
 import java.time.Instant
 
 class AgentDomainJsonSuite extends munit.FunSuite:
+  test("bounded queue requests and results round-trip without repeated row evidence") {
+    val query = QueueQuery
+      .currentUser(
+        Vector(JobName.unsafeFrom("analysis")),
+        Vector(PartitionName.unsafeFrom("gpu")),
+        Vector(QueueStateFilter.Pending, QueueStateFilter.Running)
+      )
+      .toOption
+      .get
+    val page = Page.from(17).toOption.get
+    val observedAt = Instant.parse("2026-08-13T12:00:00Z")
+    val evidence = EvidenceBundle(
+      BoundedEvidence.capture(
+        EvidenceSource.CommandStdout("squeue"),
+        observedAt,
+        ByteVector.view("queue".getBytes(StandardCharsets.UTF_8))
+      )
+    )
+    val queuePage = QueuePage(
+      Vector(
+        QueueJob(
+          JobRef(JobId.unsafeFrom("7200"), Some(ArrayIndex.unsafeFrom(3))),
+          Some(JobName.unsafeFrom("analysis")),
+          Some(UserName.unsafeFrom("brad")),
+          Some(PartitionName.unsafeFrom("gpu")),
+          SlurmState.Running,
+          Vector(SlurmStateFlag.Completing),
+          Some("None"),
+          JobTiming.unknown,
+          Some(ClusterName.unsafeFrom("alpha")),
+          StateExpressionCompleteness.Complete
+        )
+      ),
+      QueuePageCompleteness.Truncated(23),
+      Freshness.Current(observedAt),
+      evidence
+    )
+    val result: SchedulerQueryResult[QueuePage] = SchedulerQueryResult.Succeeded(queuePage)
+
+    assertEquals(
+      AgentDomainJson.decodeQueueRequest(AgentDomainJson.encodeQueueRequest(query, page)),
+      Right(query -> page)
+    )
+    assertEquals(
+      AgentDomainJson.decodeQueueResult(AgentDomainJson.encodeQueueResult(result)),
+      Right(result)
+    )
+    assertEquals(
+      AgentDomainJson
+        .encodeQueueResult(result)
+        .noSpaces
+        .sliding("bytesBase64".length)
+        .count(
+          _ == "bytesBase64"
+        ),
+      1
+    )
+  }
+
   test("agent submit JSON round-trips array identity and accepts legacy absence") {
     val array = JobArrayRequest
       .contiguous(

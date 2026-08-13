@@ -6,6 +6,7 @@ import io.github.bbuchsbaum.slurm4s.core.JobRef
 import io.github.bbuchsbaum.slurm4s.core.EnvironmentExportPolicy
 import io.github.bbuchsbaum.slurm4s.core.MemoryRequest
 import io.github.bbuchsbaum.slurm4s.core.NativeOption
+import io.github.bbuchsbaum.slurm4s.core.QueueQuery
 import io.github.bbuchsbaum.slurm4s.core.ResourceRequest
 import io.github.bbuchsbaum.slurm4s.core.TerminationNotice
 import io.github.bbuchsbaum.slurm4s.core.TerminationNoticeScope
@@ -47,6 +48,28 @@ object SlurmCommands:
         s"--json=${parser.value}",
         s"--jobs=${jobIds(jobs)}"
       )
+    )
+
+  def listJobs(query: QueueQuery, parser: DataParserVersion): SlurmCommand =
+    val filters =
+      Option
+        .when(query.names.nonEmpty)(
+          s"--name=${query.names.map(_.value).mkString(",")}"
+        )
+        .toVector ++
+        Option
+          .when(query.partitions.nonEmpty)(
+            s"--partition=${query.partitions.map(_.value).mkString(",")}"
+          )
+          .toVector ++
+        Option
+          .when(query.states.nonEmpty)(
+            s"--states=${query.states.map(_.slurmName).mkString(",")}"
+          )
+          .toVector
+    SlurmCommand(
+      SlurmExecutable.Squeue,
+      Vector(s"--json=${parser.value}", "--me", "--array") ++ filters
     )
 
   def accounting(jobs: NonEmptyVector[JobRef]): SlurmCommand =
